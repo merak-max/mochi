@@ -4,6 +4,7 @@ import type { IndexDoc, SearchIndex } from "../index/fts.ts";
 import { allPages } from "../pages.ts";
 import { pause } from "../pause.ts";
 import { messageText } from "../text.ts";
+import { readMemory, sortedNotes } from "./memory.ts";
 
 const PAGE = 200;
 const RETRY_MS = 5000;
@@ -12,6 +13,7 @@ const RETRY_MS = 5000;
 export async function indexOnce(harness: Harness, index: SearchIndex, context: Context): Promise<number> {
 	let added = 0;
 	for (const conversation of await allConversations(harness, context)) added += await indexConversation(harness, index, conversation, context);
+	index.replaceNotes(sortedNotes(await readMemory(harness, context)));
 	return added;
 }
 
@@ -37,6 +39,7 @@ export async function runFeed(harness: Harness, index: SearchIndex, context: Con
 			dirty.clear();
 			try {
 				for (const conversation of all ? await allConversations(harness, context) : marked) await indexConversation(harness, index, conversation, context);
+				index.replaceNotes(sortedNotes(await readMemory(harness, context)));
 				all = false;
 			} catch (error) {
 				if (aborted()) return;

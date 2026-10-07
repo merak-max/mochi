@@ -3,11 +3,13 @@ import { join, resolve } from "node:path";
 import { type Static, Type } from "typebox";
 import { MediaConfigSchema } from "./media/media.ts";
 import { parseWith } from "./parse.ts";
+import { DreamConfigSchema, dreamConfig } from "./memory/dream.ts";
 
 /** data/config.json. Later units add their own keys, such as trigger seeds. */
 const FileSchema = Type.Object(
 	{
 		timeZone: Type.Optional(Type.String({ minLength: 1 })),
+		memory: Type.Optional(Type.Object({ repo: Type.Optional(Type.String({ minLength: 1 })), dreaming: Type.Optional(DreamConfigSchema) }, { additionalProperties: false })),
 		/** Image, video and speech providers; see src/media/config.example.json. */
 		media: Type.Optional(MediaConfigSchema),
 		/** Minutes of silence after which an owner message starts a fresh thread; 0 never resets. Default 60. */
@@ -36,6 +38,7 @@ export async function loadConfig(env: Readonly<Record<string, string | undefined
 	const file = parseWith(FileSchema, await readJson(join(dataDir, "config.json")), "data/config.json");
 	const timeZone = file.timeZone ?? "Asia/Kolkata";
 	assertTimeZone(timeZone);
+	dreamConfig(file.memory?.dreaming, timeZone);
 	return {
 		dataDir,
 		executorUrl: env.EXECUTOR_URL ?? "https://executor.shau.me/mcp",

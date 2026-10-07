@@ -53,6 +53,7 @@ export async function openTestMochi(
 	agentTypes: readonly AgentType[] = [],
 	overrides: {
 		readonly skillsDir?: string;
+		readonly memory?: NonNullable<import("./mochi.ts").MochiOptions["memory"]>;
 		readonly agents?: AgentCatalog;
 		readonly scheduling?: "daemon" | "local";
 		readonly retry?: Retry;

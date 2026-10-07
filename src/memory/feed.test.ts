@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import { newFaux, openTestMochi, tempDir } from "../test-support.ts";
+import { writeNote } from "./memory.ts";
 import { runFeed } from "./feed.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -26,6 +27,10 @@ test("the feed catches up on commits made while it was stopped, then indexes eac
 	await until("biscuit", 1000);
 	await (await mochi.root.submit({ type: "input", content: "My cat is called Pancake." }, context)).wait(context);
 	await until("again", 200);
+
+	await mochi.harness.commit((tx) => writeNote(tx, { slug: "dream-fact", kind: "fact", subject: "durable", body: "Unattended platypus fact." }, undefined, "2026-10-05"), context);
+	await until("platypus", 1000);
+	assert.equal(mochi.index.search({ query: "platypus", limit: 5 })[0]?.ref, "note:dream-fact");
 
 	const stopping = Date.now();
 	controller.abort();

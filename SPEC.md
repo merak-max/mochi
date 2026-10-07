@@ -397,6 +397,10 @@ Results and transcripts are in `docs/eval.md` and `eval/runs/`.
 - A memory eval of about 50 questions from real chats: search versus full context on Opus 5.5.
 - Typed WhatsApp templates for messages mochi starts outside the 24-hour window.
 
+## Git memory and scheduled Dreaming
+
+Mochi publishes typed durable notes into a separate local Cognition-style memory repository, defaulting to `data/memory`. `MemoryDoc` remains canonical for reads, provenance, owner protection, and rewind. Every edit queues an immutable snapshot and persistent Git publication proof. Native tasks replay local commits without pushes or imports of human edits. Human edits block publication rather than being overwritten. Scheduled Dreaming is opt-in, runs in an ownerless conversation with no tools, and applies validated evidence-backed proposals without a root model turn. Configuration and recovery limits are documented in [Memory repository](docs/memory.md).
+
 ## Decision log
 
 | Date | Decision | Why |

@@ -36,8 +36,11 @@ import { compactionExtension, fastCompletion, handoffTool, idleResetIfStale } fr
 import type { Classify } from "./brain/classifier.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
+import { bindRepo, PublisherTask } from "./memory/publication.ts";
+import { defineDream, dreamConfig, type DreamConfigInput, reconcileDream } from "./memory/dream.ts";
 
 export interface MochiOptions {
+	readonly memory?: { repo: string; dreaming?: DreamConfigInput };
 	readonly storage: Storage;
 	readonly models: Models;
 	readonly brain: ModelRef;
@@ -91,6 +94,7 @@ const COMPACTION: CompactionPolicy = { enabled: true, reserveTokens: 16_384, kee
 
 export async function openMochi(options: MochiOptions, context: Context): Promise<Mochi> {
 	const { index, log } = options;
+	const dreaming = dreamConfig(options.memory?.dreaming, options.timeZone);
 	const registry = createRegistry();
 	const fast = fastCompletion(options.models, options.fast);
 	const media: Omit<MediaDeps, "workDir"> = options.media ?? { config: { images: { default: "", providers: [] } }, env: {} };
@@ -107,6 +111,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		defineExtension({ name: "handoff", tools: [handoffTool()] }),
 	];
 	const now = options.now ?? (() => new Date());
+	const dream = defineDream({ models: { brain: options.brain, fast: options.fast }, today: options.today, log });
 	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log });
 	const fns = [
 		...webFns({ apiKey: options.firecrawlKey, models: options.models, fast: options.fast }),
@@ -128,6 +133,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...providers,
 		defineExtension({ name: "work", tasks: [call] }),
 		defineExtension({ name: "agents", tasks: [AgentTask] }),
+		defineExtension({ name: "memory-maintenance", tasks: [PublisherTask, dream] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
 		...seatExtensions(providers.flatMap((extension) => extension.tools ?? []), fns, code),
@@ -188,6 +194,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		const { changed } = await step.run({ storage: options.storage, line, trigger }, context);
 		if (changed > 0) log("upgrade", { unit: step.unit, name: step.name, changed });
 	}
+	await bindRepo(harness, options.memory?.repo, context);
+	await reconcileDream(harness, dream, dreaming, options.scheduling, context);
 	index.replaceNotes(sortedNotes(await readMemory(harness, context)));
 	return { harness, root, registry, classify: options.classify, line, trigger };
 }

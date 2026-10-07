@@ -3,6 +3,7 @@ import {
 	AgentDoc,
 	type ConversationId,
 	type ConversationOwnership,
+	defineDoc,
 	defineExtension,
 	type Extension,
 	type ModelRef,
@@ -115,6 +116,20 @@ export async function createSeatConversation(tx: Tx, seat: Seat, ownership: Conv
 	agent.extensions = selection(seat);
 	if (change.instructions !== undefined) agent.instructions = change.instructions;
 	return id;
+}
+
+export const MemoryConversationDoc = defineDoc<{ maintenance: boolean }>({ kind: "mochi.memory-conversation", version: 1, scope: "conversation", history: "latest", fork: "current", initial: () => ({ maintenance: false }) });
+
+export async function createMemoryConversation(tx: Tx, change: { model: ModelRef; instructions: string }): Promise<ConversationId> {
+	const conversation = await tx.createConversation({ ownership: { kind: "ownerless" } });
+	(await tx.doc(MemoryConversationDoc, conversation.id)).maintenance = true;
+	const agent = await tx.doc(AgentDoc, conversation.id);
+	for (const key of Object.keys(agent) as (keyof typeof agent)[]) delete agent[key];
+	agent.model = { ...change.model };
+	agent.extensions = [];
+	agent.instructions = change.instructions;
+	agent.thinkingLevel = "off";
+	return conversation.id;
 }
 
 /** Root predates seats and `harness.root` ignores `agent` for an existing root, so each boot re-asserts it. */

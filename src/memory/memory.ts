@@ -19,6 +19,7 @@ import type { SearchIndex } from "../index/fts.ts";
 import { type Note, type NoteDraft, NoteDraftSchema, NoteKindSchema, OWNER_CAP_CHARS, OWNER_KINDS, SlugSchema } from "../notes/schema.ts";
 import { type Env, findSecret, secretRejection } from "../notes/secrets.ts";
 import { parseWith } from "../parse.ts";
+import { memoryChanged, replayed, RepoDoc } from "./publication.ts";
 
 /**
  * The owner's memory: one rewindable document on the root conversation that every conversation writes through. A write
@@ -65,15 +66,21 @@ export async function memoryAsOf(harness: MemoryReader, date: string, context: C
 	return MemoryDoc.definition.initial();
 }
 
-const entryTime = (entry: EntryRecord): number => entry.model?.[0]?.timestamp ?? Number.POSITIVE_INFINITY;
+const entryTime = (entry: EntryRecord): number =>
+	entry.kind === "mochi.memory-change" && entry.data !== null && typeof entry.data === "object" && !Array.isArray(entry.data) && typeof entry.data?.at === "number"
+		? entry.data.at : entry.model?.[0]?.timestamp ?? Number.POSITIVE_INFINITY;
 
 export function sortedNotes(memory: Memory): Note[] {
 	return Object.values(memory.notes).sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
 /** Create or replace a note as mochi. Owner notes are read-only, and owner-kind bodies share one cap. */
-export async function writeNote(tx: Tx, input: NoteDraft, source: Note["source"], today: string): Promise<Note> {
+export async function writeNote(tx: Tx, input: NoteDraft, source: Note["source"], today: string, key?: string): Promise<Note> {
+	const receipt = await replayed(tx, key);
+	if (receipt?.note != null) return { ...receipt.note };
 	const draft = parseWith(NoteDraftSchema, { slug: input.slug, kind: input.kind, subject: input.subject, body: input.body }, "note");
+	const secret = findSecret(`${draft.subject}\n${draft.body}`, process.env);
+	if (secret !== undefined) throw new Error(secretRejection(secret));
 	const memory = await tx.doc(MemoryDoc, ROOT_CONVERSATION_ID);
 	const existing = Object.hasOwn(memory.notes, draft.slug) ? memory.notes[draft.slug] : undefined;
 	if (existing?.writtenBy === "owner") throw new Error(`Note "${draft.slug}" was written by the owner and cannot be edited by mochi.`);
@@ -90,15 +97,19 @@ export async function writeNote(tx: Tx, input: NoteDraft, source: Note["source"]
 	}
 	const note: Note = { ...draft, body: draft.body.trim(), writtenBy: "mochi", updated: today, ...(source === undefined ? {} : { source }) };
 	memory.notes[note.slug] = note;
+	await memoryChanged(tx, memory, note, key);
 	return note;
 }
 
 /** Remove a note mochi wrote; owner notes stay. Undefined when there was none. */
-export async function forgetNote(tx: Tx, slug: string): Promise<Note | undefined> {
+export async function forgetNote(tx: Tx, slug: string, key?: string): Promise<Note | undefined> {
+	const receipt = await replayed(tx, key);
+	if (receipt !== undefined) return receipt.note === null ? undefined : { ...receipt.note };
 	const memory = await tx.doc(MemoryDoc, ROOT_CONVERSATION_ID);
 	const existing = Object.hasOwn(memory.notes, slug) ? memory.notes[slug] : undefined;
 	if (existing?.writtenBy === "owner") throw new Error(`Note "${slug}" was written by the owner and cannot be removed by mochi.`);
 	delete memory.notes[slug];
+	if (existing !== undefined || key !== undefined) await memoryChanged(tx, memory, existing, key);
 	return existing;
 }
 
@@ -123,18 +134,25 @@ export function noteTool(deps: { readonly index: SearchIndex; readonly today: ()
 		replay: "safe",
 		execute: async (args, api, context) => {
 			if (args.body.trim() === "") {
-				const gone = await api.commit((tx) => forgetNote(tx, args.slug), context);
-				index.removeNote(args.slug);
-				return text(gone === undefined ? `No note ${args.slug}; nothing to forget.` : `Forgot note ${args.slug}.`);
+				const gone = await api.commit((tx) => forgetNote(tx, args.slug, `tool:${api.taskId}`), context);
+				index.replaceNotes(sortedNotes(await readMemory(api, context)));
+				const status = await publicationStatus(api, context);
+				return text((gone === undefined ? `No note ${args.slug}; nothing to forget.` : `Forgot note ${args.slug}.`) + status);
 			}
 			const secret = findSecret(`${args.subject}\n${args.body}`, env);
 			if (secret !== undefined) throw new Error(secretRejection(secret));
 			const source = await sourceOf(api, context);
-			const note = await api.commit((tx) => writeNote(tx, args, source, today()), context);
-			index.replaceNote(note);
-			return text(`Saved note ${note.slug}.`);
+			const note = await api.commit((tx) => writeNote(tx, args, source, today(), `tool:${api.taskId}`), context);
+			index.replaceNotes(sortedNotes(await readMemory(api, context)));
+			return text(`Saved note ${note.slug}.` + await publicationStatus(api, context));
 		},
 	});
+}
+
+async function publicationStatus(read: DocumentReader, context: Context): Promise<string> {
+	const repo = await read.snapshot(RepoDoc, context);
+	if (repo?.repo == null) return "";
+	return repo.queue.length === 0 ? " Durably saved; local Git published." : ` Durably saved; local Git pending (${repo.queue.length} revisions).${repo.blocked === null ? "" : ` ${repo.blocked}`}`;
 }
 
 export function recallTool(index: SearchIndex) {
