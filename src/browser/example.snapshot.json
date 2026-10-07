@@ -1,0 +1,86 @@
+{
+  "url": "https://example.com/",
+  "title": "Example Domain",
+  "w": 1120,
+  "h": 780,
+  "text": "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\nهذا النطاق مُخصص للاستخدام في أمثلة التوثيق دون الحاجة إلى إذن. هذه ليست خدمة، يُرجى تجنب الاعتماد عليها لأغراض الاختبار والمراقبة.\n该域名仅用于文档示例，无需获得许可。这并非一项服务，请勿将其用于测试和监控目的。\nL’usage de ce domaine est réservé à des exemples de documentation, sans autorisation préalable.  Il ne s’agit pas d’un service ; son utilisation à des fins de test ou de surveillance est à éviter.\nДанный домен предназначен для использования в примерах документации без необходимости получения предварительного разрешения. Это не сервис; не рекомендуется его использование для тестирования и мониторинга.\nEste dominio está destinado al uso en ejemplos de documentación sin necesidad de permiso. Esto no es un servicio; evitar utilizarlo para realizar pruebas o monitoreos.\nLearn more",
+  "scroll": {
+    "y": 0,
+    "height": 790
+  },
+  "actions": [
+    {
+      "node": 1,
+      "role": "link",
+      "label": "Learn more",
+      "rect": {
+        "x": 509,
+        "y": 733.03125,
+        "w": 87,
+        "h": 22
+      },
+      "kind": "click",
+      "value": "",
+      "id": "e1"
+    },
+    {
+      "id": "scroll_down",
+      "kind": "scroll",
+      "label": "Scroll down",
+      "delta": 560
+    },
+    {
+      "id": "wait",
+      "kind": "wait",
+      "label": "Wait for the page to update"
+    }
+  ],
+  "marker": [
+    1791320419268.2,
+    "https://example.com/",
+    0,
+    0,
+    1120,
+    780,
+    "Example Domain",
+    "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\nهذا النطاق مُخصص للاستخدام في أمثلة التوثيق دون الحاجة إلى إذن. هذه ليست خدمة، يُرجى تجنب الاعتماد عليها لأغراض الاختبار والمراقبة.\n该域名仅用于文档示例，无需获得许可。这并非一项服务，请勿将其用于测试和监控目的。\nL’usage de ce domaine est réservé à des exemples de documentation, sans autorisation préalable.  Il ne s’agit pas d’un service ; son utilisation à des fins de test ou de surveillance est à éviter.\nДанный домен предназначен для использования в примерах документации без необходимости получения предварительного разрешения. Это не сервис; не рекомендуется его использование для тестирования и мониторинга.\nEste dominio está destinado al uso en ejemplos de documentación sin necesidad de permiso. Esto no es un servicio; evitar utilizarlo para realizar pruebas o monitoreos.\nLearn more",
+    [
+      {
+        "node": 1,
+        "role": "link",
+        "label": "Learn more",
+        "kind": "click",
+        "value": ""
+      }
+    ],
+    []
+  ],
+  "page_key": [
+    1791320419268.2,
+    "https://example.com/",
+    0,
+    0,
+    1120,
+    780,
+    []
+  ],
+  "guards": {
+    "1": [
+      1,
+      "link",
+      "Learn more",
+      null,
+      null,
+      null,
+      null,
+      false,
+      null,
+      null,
+      null,
+      null,
+      "https://iana.org/help/example-domains",
+      "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\n\nهذا النطاق مُخصص للاستخدام في أمثلة التوثيق دون الحاجة إلى إذن. هذه ليست خدمة، يُرجى تجنب الاعتماد عليها لأغراض الاختبار والمراقبة.\n\n该域名仅用于文档示例，无需获得许可。这并非一项服务，请勿将其用于测试和监控目的。\n\nL’usage de ce domaine est réservé à des exemples de documentation, sans autorisation préalable. Il ne s’agit pas d’un service ; son utilisation à des fins de test ou de surveillance est à éviter.\n\nДанный домен предназначен для использования в примерах документации без необходимости получения предварительного разрешения. Это не сервис; не рекомендуется его использование для тестирования и мониторинга.\n\nEste dominio está destinado al uso en ejemplos de documentación sin necesidad de permiso. Esto no es un servicio; evitar utilizarlo para realizar pruebas o monitoreos.\n\nLearn more"
+    ]
+  },
+  "omitted_actions": 0
+}

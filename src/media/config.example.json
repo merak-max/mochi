@@ -1,0 +1,25 @@
+{
+  "media": {
+    "images": {
+      "default": "mai",
+      "providers": [
+        {
+          "name": "mai",
+          "baseUrl": "https://suzuka-ai-garage-si-32cbd92e.services.ai.azure.com/mai/v1",
+          "keyEnv": "AZURE_SI_KEY",
+          "model": "mai-image-2.6",
+          "sizeStyle": "size",
+          "edits": true
+        }
+      ]
+    },
+    "video": {
+      "baseUrl": "https://suzuka-ai-garage-32cbd92e.openai.azure.com/openai/v1",
+      "keyEnv": "AZURE_MEDIA_KEY",
+      "model": "sora-2"
+    },
+    "speech": {
+      "deepgramKeyEnv": "DEEPGRAM_API_KEY"
+    }
+  }
+}

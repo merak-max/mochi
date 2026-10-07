@@ -1,0 +1,25 @@
+{
+  "update_id": 1003,
+  "message": {
+    "message_id": 44,
+    "from": {
+      "id": 7712345678,
+      "is_bot": false,
+      "first_name": "Shaurya",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": 7712345678,
+      "first_name": "Shaurya",
+      "type": "private"
+    },
+    "date": 1759653722,
+    "voice": {
+      "duration": 3,
+      "mime_type": "audio/ogg",
+      "file_id": "AwACAgVoice",
+      "file_unique_id": "v1",
+      "file_size": 9000
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "update_id": 1001,
+  "message": {
+    "message_id": 42,
+    "from": {
+      "id": 7712345678,
+      "is_bot": false,
+      "first_name": "Shaurya",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": 7712345678,
+      "first_name": "Shaurya",
+      "type": "private"
+    },
+    "date": 1759653720,
+    "text": "hello mochi"
+  }
+}
