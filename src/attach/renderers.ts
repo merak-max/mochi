@@ -13,7 +13,7 @@ import {
 import { type Component, Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
 // How each of mochi's tools draws in the TUI. bash, read, edit and write are pi-durable's ports of pi's coding tools,
-// with the same arguments and details, so they take pi's own renderers from its tool definitions. `code` gets a
+// with the same arguments and details, so they take pi's own renderers from its tool definitions. `codemode` gets a
 // renderer shaped like pi's codemode one (not exported); the rest show one line of arguments and a short result.
 
 const CODE_LINES = 10;
@@ -30,7 +30,7 @@ export function toolRenderers(cwd: string): (name: string) => Renderers {
 			return [name, { ...(renderShell === undefined ? {} : { renderShell }), renderCall, renderResult } as Renderers];
 		}),
 	);
-	const own: Record<string, Renderers> = { ...pi, code: codeRenderers };
+	const own: Record<string, Renderers> = { ...pi, codemode: codeRenderers };
 	return (name) => own[name] ?? compactRenderers(name);
 }
 
@@ -67,7 +67,7 @@ const codeRenderers: Renderers = {
 	renderCall(args, theme, context) {
 		const component = (context.lastComponent as Container | undefined) ?? new Container();
 		component.clear();
-		component.addChild(new Text(theme.fg("toolTitle", theme.bold("code")), 0, 0));
+		component.addChild(new Text(theme.fg("toolTitle", theme.bold("codemode")), 0, 0));
 		const raw = (args as { code?: unknown } | undefined)?.code;
 		const code = typeof raw === "string" ? raw.replace(/\r/g, "").replace(/\t/g, "   ").trimEnd() : "";
 		if (code !== "") component.addChild(preview(highlightCode(code, "javascript").join("\n"), CODE_LINES, context.expanded, theme));
@@ -76,8 +76,8 @@ const codeRenderers: Renderers = {
 	renderResult(result, options, theme, context) {
 		const component = (context.lastComponent as Container | undefined) ?? new Container();
 		component.clear();
-		// The first line is the model's "Script completed." / "Script failed (...)."; the card's colour already says it.
-		const text = options.isPartial ? "" : resultText(result).replace(/^Script (completed\.|failed \([^)]*\)\.)\n?/, "");
+		// The header ("Script completed", the wall time, "Output:") repeats what the card's colour already says.
+		const text = options.isPartial ? "" : resultText(result).replace(/^Script (completed|failed)\nWall time [^\n]*\nOutput:\n\n?/, "");
 		addOutput(component, text, context.isError, options.expanded, theme);
 		return component;
 	},

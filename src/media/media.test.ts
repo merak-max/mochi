@@ -7,9 +7,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { createRegistry, defineExtension, Harness } from "@earendil-works/pi-durable";
+import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { callTask } from "../code/code.ts";
+import { FAUX, newFaux } from "../test-support.ts";
+import { messageText } from "../text.ts";
 import { loadAttachment, splitAttachments, workPath } from "./files.ts";
 import { MediaClient, mediaFns, prepareInbound, parseMediaConfig, type MediaDeps } from "./media.ts";
 
@@ -166,38 +170,51 @@ test("inbound media preserves originals, exposes voice text and degrades failure
 	assert.deepEqual(failed.notes, ["[audio attachment audio/mp4, 5 bytes, saved at note.m4a]"]);
 });
 
-test("durable script definitions expose four functions and costly execute recovery never calls providers", async (t) => {
+test("costly media calls are unsafe to replay: a restart mid-call reports them interrupted and never calls a provider again", async (t) => {
 	const dir = await temporary(t);
 	let calls = 0;
 	let started = (): void => {};
 	const fns = mediaFns(depsOf(dir, async (_url, init) => {
-		calls++; started();
+		calls++;
+		if (calls === 3) started();
 		await new Promise<void>((resolve) => init?.signal?.addEventListener("abort", () => resolve(), { once: true }));
 		throw new Error("cancelled by harness close");
 	}));
-	assert.deepEqual(fns.map((fn) => [fn.name, fn.replay]), [["image_gen", "once"], ["video_gen", "once"], ["speak", "once"], ["transcribe", "read"]]);
+	assert.deepEqual(fns.map((fn) => [fn.name, fn.replay]), [["image_gen", "unsafe"], ["video_gen", "unsafe"], ["speak", "unsafe"], ["transcribe", "safe"]]);
 	const registry = createRegistry();
-	const call = callTask(new Map(fns.map((fn) => [fn.name, fn])));
-	registry.install(defineExtension({ name: "test-media", tasks: [call] }));
-	for (const name of ["image_gen", "video_gen", "speak"]) {
-		const database = join(dir, `${name}.sqlite`);
-		const open = async () => Harness.open(await openNodeSqliteStorage(database), { registry, models: createModels() }, BACKGROUND_CONTEXT);
-		const first = await open();
-		const root = await first.root(BACKGROUND_CONTEXT);
-		const begun = new Promise<void>((resolve) => { started = resolve; });
-		const id = await root.commit((tx) => tx.createTask(call, { fn: name, args: { prompt: "tea", text: "tea" } }, { ownership: { kind: "conversation" } }), BACKGROUND_CONTEXT);
-		first.resume();
-		await begun;
-		await first.close(BACKGROUND_CONTEXT);
-		const recovered = await open();
-		t.after(() => recovered.close(BACKGROUND_CONTEXT));
-		const outcome = (await recovered.waitForTask(id, BACKGROUND_CONTEXT)).state.outcome;
-		assert.equal(outcome.status, "completed");
-		if (outcome.status === "completed") {
-			assert.equal(outcome.result.ok, false);
-			if (!outcome.result.ok) assert.match(outcome.result.error, /was interrupted.*not run again/);
-		}
-	}
+	const extensions = [
+		createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: 64 * 1024 * 1024 }), models: false }),
+		defineExtension({ name: "test-media", tools: fns.map((fn) => ({ ...fn, callers: ["tools" as const] })) }),
+	];
+	for (const extension of extensions) registry.install(extension);
+	const faux = newFaux();
+	const models = createModels();
+	models.setProvider(faux.provider);
+	const script = `const settled = (p) => p.catch((error) => error.message);
+return await Promise.all([
+	settled(tools.image_gen({ prompt: "tea" })),
+	settled(tools.video_gen({ prompt: "tea" })),
+	settled(tools.speak({ text: "tea" })),
+]);`;
+	faux.setResponses([fauxAssistantMessage(fauxToolCall("codemode", { code: script }), { stopReason: "toolUse" }), fauxAssistantMessage("done")]);
+	const database = join(dir, "media.sqlite");
+	const open = async () => Harness.open(await openNodeSqliteStorage(database), { registry, models, settings: { extensions } }, BACKGROUND_CONTEXT);
+	const first = await open();
+	const root = await first.root(BACKGROUND_CONTEXT, { agent: { model: FAUX } });
+	const begun = new Promise<void>((resolve) => { started = resolve; });
+	const submitted = await root.submit({ type: "input", content: "make media" }, BACKGROUND_CONTEXT);
+	await begun;
+	await first.close(BACKGROUND_CONTEXT);
+
+	const recovered = await open();
+	t.after(() => recovered.close(BACKGROUND_CONTEXT));
+	recovered.resume();
+	assert.equal((await (await recovered.submission(submitted.id, BACKGROUND_CONTEXT))!.wait(BACKGROUND_CONTEXT)).status, "done");
+	const after = await recovered.root(BACKGROUND_CONTEXT);
+	const entry = (await after.entries({}, 50, undefined, BACKGROUND_CONTEXT)).items.find((each) => each.kind === "pi.tool-result");
+	const text = messageText(entry!.model![0]!);
+	assert.match(text, /^Script completed\n/);
+	assert.match(text, /\["Tool image_gen was interrupted and may have partially run","Tool video_gen was interrupted and may have partially run","Tool speak was interrupted and may have partially run"\]/);
 	assert.equal(calls, 3);
 });
 

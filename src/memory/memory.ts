@@ -113,23 +113,24 @@ export async function forgetNote(tx: Tx, slug: string, key?: string): Promise<No
 	return existing;
 }
 
-/** The assistant entry whose tool call is running, read from the tool task's input. */
+/** The assistant entry whose tool call is running: this call's, or for a script's call, its codemode call's. */
 async function sourceOf(api: Pick<ToolExecutionApi, "getTask" | "taskId" | "conversationId">, context: Context): Promise<Note["source"]> {
-	const task = await api.getTask(api.taskId, context);
-	const assistant = (task?.input as Partial<ToolTaskInput> | undefined)?.assistant;
-	return assistant === undefined ? undefined : { conversation: api.conversationId, entry: assistant };
+	let input = (await api.getTask(api.taskId, context))?.input as ToolTaskInput | undefined;
+	if (input?.kind === "nested") input = (await api.getTask(input.parent, context))?.input as ToolTaskInput | undefined;
+	if (input?.kind !== "model") return undefined;
+	return { conversation: api.conversationId, entry: input.assistant };
 }
 
-const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
+const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 
 export function noteTool(deps: { readonly index: SearchIndex; readonly today: () => string; readonly env?: Env }) {
 	const { index, today, env = process.env } = deps;
 	return defineTool({
 		name: "note",
 		description:
-			"Save something lasting about the owner, their people, projects, preferences or standing rules; it shows in your " +
-			"prompt from the next request. user and rule notes are always visible and share 4,000 characters, so consolidate " +
-			"first. An empty body forgets a note you wrote. Never store a credential.",
+			"Save a lasting fact about the owner, their people, projects, preferences or standing rules. The note shows in your " +
+			"prompt from the next request. user and rule notes are always visible and share 4,000 characters, so merge them " +
+			"before you add one. An empty body forgets a note you wrote. Never store a credential.",
 		parameters: Type.Object({ slug: SlugSchema, kind: NoteKindSchema, subject: Type.String({ maxLength: 200 }), body: Type.String({ maxLength: 4000 }) }),
 		replay: "safe",
 		execute: async (args, api, context) => {
@@ -159,8 +160,8 @@ export function recallTool(index: SearchIndex) {
 	return defineTool({
 		name: "recall",
 		description:
-			"Search past chats and notes by words, root first. Check it before saying the owner never told you " +
-			"something. Pass entry to read around one hit instead. asOf (a date) reads memory as it stood then.",
+			"Search past chats and notes by words, the owner's chat first. Search before you say the owner never told you " +
+			"something. Pass entry instead of query to read the messages around one hit. asOf (a date) reads memory as it was on that date.",
 		parameters: Type.Object({
 			query: Type.Optional(Type.String()),
 			entry: Type.Optional(Type.Integer({ minimum: 1 })),

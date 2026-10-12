@@ -22,7 +22,7 @@ function scripted(code: string) {
 			results.push(messageText(last));
 			return fauxAssistantMessage("started");
 		}
-		if (messageText(last).split("\n").at(-1) === "go") return fauxAssistantMessage(fauxToolCall("code", { code }), { stopReason: "toolUse" });
+		if (messageText(last).split("\n").at(-1) === "go") return fauxAssistantMessage(fauxToolCall("codemode", { code }), { stopReason: "toolUse" });
 		return fauxAssistantMessage("ok");
 	};
 	faux.setResponses(Array.from({ length: 20 }, () => step));
@@ -79,7 +79,7 @@ return JSON.stringify({ ms, state: row.state, pid: proc.pid });`;
 	assert.equal(woken[1], "[process demo exited code=3]\nready");
 
 	faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("code", { code: `return JSON.stringify({ status: await tools.proc_status({}), logs: await tools.proc_logs({ name: "demo" }) });` }), { stopReason: "toolUse" }),
+		fauxAssistantMessage(fauxToolCall("codemode", { code: `return JSON.stringify({ status: await tools.proc_status({}), logs: await tools.proc_logs({ name: "demo" }) });` }), { stopReason: "toolUse" }),
 		fauxAssistantMessage("checked"),
 	]);
 	await (await mochi.root.submit({ type: "input", content: "check" }, context)).wait(context);
@@ -157,7 +157,7 @@ return "started";`);
 	const meta = JSON.parse(await readFile(join(dir, "work", ".procs", "long.json"), "utf8")) as { pid: number };
 	assert.ok(alive(meta.pid) && alive(Number(childPid)));
 
-	faux.setResponses([fauxAssistantMessage(fauxToolCall("code", { code: `return await tools.proc_stop({ name: "long" });` }), { stopReason: "toolUse" }), fauxAssistantMessage("stopped")]);
+	faux.setResponses([fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.proc_stop({ name: "long" });` }), { stopReason: "toolUse" }), fauxAssistantMessage("stopped")]);
 	await (await mochi.root.submit({ type: "input", content: "stop it" }, context)).wait(context);
 	await watchersDone(mochi);
 	await sleep(100);

@@ -1,8 +1,7 @@
 import type { Context } from "@earendil-works/chord";
 import { Type, type Models, type ClassifierQuestion, type ClassifierAnswer } from "@earendil-works/pi-ai";
-import type { ModelRef } from "@earendil-works/pi-durable";
+import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { Classify } from "../brain/classifier.ts";
-import { defineFn, type ScriptFn } from "../code/code.ts";
 import { parseWith } from "../parse.ts";
 import { messageText } from "../text.ts";
 import { BrowseInput, BrowseOutput } from "./browser.ts";
@@ -128,13 +127,13 @@ async function act(cdp: Cdp, sessionId: string, page: PageSnapshot, action: Acti
 	await cdp.evaluate("new Promise(resolve => setTimeout(resolve, 200))", sessionId);
 }
 
-export function fastBrowserFns(deps: FastDeps): readonly ScriptFn[] {
-	return [defineFn({
+export function fastBrowserFns(deps: FastDeps): readonly ToolRegistration[] {
+	return [defineTool({
 		name: "browse_fast",
 		description: "Experimental Jev browser loop, bounded to 60 actions. Check the success flag and evidence before reporting completion.",
 		parameters: Type.Object({ url: BrowseInput.properties.url, task: BrowseInput.properties.task }),
-		output: Type.Object({ ...BrowseOutput.properties, steps: Type.Integer(), success: Type.Boolean(), evidence: Type.String() }),
-		replay: "once",
-		run: async (args, _call, context) => ({ value: await browseFast(deps, args, context) }),
+		structuredOutputSchema: Type.Object({ ...BrowseOutput.properties, steps: Type.Integer(), success: Type.Boolean(), evidence: Type.String() }),
+		replay: "unsafe",
+		execute: async (args, _api, context) => ({ structuredOutput: await browseFast(deps, args, context) }),
 	})];
 }

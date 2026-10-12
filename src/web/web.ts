@@ -1,6 +1,5 @@
 import { type Models, Type } from "@earendil-works/pi-ai";
-import type { ModelRef } from "@earendil-works/pi-durable";
-import { defineFn, type ScriptFn } from "../code/code.ts";
+import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
 import { FirecrawlClient, type SearchRequest } from "./client.ts";
 import { cleanFirecrawlHtml, extractFirecrawlContent } from "./content.ts";
 
@@ -17,13 +16,13 @@ export interface WebDeps {
 }
 
 /** Firecrawl v2 search, fetch and map on mochi's own key, as script functions. */
-export function webFns(deps: WebDeps): readonly ScriptFn[] {
+export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 	const client = (): FirecrawlClient => {
 		if (deps.apiKey === undefined) throw new Error("Firecrawl is not configured: FIRECRAWL_API_KEY is unset.");
 		return new FirecrawlClient(deps.apiKey, deps.baseUrl);
 	};
 	return [
-		defineFn({
+		defineTool({
 			name: "web_search",
 			description: "Firecrawl web search: title, URL and snippet per hit.",
 			parameters: Type.Object({
@@ -33,9 +32,9 @@ export function webFns(deps: WebDeps): readonly ScriptFn[] {
 				excludeDomains: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })),
 				recency: Type.Optional(Type.Union(RECENCY.map((key) => Type.Literal(key)))),
 			}),
-			output: Type.Array(Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() })),
-			replay: "read",
-			run: async ({ query, limit, includeDomains, excludeDomains, recency }, _call, context) => {
+			structuredOutputSchema: Type.Array(Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() })),
+			replay: "safe",
+			execute: async ({ query, limit, includeDomains, excludeDomains, recency }, _api, context) => {
 				if (includeDomains && excludeDomains) throw new Error("includeDomains and excludeDomains cannot be used together.");
 				const request: SearchRequest = {
 					query: query.trim(),
@@ -52,33 +51,33 @@ export function webFns(deps: WebDeps): readonly ScriptFn[] {
 					seen.add(key);
 					return true;
 				});
-				return { value: hits.map((hit) => ({ title: hit.title?.trim() || "Untitled", url: hit.url, snippet: hit.description?.trim() ?? "" })) };
+				return { structuredOutput: hits.map((hit) => ({ title: hit.title?.trim() || "Untitled", url: hit.url, snippet: hit.description?.trim() ?? "" })) };
 			},
 		}),
-		defineFn({
+		defineTool({
 			name: "web_fetch",
 			description: "Clean page text. With instruction, only what it asks for, extracted on the fast model.",
 			parameters: Type.Object({ url: Type.String(), instruction: Type.Optional(Type.String()) }),
-			output: Type.String(),
-			replay: "read",
-			run: async ({ url, instruction }, _call, context) => {
+			structuredOutputSchema: Type.String(),
+			replay: "safe",
+			execute: async ({ url, instruction }, _api, context) => {
 				const signal = context.abortSignal;
 				const page = await client().scrape(url, signal);
 				if (page.status >= 400) throw new Error(`Page fetch failed (HTTP ${page.status}): ${page.error ?? "source returned an error"}. URL: ${url}`);
 				const markdown = (page.html === undefined ? undefined : await cleanFirecrawlHtml(page.html, url)) ?? page.markdown ?? "";
-				if (!instruction?.trim() || markdown === "") return { value: markdown };
+				if (!instruction?.trim() || markdown === "") return { structuredOutput: markdown };
 				const extracted = await extractFirecrawlContent({ models: deps.models, model: deps.fast, url, markdown, instruction, maxOutput: EXTRACT_CHARS, ...(signal === undefined ? {} : { signal }) });
-				return extracted === undefined ? { value: markdown } : { value: extracted.text, usage: extracted.usage };
+				return extracted === undefined ? { structuredOutput: markdown } : { structuredOutput: extracted.text, usage: extracted.usage };
 			},
 		}),
-		defineFn({
+		defineTool({
 			name: "web_map",
 			description: "Discover URLs on a site, optionally ranked by a search term.",
 			parameters: Type.Object({ url: Type.String(), search: Type.Optional(Type.String()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })) }),
-			output: Type.Array(Type.String()),
-			replay: "read",
-			run: async ({ url, search, limit }, _call, context) => {
-				return { value: await client().map({ url, limit: limit ?? 100, ...(search === undefined ? {} : { search }) }, context.abortSignal) };
+			structuredOutputSchema: Type.Array(Type.String()),
+			replay: "safe",
+			execute: async ({ url, search, limit }, _api, context) => {
+				return { structuredOutput: await client().map({ url, limit: limit ?? 100, ...(search === undefined ? {} : { search }) }, context.abortSignal) };
 			},
 		}),
 	];

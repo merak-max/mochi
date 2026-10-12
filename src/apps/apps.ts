@@ -3,14 +3,16 @@ import { Type } from "@earendil-works/pi-ai";
 import { McpClient, McpConnectionClosedError, McpSessionExpiredError, type McpTransport } from "@earendil-works/pi-mcp";
 import { McpOAuthAuthorizationRequiredError } from "@earendil-works/pi-mcp/oauth";
 import { AUTH_COMMAND } from "../auth/executor.ts";
-import { defineFn, type ScriptFn } from "../code/code.ts";
+import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { Log } from "../log.ts";
 import { pause } from "../pause.ts";
 
 const RETRY_MS = 60_000;
 const CALL_TIMEOUT_MS = 15 * 60_000;
-/** Mochi is autonomous: it accepts every Executor approval. This caps one call's chain of approvals. */
 const MAX_APPROVALS = 20;
+/** How long a call whose MCP session expired waits for `run` to reconnect before its one retry. */
+const RECONNECT_WAIT_MS = 15_000;
+const ACCEPT = { action: "accept", content: {} };
 
 /** Resolves to undefined when mochi holds no Executor tokens. */
 export type Connect = () => Promise<McpTransport | undefined>;
@@ -30,29 +32,49 @@ type Link =
 /** One Executor connection for the daemon's life; `run` reconnects every 60 s. Nothing the model sees changes with it. */
 export function connectApps(connect: Connect, log: Log): Apps & { run(context: Context): Promise<void> } {
 	let link: Link = { status: "down", error: "not connected yet" };
-	const tool = async (name: string, args: Record<string, unknown>, context: Context): Promise<JsonValue> => {
+	const connected = (): McpClient => {
 		const current = link;
 		if (current.status === "unauthorized") throw new Error(`Executor is not authorized; the owner runs \`${AUTH_COMMAND}\`.`);
 		if (current.status === "down") throw new Error(`Executor is down (${current.error}), retrying every 60 s.`);
+		return current.client;
+	};
+	const reconnected = async (old: McpClient, context: Context): Promise<McpClient> => {
+		for (let waited = 0; waited < RECONNECT_WAIT_MS; waited += 250) {
+			if (link.status === "up" && link.client !== old) return link.client;
+			await pause(250, context.abortSignal);
+		}
+		return connected();
+	};
+	const callOnce = async (client: McpClient, name: string, args: Record<string, unknown>, context: Context): Promise<ToolResult> => {
 		const options = { timeoutMs: CALL_TIMEOUT_MS, onProgress: () => {}, ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) };
-		let value: JsonValue;
 		try {
-			value = parseResult(await current.client.callTool(name, args, options));
-			for (let approvals = 0; ; approvals++) {
-				const requestId = approvalRequest(value);
-				if (requestId === undefined) break;
-				if (approvals >= MAX_APPROVALS) throw new Error(`Executor asked for more than ${MAX_APPROVALS} approvals in one call.`);
-				log("executor.approved", { requestId });
-				value = parseResult(await current.client.callTool("resume", { requestId, response: { action: "accept", content: {} } }, options));
-			}
+			return await client.callTool(name, args, options);
 		} catch (error) {
 			if (error instanceof McpSessionExpiredError || error instanceof McpConnectionClosedError || error instanceof McpOAuthAuthorizationRequiredError) {
 				log("executor.reconnecting", { error: String(error) });
-				await current.client.close();
+				await client.close();
 			}
-			throw error instanceof ExecutorError ? error : new Error(`Executor call failed: ${String(error)}`);
+			throw error;
 		}
-		return value;
+	};
+	const callTool = async (name: string, args: Record<string, unknown>, context: Context): Promise<JsonValue> => {
+		const client = connected();
+		try {
+			return parseResult(await callOnce(client, name, args, context));
+		} catch (error) {
+			if (!(error instanceof McpSessionExpiredError)) throw error instanceof ExecutorResultError ? error : new Error(`Executor call failed: ${String(error)}`);
+		}
+		return parseResult(await callOnce(await reconnected(client, context), name, args, context));
+	};
+	const tool = async (name: string, args: Record<string, unknown>, context: Context): Promise<JsonValue> => {
+		let value = await callTool(name, args, context);
+		for (let approvals = 0; ; approvals++) {
+			const requestId = approvalRequest(value);
+			if (requestId === undefined) return value;
+			if (approvals >= MAX_APPROVALS) throw new Error(`Executor asked for more than ${MAX_APPROVALS} approvals in one call.`);
+			log("executor.approved", { requestId });
+			value = await callTool("resume", { requestId, response: ACCEPT }, context);
+		}
 	};
 	return {
 		search: (query, context) => tool("execute", { code: `return await tools.search(${JSON.stringify({ query })});` }, context),
@@ -94,7 +116,7 @@ async function open(connect: Connect): Promise<Link> {
 	}
 	if (transport === undefined) return { status: "unauthorized" };
 	const client = new McpClient({ name: "mochi", version: "0.0.0", capabilities: { elicitation: {} } });
-	client.setRequestHandler("elicitation/create", () => ({ action: "accept", content: {} }));
+	client.setRequestHandler("elicitation/create", () => ACCEPT);
 	try {
 		await client.connect(transport);
 	} catch (error) {
@@ -104,7 +126,8 @@ async function open(connect: Connect): Promise<Link> {
 	return { status: "up", client };
 }
 
-class ExecutorError extends Error {}
+/** An error result from an Executor tool: the call reached Executor and failed there. */
+class ExecutorResultError extends Error {}
 
 /** A path as apps_search returns it ("tools[\"a-b\"].x") or without the prefix ("gmail.send", "[\"a-b\"].x"), as a callable expression. */
 export function toolExpression(path: string): string {
@@ -119,7 +142,7 @@ type ToolResult = Awaited<ReturnType<McpClient["callTool"]>>;
 /** A tool result as JSON: structured content, else parsed text, else the text. An error result throws its text. */
 function parseResult(result: ToolResult): JsonValue {
 	const text = result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
-	if (result.isError === true) throw new ExecutorError(text);
+	if (result.isError === true) throw new ExecutorResultError(text);
 	if (result.structuredContent !== undefined) return result.structuredContent as JsonValue;
 	try {
 		return JSON.parse(text) as JsonValue;
@@ -143,31 +166,31 @@ function untilClosed(client: McpClient, context: Context): Promise<void> {
 	});
 }
 
-export function appsFns(apps: Apps): readonly ScriptFn[] {
+export function appsFns(apps: Apps): readonly ToolRegistration[] {
 	return [
-		defineFn({
+		defineTool({
 			name: "apps_search",
 			description: "Find tools in the owner's apps (mail, calendar, GitHub, browser). Read the apps skill first.",
 			parameters: Type.Object({ query: Type.String() }),
-			output: Type.Object({ items: Type.Array(Type.Object({ path: Type.String(), signature: Type.String() })) }),
-			replay: "read",
-			run: async ({ query }, _call, context) => ({ value: await apps.search(query, context) }),
+			structuredOutputSchema: Type.Object({ items: Type.Array(Type.Object({ path: Type.String(), signature: Type.String() })) }),
+			replay: "safe",
+			execute: async ({ query }, _api, context) => ({ structuredOutput: await apps.search(query, context) }),
 		}),
-		defineFn({
+		defineTool({
 			name: "apps_call",
 			description: "Call an app tool by its apps_search path. Acts for real; an interrupted call is reported, never rerun.",
 			parameters: Type.Object({ path: Type.String(), args: Type.Record(Type.String(), Type.Unknown()) }),
-			output: Type.Unknown(),
-			replay: "once",
-			run: async ({ path, args }, _call, context) => ({ value: await apps.call(path, args as JsonValue, context) }),
+			structuredOutputSchema: Type.Unknown(),
+			replay: "unsafe",
+			execute: async ({ path, args }, _api, context) => ({ structuredOutput: await apps.call(path, args as JsonValue, context) }),
 		}),
-		defineFn({
+		defineTool({
 			name: "apps_skills",
 			description: "Executor's instructions for one app, or the list of apps.",
 			parameters: Type.Object({ app: Type.Optional(Type.String()) }),
-			output: Type.String(),
-			replay: "read",
-			run: async ({ app }, _call, context) => ({ value: await apps.skills(app, context) }),
+			structuredOutputSchema: Type.String(),
+			replay: "safe",
+			execute: async ({ app }, _api, context) => ({ structuredOutput: await apps.skills(app, context) }),
 		}),
 	];
 }

@@ -11,8 +11,6 @@ import { measureSurface } from "../eval/surface.ts";
 import { BUDGET, FORBIDDEN_TOOL_NAME, SEATS, seatExtensions } from "./seats.ts";
 import { FAUX, newFaux, openTestMochi, tempDir } from "./test-support.ts";
 
-const CODING = ["read", "write", "edit", "bash"];
-
 test("each seat's request carries its tools within BUDGET: only root starts agents or adds triggers, root has no notify, and a user has no owner notes", async () => {
 	const surfaces = await Promise.all(SEATS.map(async (seat) => [seat, await measureSurface(seat)] as const));
 	const over = surfaces.flatMap(([seat, { tools, sections }]) =>
@@ -23,10 +21,10 @@ test("each seat's request carries its tools within BUDGET: only root starts agen
 	assert.deepEqual(over, []);
 	const seen = Object.fromEntries(surfaces.map(([seat, { tools }]) => [seat, tools.map((tool) => tool.name)]));
 	assert.deepEqual(seen, {
-		owner: [...CODING, "note", "recall", "react", "handoff", "code"],
-		run: [...CODING, "recall", "notify", "code"],
-		worker: [...CODING, "recall", "code"],
-		user: [...CODING, "recall", "handoff", "code"],
+		owner: ["handoff", "codemode"],
+		run: ["notify", "codemode"],
+		worker: ["codemode"],
+		user: ["handoff", "codemode"],
 	});
 	const userSections = surfaces.find(([seat]) => seat === "user")![1].sections.map((section) => section.name);
 	assert.deepEqual(userSections.filter((name) => name === "owner" || name === "notes-index"), []);
@@ -34,8 +32,8 @@ test("each seat's request carries its tools within BUDGET: only root starts agen
 });
 
 test("a tool or function missing from SURFACE or LIBRARY stops mochi from opening", () => {
-	const stray = defineTool({ name: "stray", description: "x", parameters: Type.Object({}), execute: async () => ({ content: [] }) });
-	assert.throws(() => seatExtensions([stray], [], {} as never), /disagree on stray, read/);
+	const stray = defineTool({ name: "stray", description: "x", parameters: Type.Object({}), execute: async () => ({}) });
+	assert.throws(() => seatExtensions([stray], []), /disagree on stray, notify, handoff, read/);
 });
 
 test("only seats.ts creates conversations", async () => {
@@ -54,7 +52,7 @@ test("a root created before seats gets the owner seat at boot and keeps its thin
 	const mochi = await openTestMochi(dir, newFaux(), new Map(), undefined, [], { log: (event, fields) => logs.push({ event, ...fields }) });
 	const root = await mochi.root.agent(context);
 	assert.equal(root.thinkingLevel, "high");
-	assert.ok(root.tools.some((tool) => tool.name === "react") && !root.tools.some((tool) => tool.name === "notify"));
+	assert.ok(root.callable.some((tool) => tool.name === "react") && !root.tools.some((tool) => tool.name === "notify"));
 	assert.deepEqual(logs, [{ event: "upgrade", unit: "U6", name: "root-seat", changed: 1 }]);
 	await mochi.close();
 	const again: unknown[] = [];

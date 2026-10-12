@@ -21,6 +21,7 @@ const MIN = 60_000;
 const DAY = 1440 * MIN;
 const DAILY: Trigger = { kind: "cron", id: "daily", cron: "0 9 * * *", tz: "Asia/Kolkata", prompt: "Summarize." };
 const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
+const scriptOutput = (text: string) => text.replace(/^Script completed\nWall time [\d.]+ seconds\nOutput:\n\n/, "");
 /** Runs at real speed from `at`; `set` moves it, so a slot can be placed just after a slow open. */
 const clockAt = (at: number) => {
 	let skew = at - Date.now();
@@ -86,11 +87,11 @@ await tools.trigger_add({ id: "standup", prompt: "Plan the week.", when: "0 9 * 
 await tools.trigger_remove({ id: "ci" });
 return { bad, gated, standup, ci, listed, after: await tools.trigger_list({}) };`;
 	const faux = newFaux();
-	faux.setResponses([call("code", { code: script }), fauxAssistantMessage("done")]);
+	faux.setResponses([call("codemode", { code: script }), fauxAssistantMessage("done")]);
 	const mochi = await openTestMochi(await tempDir(), faux, undefined, undefined, [], { now: clockAt(Date.parse("2026-10-05T03:00:00Z")) });
 	await (await mochi.root.submit({ type: "input", content: "set things up" }, context)).wait(context);
 	const result = (await mochi.root.entries({}, 50, undefined, context)).items.find((entry) => entry.kind === "pi.tool-result");
-	const out = JSON.parse(messageText(result!.model![0]!).split("\n").slice(1).join("\n"));
+	const out = JSON.parse(scriptOutput(messageText(result!.model![0]!)));
 
 	assert.match(out.bad, /minute "61"/);
 	assert.match(out.gated, /admitWhen applies only to webhook triggers/);
@@ -110,7 +111,7 @@ return { bad, gated, standup, ci, listed, after: await tools.trigger_list({}) };
 
 test("root's /stop leaves triggers live, and a run that removes its own trigger finishes its turn on root's model", async () => {
 	const faux = newFaux();
-	faux.setResponses([call("code", { code: `return await tools.trigger_remove({ id: "daily" });` }), fauxAssistantMessage("Removed myself.")]);
+	faux.setResponses([call("codemode", { code: `return await tools.trigger_remove({ id: "daily" });` }), fauxAssistantMessage("Removed myself.")]);
 	const now = clockAt(S);
 	const mochi = await openTestMochi(await tempDir(), faux, undefined, undefined, [], { now });
 	now.set(S - 300);
@@ -206,7 +207,7 @@ return { unknown, both, plain };`;
 	faux.setResponses([
 		(request) => {
 			system = JSON.stringify(request.messages.find((message) => message.role === "system"));
-			return call("code", { code: script });
+			return call("codemode", { code: script });
 		},
 		fauxAssistantMessage("done"),
 	]);
@@ -214,7 +215,7 @@ return { unknown, both, plain };`;
 	const mochi = await openTestMochi(await tempDir(), faux, undefined, undefined, [], { now: clockAt(Date.parse("2026-10-05T03:00:00Z")), users });
 	await (await mochi.root.submit({ type: "input", content: "set things up" }, context)).wait(context);
 	const result = (await mochi.root.entries({}, 50, undefined, context)).items.find((entry) => entry.kind === "pi.tool-result");
-	const out = JSON.parse(messageText(result!.model![0]!).split("\n").slice(1).join("\n"));
+	const out = JSON.parse(scriptOutput(messageText(result!.model![0]!)));
 	assert.equal(out.unknown, 'Unknown notify recipient "Hemant Singh". Valid ids: user1, user2.');
 	assert.match(system, /People by id: user1: the owner; user2: Hemant Singh \(iMessage\)\./);
 	const tasks = await mochi.harness.commit((tx) => scanTriggers(tx), context);
@@ -239,7 +240,7 @@ test("a trigger without notify sends only to the owner", async () => {
 test("seeds reconcile idempotently, keep their conversation when changed, and never touch a model trigger", async () => {
 	const mochi = await openTestMochi(await tempDir(), newFaux(), undefined, undefined, [], { now: clockAt(S - DAY) });
 	await add(mochi, { kind: "once", id: "mine", at: "2026-10-06T00:00:00Z", prompt: "Mine." });
-	const news = parseSeeds({ triggers: [{ kind: "cron", id: "news", cron: "0 8 * * *", tz: "UTC", prompt: "Old." }] });
+	const news = parseSeeds({ triggers: [{ kind: "cron", id: "news", cron: "0 8 * * *", tz: "UTC", prompt: "Old." }] }, []);
 	const live = async () => (await mochi.harness.commit((tx) => scanTriggers(tx), context)).filter((task) => task.state.status !== "terminal" && !task.abortRequested);
 	await reconcileSeeds(mochi.harness, mochi.trigger, news, context);
 	const first = await live();
@@ -251,8 +252,9 @@ test("seeds reconcile idempotently, keep their conversation when changed, and ne
 	assert.equal(changed.conversationId, first.find((task) => task.input.trigger.id === "news")!.conversationId);
 	await reconcileSeeds(mochi.harness, mochi.trigger, [], context);
 	assert.deepEqual((await live()).map((task) => [task.input.trigger.id, task.input.origin]), [["mine", "model"]]);
-	assert.throws(() => parseSeeds({ triggers: [{ kind: "cron", id: "x", cron: "* *", tz: "UTC", prompt: "p" }] }), /5 fields/);
-	assert.throws(() => parseSeeds({ triggers: [{ kind: "cron", id: "x", cron: "* * * * *", tz: "Mars/Base", prompt: "p" }] }), /time zone/);
+	assert.throws(() => parseSeeds({ triggers: [{ kind: "cron", id: "x", cron: "* *", tz: "UTC", prompt: "p" }] }, []), /5 fields/);
+	assert.throws(() => parseSeeds({ triggers: [{ kind: "cron", id: "x", cron: "* * * * *", tz: "Mars/Base", prompt: "p" }] }, []), /time zone/);
+	assert.throws(() => parseSeeds({ triggers: [{ kind: "cron", id: "x", cron: "* * * * *", tz: "UTC", prompt: "p", notify: ["user9"] }] }, []), /Unknown notify recipient/);
 	await mochi.close();
 });
 

@@ -1,5 +1,7 @@
 import type { Context } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord";
 import { type ConversationId, defineDoc, defineDocFamily, LiveDoc, ROOT_CONVERSATION_ID, type Storage, type SubmissionId } from "@earendil-works/pi-durable";
+import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
 import type { ChannelId } from "./channels/types.ts";
 import { allPages } from "./pages.ts";
 import { seatRoot } from "./seats.ts";
@@ -141,5 +143,39 @@ export const retireRollover: UpgradeStep = {
 	},
 };
 
+const OldStoreDoc = defineDoc<{ values: { [key: string]: JsonValue } }>({ kind: "mochi.codemode-store", version: 1, scope: "conversation", history: "latest", fork: "current", initial: () => ({ values: {} }) });
+
+/**
+ * mochi's own `code` tool gave way to pi-durable's `codemode`. A live `mochi.call` task has no definition now, so
+ * `abortTask` settles it `orphaned`. Each conversation's `mochi.codemode-store` values move to `pi.codemode.store`,
+ * and the old document retires in the same commit.
+ */
+export const codeToCodemode: UpgradeStep = {
+	unit: "U13",
+	name: "code-to-codemode",
+	async run({ storage, line: { harness } }, context) {
+		let changed = 0;
+		const calls = await allPages((cursor) => harness.commit((tx) => tx.scanTasks({ kind: "mochi.call" }, 256, cursor), context));
+		for (const task of calls) {
+			if (task.state.status === "terminal") continue;
+			await harness.abortTask(task.id, context);
+			changed++;
+		}
+		for (const { id } of await allPages((cursor) => storage.scanConversations({}, 256, cursor, context))) {
+			const old = await harness.snapshot(OldStoreDoc, id, context);
+			if (old === undefined) continue;
+			await harness.commit(async (tx) => {
+				const store = await tx.doc(CodemodeStoreDoc, id);
+				for (const [key, value] of Object.entries(old.values)) {
+					if (!Object.hasOwn(store.values, key)) store.values[key] = value;
+				}
+				await tx.retireDoc(OldStoreDoc, id);
+			}, context);
+			changed++;
+		}
+		return { changed };
+	},
+};
+
 /** In unit order. */
-export const UPGRADES: readonly UpgradeStep[] = [outboxToTurns, rootSeat, triggersToTasks, drainAgentKinds, retireRollover];
+export const UPGRADES: readonly UpgradeStep[] = [outboxToTurns, rootSeat, triggersToTasks, drainAgentKinds, retireRollover, codeToCodemode];

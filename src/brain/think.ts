@@ -1,7 +1,6 @@
 import type { JsonValue } from "@earendil-works/chord";
 import { type ClassifierQuestion, type JsonObject, type Models, Type } from "@earendil-works/pi-ai";
-import type { ModelRef } from "@earendil-works/pi-durable";
-import { defineFn, type ScriptFn } from "../code/code.ts";
+import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
 import { messageText } from "../text.ts";
 import type { Classify } from "./classifier.ts";
 
@@ -19,15 +18,15 @@ const Answer = Type.Union([
 ]);
 
 /** Fast-model calls from scripts: `llm` on the fast model with no tools, and `classify` on Jev, the gates' classifier. */
-export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRef; readonly classify: Classify }): readonly ScriptFn[] {
+export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRef; readonly classify: Classify }): readonly ToolRegistration[] {
 	return [
-		defineFn({
+		defineTool({
 			name: "llm",
 			description: "One fast-model completion, no tools. Hand it a slice of data; only its answer reaches you.",
 			parameters: Type.Object({ prompt: Type.String(), system: Type.Optional(Type.String()) }),
-			output: Type.String(),
-			replay: "read",
-			run: async ({ prompt, system }, _call, context) => {
+			structuredOutputSchema: Type.String(),
+			replay: "safe",
+			execute: async ({ prompt, system }, _api, context) => {
 				const model = deps.models.getModel(deps.fast.provider, deps.fast.modelId);
 				if (model === undefined) throw new Error(`Model ${deps.fast.provider}/${deps.fast.modelId} is not configured.`);
 				const signal = context.abortSignal;
@@ -37,19 +36,19 @@ export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRe
 					{ ...(signal === undefined ? {} : { signal }), reasoning: "low", maxTokens: Math.min(model.maxTokens, LLM_MAX_TOKENS) },
 				);
 				if (response.stopReason === "error" || response.stopReason === "aborted") throw new Error(`llm failed: ${response.errorMessage ?? response.stopReason}`);
-				return { value: messageText(response), usage: response.usage };
+				return { structuredOutput: messageText(response), usage: response.usage };
 			},
 		}),
-		defineFn({
+		defineTool({
 			name: "classify",
 			description: "Typed bool, choice or score questions about a JSON object, answered by Jev with probabilities. Try a trigger gate on samples with it.",
 			parameters: Type.Object({
 				state: Type.Record(Type.String(), Type.Unknown()),
 				questions: Type.Record(Type.String({ pattern: "^[a-z0-9_]+$" }), Question, { minProperties: 1, maxProperties: 8 }),
 			}),
-			output: Type.Record(Type.String(), Answer),
-			replay: "read",
-			run: async ({ state, questions }, _call, context) => {
+			structuredOutputSchema: Type.Record(Type.String(), Answer),
+			replay: "safe",
+			execute: async ({ state, questions }, _api, context) => {
 				const asked = Object.fromEntries(
 					Object.entries(questions).map(([id, question]): [string, ClassifierQuestion] => {
 						switch (question.type) {
@@ -64,7 +63,7 @@ export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRe
 				);
 				const result = await deps.classify(state as JsonObject, asked, context);
 				if (!result.ok) throw new Error(`Classifier failed: ${result.error}`);
-				return { value: result.answers as unknown as JsonValue };
+				return { structuredOutput: result.answers as unknown as JsonValue };
 			},
 		}),
 	];

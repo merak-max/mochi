@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
-import type { JsonRpcMessage, JsonRpcRequest } from "@earendil-works/pi-mcp";
+import { type JsonRpcMessage, type JsonRpcRequest, McpSessionExpiredError, type McpTransport } from "@earendil-works/pi-mcp";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { type Connect, connectApps, toolExpression } from "./apps.ts";
 
@@ -72,6 +72,33 @@ test("apps functions run Executor programs and return parsed results; mochi acce
 	assert.deepEqual(seen.at(-1), { name: "resume", args: { requestId: "apr_1", response: { action: "accept", content: {} } } });
 	assert.ok(logs.includes("executor.approved"));
 	assert.deepEqual(executor.capabilities, [{ elicitation: {} }]);
+	await stop();
+});
+
+test("an expired Executor session reconnects and retries the call once", async () => {
+	let calls = 0;
+	let expireNext = true;
+	const expiring: Connect = async () => {
+		const executor = fakeExecutor(async () => {
+			calls++;
+			return text("ok");
+		});
+		const transport = (await executor.connect()) as McpTransport;
+		const send = transport.send.bind(transport);
+		transport.send = async (message) => {
+			if ("method" in message && message.method === "tools/call" && expireNext) {
+				expireNext = false;
+				throw new McpSessionExpiredError();
+			}
+			return send(message);
+		};
+		return transport;
+	};
+	const { apps, until, logs, stop } = start(expiring);
+	await until("executor.up");
+	assert.equal(await apps.call("gmail.send", {}, context), "ok");
+	assert.equal(calls, 1);
+	assert.ok(logs.includes("executor.reconnecting"));
 	await stop();
 });
 

@@ -5,16 +5,12 @@ import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
 import { type Static, Type } from "@earendil-works/pi-ai";
-import { defineTask, type NextTaskState, ROOT_CONVERSATION_ID, type Task, type TaskId, type TaskRuntime } from "@earendil-works/pi-durable";
-import { type CallApi, defineFn, type ScriptFn } from "../code/code.ts";
+import { defineTask, defineTool, type NextTaskState, ROOT_CONVERSATION_ID, type Task, type TaskId, type ToolExecutionApi, type ToolRegistration, type TaskRuntime } from "@earendil-works/pi-durable";
 import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
+import { clip } from "../text.ts";
 import { LastInboundDoc, type Line, openTurn } from "../turn/turn.ts";
-
-// A background process outlives the script that started it and the daemon. Its files sit in `<workDir>/.procs`:
-// <name>.log (stdout and stderr), <name>.json (pid, command, start time) and <name>.exit (the code, written by the
-// wrapper shell). One `mochi.proc` task per process watches those files and wakes the conversation that started it.
 
 export const PROC_POLL_MS = 1000;
 const WAKE_LINES = 30;
@@ -167,7 +163,7 @@ function checkPattern(watch: string): void {
 
 function wakeBody(lines: readonly string[]): string {
 	if (lines.length === 0) return "(no output)";
-	return lines.map((line) => (line.length > LINE_CHARS ? `${line.slice(0, LINE_CHARS)}…` : line)).join("\n");
+	return lines.map((line) => clip(line, LINE_CHARS)).join("\n");
 }
 
 export interface ProcWatchDeps {
@@ -189,7 +185,7 @@ export function defineProcWatch(deps: ProcWatchDeps): ProcTask {
 		const key = `proc:${task.id}:${event}`;
 		deps.log("proc.wake", { task: task.id, event, tag });
 		const last = runtime.conversationId === ROOT_CONVERSATION_ID ? (await runtime.snapshot(LastInboundDoc, context))?.last : undefined;
-		if (last != null) {
+		if (last !== undefined && last !== null) {
 			await runtime.commit(async (tx) => {
 				await openTurn(tx, deps.line(), { source: "owner", channel: last.channel, key, tag, text: body, files: [] });
 				return next;
@@ -262,10 +258,10 @@ const StatusRow = Type.Object({
 	log: Type.String(),
 });
 
-export function procFns(deps: ProcFnDeps): ScriptFn[] {
-	const liveWatchers = async (call: CallApi, name: string, context: Context): Promise<TaskId[]> => {
+export function procFns(deps: ProcFnDeps): ToolRegistration[] {
+	const liveWatchers = async (api: ToolExecutionApi, name: string, context: Context): Promise<TaskId[]> => {
 		const found: TaskId[] = [];
-		await call.commit(async (tx) => {
+		await api.commit(async (tx) => {
 			const tasks = await allPages((cursor) => tx.scanTasks({ kind: KIND }, 256, cursor));
 			for (const task of tasks) {
 				const input = task.input as ProcInput;
@@ -276,17 +272,17 @@ export function procFns(deps: ProcFnDeps): ScriptFn[] {
 	};
 
 	return [
-		defineFn({
+		defineTool({
 			name: "proc_start",
 			description:
-				"Run a shell command in the background and return at once. Use it for anything over ~30 s. This conversation is woken with the log tail when it exits, and once when a line first matches the regex watch.",
+				"Run a shell command in the background and return at once. Use it for any command that can take more than 30 seconds. This conversation wakes with the log tail when the command exits, and once when a line first matches the watch regex.",
 			parameters: Type.Object({ name: Name, command: Type.String({ minLength: 1 }), cwd: Type.Optional(Type.String()), watch: Type.Optional(Type.String({ minLength: 1 })) }),
-			output: Type.Object({ name: Type.String(), pid: Type.Number(), log: Type.String() }),
-			replay: "once",
-			run: async ({ name, command, cwd, watch }, call, context) => {
+			structuredOutputSchema: Type.Object({ name: Type.String(), pid: Type.Number(), log: Type.String() }),
+			replay: "unsafe",
+			execute: async ({ name, command, cwd, watch }, api, context) => {
 				if (watch !== undefined) checkPattern(watch);
 				const files = filesOf(deps.dir, name);
-				if ((await liveWatchers(call, name, context)).length > 0) throw new Error(`Process ${name} is still running. Stop it or pick another name.`);
+				if ((await liveWatchers(api, name, context)).length > 0) throw new Error(`Process ${name} is still running. Stop it or pick another name.`);
 				const previous = await readMeta(files);
 				if (previous !== undefined && (await statusOf(files, previous.pid)).state === "running") throw new Error(`Process ${name} is still running. Stop it or pick another name.`);
 				const directory = cwd === undefined ? deps.workDir : isAbsolute(cwd) ? cwd : resolve(deps.workDir, cwd);
@@ -295,19 +291,19 @@ export function procFns(deps: ProcFnDeps): ScriptFn[] {
 				const meta: Meta = { name, command, cwd: directory, pid, startedAt: new Date().toISOString(), ...(watch === undefined ? {} : { watch }) };
 				await writeFile(files.meta, `${JSON.stringify(meta)}\n`);
 				const input: ProcInput = { name, pid, ...(watch === undefined ? {} : { watch }) };
-				await call.commit(async (tx) => {
-					await tx.createTask(deps.task, input, { ownership: { kind: "conversation" }, conversationId: call.conversationId, background: true });
+				await api.commit(async (tx) => {
+					await tx.createTask(deps.task, input, { ownership: { kind: "conversation" }, conversationId: api.conversationId, background: true });
 				}, context);
-				return { value: { name, pid, log: files.log } };
+				return { structuredOutput: { name, pid, log: files.log } };
 			},
 		}),
-		defineFn({
+		defineTool({
 			name: "proc_status",
 			description: "State of one background process, or of every one: running, exited with its code, or lost.",
 			parameters: Type.Object({ name: Type.Optional(Name) }),
-			output: Type.Array(StatusRow),
-			replay: "read",
-			run: async ({ name }) => {
+			structuredOutputSchema: Type.Array(StatusRow),
+			replay: "safe",
+			execute: async ({ name }) => {
 				const names = name !== undefined ? [name] : (await readdir(deps.dir).catch(() => [])).filter((file) => file.endsWith(".json")).map((file) => file.slice(0, -".json".length)).sort();
 				const rows = [];
 				for (const each of names) {
@@ -317,37 +313,37 @@ export function procFns(deps: ProcFnDeps): ScriptFn[] {
 					const status = await statusOf(files, meta.pid);
 					rows.push({ name: each, ...status, pid: meta.pid, command: meta.command, startedAt: meta.startedAt, log: files.log });
 				}
-				return { value: rows };
+				return { structuredOutput: rows };
 			},
 		}),
-		defineFn({
+		defineTool({
 			name: "proc_logs",
 			description: "The last lines of a background process's output, stdout and stderr together.",
 			parameters: Type.Object({ name: Name, tail: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })) }),
-			output: Type.String(),
-			replay: "read",
-			run: async ({ name, tail }) => {
+			structuredOutputSchema: Type.String(),
+			replay: "safe",
+			execute: async ({ name, tail }) => {
 				const files = filesOf(deps.dir, name);
 				if ((await readMeta(files)) === undefined) throw new Error(`No process named ${name}.`);
-				return { value: (await tailLines(files.log, tail ?? 50)).join("\n") };
+				return { structuredOutput: (await tailLines(files.log, tail ?? 50)).join("\n") };
 			},
 		}),
-		defineFn({
+		defineTool({
 			name: "proc_stop",
 			description: "Stop a background process and its children. No wake-up follows.",
 			parameters: Type.Object({ name: Name }),
-			output: Type.Object({ name: Type.String(), code: Type.Union([Type.Number(), Type.Null()]) }),
-			replay: "keyed",
-			run: async ({ name }, call, context) => {
+			structuredOutputSchema: Type.Object({ name: Type.String(), code: Type.Union([Type.Number(), Type.Null()]) }),
+			replay: "safe",
+			execute: async ({ name }, api, context) => {
 				const files = filesOf(deps.dir, name);
 				const meta = await readMeta(files);
 				if (meta === undefined) throw new Error(`No process named ${name}.`);
-				for (const id of await liveWatchers(call, name, context)) {
+				for (const id of await liveWatchers(api, name, context)) {
 					await deps.abortTask(id, context);
-					await call.waitForTask(id, context);
+					await api.waitForTask(id, context);
 				}
 				await stopGroup(meta.pid, files);
-				return { value: { name, code: (await exitCode(files)) ?? null } };
+				return { structuredOutput: { name, code: (await exitCode(files)) ?? null } };
 			},
 		}),
 	];

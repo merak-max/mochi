@@ -12,11 +12,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.0.3",
-    "@earendil-works/pi-ai": "1.0.3",
-    "@earendil-works/pi-codemode": "1.0.3",
+    "@earendil-works/chord": "file:deps/earendil-works-chord-1.1.0.tgz",
+    "@earendil-works/pi-ai": "file:deps/earendil-works-pi-ai-1.1.0.tgz",
+    "@earendil-works/pi-codemode": "file:deps/earendil-works-pi-codemode-1.1.0.tgz",
     "@earendil-works/pi-coding-agent": "1.0.3",
-    "@earendil-works/pi-durable": "1.0.3",
+    "@earendil-works/pi-durable": "file:deps/earendil-works-pi-durable-1.1.0.tgz",
     "@earendil-works/pi-mcp": "1.0.3",
     "@earendil-works/pi-tui": "1.0.3",
     "defuddle": "0.19.3",
@@ -29,5 +29,16 @@
   "devDependencies": {
     "@types/node": "24.19.1",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "@earendil-works/chord": "file:deps/earendil-works-chord-1.1.0.tgz",
+    "@earendil-works/pi-ai": "file:deps/earendil-works-pi-ai-1.1.0.tgz",
+    "@earendil-works/pi-codemode": "file:deps/earendil-works-pi-codemode-1.1.0.tgz",
+    "@earendil-works/pi-telemetry": "file:deps/earendil-works-pi-telemetry-1.1.0.tgz",
+    "@earendil-works/pi-coding-agent": {
+      "@earendil-works/pi-codemode": "1.0.3",
+      "@earendil-works/chord": "1.0.3",
+      "@earendil-works/pi-ai": "1.0.3"
+    }
   }
 }

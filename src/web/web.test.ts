@@ -30,7 +30,7 @@ function web(baseUrl: string, apiKey: string | null = "fc-test") {
 	const models = createModels();
 	models.setProvider(faux.provider);
 	const fns = new Map(webFns({ apiKey: apiKey ?? undefined, models, fast: FAUX, baseUrl }).map((fn) => [fn.name, fn]));
-	return { faux, call: async (name: string, args: unknown) => (await fns.get(name)!.run(args as never, {} as never, context)).value };
+	return { faux, call: async (name: string, args: unknown) => (await fns.get(name)!.execute(args as never, {} as never, context)).structuredOutput };
 }
 
 test("web_search returns deduped hits and sends the Firecrawl request with the key", async (t) => {

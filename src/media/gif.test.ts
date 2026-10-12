@@ -10,7 +10,7 @@ const PAGE = `<figure class="UniversalGifListItem clickable" data-index="0"><a h
 <figure class="UniversalGifListItem clickable" data-index="1"><a href="/view/b"><div class="Gif"><picture><img src="https://media.tenor.com/B2AAAAM/clap.gif" width="180" alt="a man applauds in front of a sign that says &quot;i&#039;m proud&quot;" loading="lazy"></picture></div></a></figure>
 <figure class="UniversalGifListItem clickable" data-index="2"><a href="/view/a"><div class="Gif"><picture><img src="https://media.tenor.com/A1AAAAM/happy-tears.gif" alt="duplicate"></picture></div></a></figure>`;
 
-const call = {} as never;
+const api = {} as never;
 
 it("parses Tenor results into url and description, once each", () => {
 	assert.deepEqual(parseTenorPage(PAGE), [
@@ -28,11 +28,11 @@ it("searches the slugged Tenor page and saves only Tenor GIFs", async () => {
 		return new Response(new Uint8Array([71, 73, 70]));
 	}) as typeof fetch;
 	const [search, save] = gifFns({ workDir, fetch: network });
-	const hits = await search!.run({ query: "Proud of you!", limit: 1 }, call, BACKGROUND_CONTEXT);
+	const hits = await search!.execute({ query: "Proud of you!", limit: 1 }, api, BACKGROUND_CONTEXT);
 	assert.equal(asked[0], "https://tenor.com/search/proud-of-you-gifs");
-	assert.equal((hits.value as unknown[]).length, 1);
-	const saved = (await save!.run({ url: "https://media.tenor.com/A1AAAAM/happy-tears.gif" }, call, BACKGROUND_CONTEXT)).value as { path: string };
+	assert.equal((hits.structuredOutput as unknown[]).length, 1);
+	const saved = (await save!.execute({ url: "https://media.tenor.com/A1AAAAM/happy-tears.gif" }, api, BACKGROUND_CONTEXT)).structuredOutput as { path: string };
 	assert.match(saved.path, /^out\/.+\.gif$/);
 	assert.deepEqual([...(await readFile(join(workDir, saved.path)))], [71, 73, 70]);
-	await assert.rejects(save!.run({ url: "https://evil.example/x.gif" }, call, BACKGROUND_CONTEXT), /Only https:\/\/media.tenor.com/);
+	await assert.rejects(save!.execute({ url: "https://evil.example/x.gif" }, api, BACKGROUND_CONTEXT), /Only https:\/\/media.tenor.com/);
 });

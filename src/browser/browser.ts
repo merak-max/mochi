@@ -1,5 +1,5 @@
 import { Type, type Static } from "@earendil-works/pi-ai";
-import { defineFn, type ScriptFn } from "../code/code.ts";
+import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { BrowserClient, type BrowserDeps } from "./client.ts";
 import { acquireProfile } from "./profile.ts";
 
@@ -51,13 +51,13 @@ export async function browse(deps: BrowserDeps, args: Static<typeof BrowseInput>
 	}
 }
 
-export function browserFns(deps: BrowserDeps): readonly ScriptFn[] {
-	return [defineFn({
+export function browserFns(deps: BrowserDeps): readonly ToolRegistration[] {
+	return [defineTool({
 		name: "browse",
 		description: "Use the owner's persistent browser to complete a web task. A liveViewUrl is a human takeover link valid for about five minutes. The profile stays reserved until that session closes.",
 		parameters: BrowseInput,
-		output: BrowseOutput,
-		replay: "once",
-		run: async (args, _call, context) => ({ value: await browse(deps, args, context.abortSignal) }),
+		structuredOutputSchema: BrowseOutput,
+		replay: "unsafe",
+		execute: async (args, _api, context) => ({ structuredOutput: await browse(deps, args, context.abortSignal) }),
 	})];
 }

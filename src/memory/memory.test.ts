@@ -11,14 +11,15 @@ import { newFaux, openTestMochi, type TestMochi, tempDir } from "../test-support
 import { INDEX_EMPTY, MemoryDoc, OWNER_EMPTY, readMemory, writeNote } from "./memory.ts";
 
 const context = BACKGROUND_CONTEXT;
-const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
+const call = (name: string, args: Record<string, unknown>) => fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.${name}(${JSON.stringify(args)});` }), { stopReason: "toolUse" });
 const note = (slug: string, kind: string, subject: string, body: string) => call("note", { slug, kind, subject, body });
+const scriptOutput = (text: string) => text.replace(/^Script (completed|failed)\nWall time [\d.]+ seconds\nOutput:\n\n/, "");
 const systems = (messages: readonly Message[]) => messages.filter((message): message is SystemMessage => message.role === "system");
 const ask = async (mochi: TestMochi, content: string) => (await mochi.root.submit({ type: "input", content }, context)).wait(context);
 
 async function results(mochi: TestMochi): Promise<string[]> {
 	const entries = (await mochi.root.entries({}, 100, undefined, context)).items.filter((entry) => entry.kind === "pi.tool-result");
-	return entries.reverse().map((entry) => messageText(entry.model![0]!));
+	return entries.reverse().map((entry) => scriptOutput(messageText(entry.model![0]!)));
 }
 
 test("a note write reaches the next request as one positional system patch of the owner section, indexed, with its source", async () => {

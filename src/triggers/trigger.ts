@@ -8,7 +8,7 @@ import { type ConversationId, ConversationBusy, configure, defineTask, defineToo
 import { admits, checkGate, type Classify } from "../brain/classifier.ts";
 import { bifrostRef } from "../brain/models.ts";
 import type { ChannelId } from "../channels/types.ts";
-import { defineFn, journaled, type ScriptFn } from "../code/code.ts";
+import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
@@ -199,8 +199,21 @@ function validateTrigger(trigger: Trigger): Trigger {
 	return trigger;
 }
 
-/** Seeds from data/config.json `triggers`. */
-export const parseSeeds = (file: Readonly<Record<string, unknown>>): Trigger[] => parseWith(SeedsSchema, file.triggers ?? [], "triggers in data/config.json").map(validateTrigger);
+function checkRecipients(notify: readonly string[], users: readonly ChatUser[]): void {
+	const valid = [OWNER_ID, ...users.map((user) => user.id)];
+	for (const recipient of notify) {
+		if (!valid.includes(recipient)) throw new Error(`Unknown notify recipient "${recipient}". Valid ids: ${valid.join(", ")}.`);
+	}
+}
+
+/** Seeds from data/config.json `triggers`. Each notify id must be the owner or a configured user. */
+export function parseSeeds(file: Readonly<Record<string, unknown>>, users: readonly ChatUser[]): Trigger[] {
+	const seeds = parseWith(SeedsSchema, file.triggers ?? [], "triggers in data/config.json").map(validateTrigger);
+	for (const seed of seeds) {
+		if (seed.notify !== undefined) checkRecipients(seed.notify, users);
+	}
+	return seeds;
+}
 
 /**
  * Idempotent: an equal seed is left alone, a changed one is re-added in its conversation, a config trigger whose seed
@@ -245,12 +258,7 @@ const AddParams = Type.Object({
 function parseWhen(args: Static<typeof AddParams>, timeZone: string, users: readonly ChatUser[]): Trigger {
 	const { id, prompt, when, admitWhen, notifyWhen, notify } = args;
 	if (admitWhen !== undefined && when !== "webhook") throw new Error("admitWhen applies only to webhook triggers.");
-	if (notify !== undefined) {
-		const valid = [OWNER_ID, ...users.map((user) => user.id)];
-		for (const recipient of notify) {
-			if (!valid.includes(recipient)) throw new Error(`Unknown notify recipient "${recipient}". Valid ids: ${valid.join(", ")}.`);
-		}
-	}
+	if (notify !== undefined) checkRecipients(notify, users);
 	const secret = randomBytes(32).toString("hex");
 	const draft =
 		when === "webhook"
@@ -286,25 +294,26 @@ export interface TriggerFnDeps {
 	readonly users: readonly ChatUser[];
 }
 
-export function triggerFns(deps: TriggerFnDeps): ScriptFn[] {
+export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 	return [
-		defineFn({
+		defineTool({
 			name: "trigger_add",
 			description:
-				"Run a prompt later in its own conversation, silent unless it calls notify (sent to notify ids, default user1). " +
-				"when: cron 'm h dom mon dow' (owner's tz), an ISO time with offset, or 'webhook', which returns the URL " +
-				"and secret (hmac: GitHub's X-Hub-Signature-256; bearer: Authorization header). Gates are yes/no classifier questions, " +
-				"yes proceeds: admitWhen per payload, notifyWhen per notify text. Re-adding an id replaces it, same thread.",
+				"Run a prompt later in its own conversation. The run is silent unless it calls notify, which goes to the ids in notify (default user1). " +
+				"when is a cron 'm h dom mon dow' in the owner's time zone, an ISO time with an offset, or 'webhook'. A webhook returns its URL " +
+				"and secret (hmac checks GitHub's X-Hub-Signature-256; bearer checks the Authorization header). admitWhen and notifyWhen are yes/no " +
+				"classifier questions: admitWhen is asked of each payload and notifyWhen of each notify text, and yes lets it through. " +
+				"Adding an existing id replaces that trigger and keeps its conversation.",
 			parameters: AddParams,
-			output: Type.Object({ id: Type.String(), next: Type.Optional(Type.String()), url: Type.Optional(Type.String()), secret: Type.Optional(Type.String()) }),
-			replay: "keyed",
-			run: async (args, call, context) => {
+			structuredOutputSchema: Type.Object({ id: Type.String(), next: Type.Optional(Type.String()), url: Type.Optional(Type.String()), secret: Type.Optional(Type.String()) }),
+			replay: "safe",
+			execute: async (args, api, context) => {
 				const draft = parseWhen(args, deps.timeZone, deps.users);
 				let trigger = draft;
 				let replaced: TaskId | undefined;
-				await call.commit(async (tx) => {
+				await api.commit(async (tx) => {
 					const existing = await scanTriggers(tx);
-					const { id, created } = await journaled(tx, call.taskId, "trigger", async () => {
+					const { id, created } = await journaled(tx, api.taskId, "trigger", async () => {
 						const added = await addTrigger(tx, deps.task, { trigger: draft, origin: "model" }, existing);
 						replaced = added.replaced;
 						return added.id;
@@ -314,30 +323,30 @@ export function triggerFns(deps: TriggerFnDeps): ScriptFn[] {
 				if (replaced !== undefined) await deps.abortTask(replaced, context);
 				if (trigger.kind === "webhook") {
 					const secret = trigger.auth.kind === "bearer" ? trigger.auth.token : trigger.auth.secret;
-					return { value: { id: trigger.id, url: `${deps.publicUrl ?? "<MOCHI_PUBLIC_URL unset>"}/hooks/${trigger.id}`, secret } };
+					return { structuredOutput: { id: trigger.id, url: `${deps.publicUrl ?? "<MOCHI_PUBLIC_URL unset>"}/hooks/${trigger.id}`, secret } };
 				}
-				return { value: JSON.parse(JSON.stringify({ id: trigger.id, next: nextSlot(trigger, null, deps.now()) })) };
+				return { structuredOutput: JSON.parse(JSON.stringify({ id: trigger.id, next: nextSlot(trigger, null, deps.now()) })) };
 			},
 		}),
-		defineFn({
+		defineTool({
 			name: "trigger_list",
-			description: "Live triggers: origin (model or config), next and last run.",
+			description: "List live triggers with their origin (model or config), next run and last run.",
 			parameters: Type.Object({}),
-			output: Type.Array(Type.Object({ id: Type.String(), when: Type.String(), origin: Type.String(), next: Type.Optional(Type.String()), last: Type.Optional(Type.String()) })),
-			replay: "read",
-			run: async (_args, _call, context) => ({ value: (await deps.triggers(context)).filter(live).map((task) => listed(task, deps.now())) }),
+			structuredOutputSchema: Type.Array(Type.Object({ id: Type.String(), when: Type.String(), origin: Type.String(), next: Type.Optional(Type.String()), last: Type.Optional(Type.String()) })),
+			replay: "safe",
+			execute: async (_args, _api, context) => ({ structuredOutput: (await deps.triggers(context)).filter(live).map((task) => listed(task, deps.now())) }),
 		}),
-		defineFn({
+		defineTool({
 			name: "trigger_remove",
-			description: "Stop a trigger; a run may stop its own. Its conversation stays for history. A config trigger returns at the next start.",
+			description: "Stop a trigger. A run may stop its own trigger. Its conversation stays for history. A config trigger comes back at the next start.",
 			parameters: Type.Object({ id: Id }),
-			output: Type.Literal("removed"),
-			replay: "keyed",
-			run: async ({ id }, _call, context) => {
+			structuredOutputSchema: Type.Literal("removed"),
+			replay: "safe",
+			execute: async ({ id }, _api, context) => {
 				const found = (await deps.triggers(context)).findLast((task) => task.input.trigger.id === id);
 				if (found === undefined) throw new Error(`No trigger named ${id}.`);
 				await deps.abortTask(found.id, context);
-				return { value: "removed" };
+				return { structuredOutput: "removed" };
 			},
 		}),
 	];
@@ -361,8 +370,8 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 	return defineTool({
 		name: "notify",
 		description:
-			"Send a message now to the owner, or in a trigger run to the trigger's recipients. In a trigger run (cron, once, webhook) this is the only way to reach " +
-			"them; call it only when something needs their attention. channel is the owner's, default where they last wrote.",
+			"Send a message now to the owner, or in a trigger run to the trigger's recipients. In a trigger run this is the only way to reach " +
+			"them, so call it only when something needs their attention. channel applies to the owner and defaults to where the owner last wrote. Users always get iMessage.",
 		parameters: Type.Object({
 			text: Type.String({ minLength: 1, maxLength: 4000 }),
 			channel: Type.Optional(Type.Union(channelNames.map((id) => Type.Literal(id)))),
@@ -380,7 +389,7 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 				if (held !== null) {
 					deps.log("notify.filtered", { trigger: trigger.id, probability: held });
 					const text = `Not sent: this trigger's notifyWhen gate judged it does not meet "${trigger.notifyWhen.question}" (p=${held.toFixed(2)}). Finish without notifying.`;
-					return { content: [{ type: "text", text }] };
+					return { output: [{ type: "text", text }] };
 				}
 			}
 			const last = (await api.snapshot(LastInboundDoc, context))?.last?.channel;
@@ -406,7 +415,7 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 				}
 			}, context);
 			// The run is done once its message is queued; ending here skips a model request that would only narrate the send.
-			return { content: [{ type: "text", text: `Queued for ${queued.join(" and ")}; it goes out verbatim.` }], control: { terminate: true } };
+			return { output: [{ type: "text", text: `Queued for ${queued.join(" and ")}; it goes out verbatim.` }], control: { terminate: true } };
 		},
 	});
 }

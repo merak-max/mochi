@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { LIBRARY, SURFACE } from "./seats.ts";
 
 const REPO = join(import.meta.dirname, "..");
-const SCRIPT_GLOBALS = ["store", "load", "text", "search"];
+const SCRIPT_GLOBALS = ["store", "load", "text", "image", "searchTools", "describeTool"];
 
 /** A backticked token that names a tool: `name(`, `tools.name`, a snake_case word, or a bare word followed by "tool". */
 function toolReferences(markdown: string): string[] {

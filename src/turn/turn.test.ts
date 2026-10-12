@@ -89,7 +89,7 @@ test("a user message runs in the user's own conversation, once per redelivery, a
 	assert.deepEqual((await mochi.root.entries({}, 50, undefined, context)).items.filter((entry) => UserEntry.is(entry)), []);
 	const agent = await mochi.harness.snapshot(AgentDoc, userConversation!, context);
 	assert.deepEqual(agent?.extensions, ["identity", "skills", "fast-compaction", "seat-user"]);
-	assert.match(agent?.instructions ?? "", /^This conversation is with user2 \(Hemant Singh, iMessage \+918423152032\), a friend of user1, Shaurya Pratap Singh\./);
+	assert.match(agent?.instructions ?? "", /^This conversation is with user2 \(Hemant Singh, iMessage \+918423152032\)\. They are a friend of the owner \(user1\), not the owner\./);
 	assert.deepEqual(imessage.sentTo, [{ person: USER.handle, text: "Hi Hemant!" }]);
 	assert.equal((await mochi.harness.snapshot(LastInboundDoc, context))?.last ?? null, null, "a user never becomes notify's or react's target");
 	assert.equal((await mochi.harness.snapshot(InboundCursorDoc, "imessage", context))?.sequence, 7);
@@ -136,7 +136,7 @@ test("a redelivery racing the first submit opens a second Turn that ends merged"
 });
 
 test("steers into one run on two channels send the answer once per channel", async () => {
-	const answer = gated(fauxAssistantMessage(fauxToolCall("recall", { query: "thing" }), { stopReason: "toolUse" }));
+	const answer = gated(fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.recall({ query: "thing" });` }), { stopReason: "toolUse" }));
 	const faux = newFaux();
 	faux.setResponses([answer.respond, fauxAssistantMessage("Both done.")]);
 	const telegram = recordingChannel("telegram");
@@ -384,7 +384,7 @@ test("a local process leaves a pending Turn waiting, and the next daemon start d
 test("react defaults to the owner's newest message, takes an explicit id, and fails clearly without reactions", async () => {
 	const telegram = recordingChannel("telegram");
 	const whatsapp = recordingChannel("whatsapp", { react: false });
-	const react = (args: Record<string, string>, id: string) => fauxAssistantMessage(fauxToolCall("react", args, { id }), { stopReason: "toolUse" });
+	const react = (args: Record<string, string>, id: string) => fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.react(${JSON.stringify(args)});` }, { id }), { stopReason: "toolUse" });
 	const faux = newFaux();
 	faux.setResponses([react({ reaction: "like" }, "r1"), fauxAssistantMessage(""), react({ reaction: "none", messageId: "m1" }, "r2"), fauxAssistantMessage(""), react({ reaction: "like" }, "r3"), fauxAssistantMessage("ok")]);
 	const mochi = await openTestMochi(await tempDir(), faux, new Map<ChatChannelId, Channel>([["telegram", telegram.channel], ["whatsapp", whatsapp.channel]]));

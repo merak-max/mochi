@@ -193,7 +193,7 @@ export function handoffTool() {
 			const self = await api.conversation(api.conversationId, context);
 			if (self === undefined) throw new Error("Handoff conversation is missing.");
 			await self.submit({ type: "input", content: "Continue.", requestId: `handoff:${api.taskId}`, whenBusy: "followUp" }, context);
-			return { content: [{ type: "text", text: "Handing off." }], control: { handoff: note } };
+			return { output: [{ type: "text", text: "Handing off." }], control: { handoff: note } };
 		},
 	});
 }

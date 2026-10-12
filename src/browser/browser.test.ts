@@ -35,7 +35,7 @@ test("scrape inherits the persistent writable profile and prompt interact is sto
 	assert.deepEqual(f.requests[0]?.body, { url: "https://example.com/", formats: ["markdown"], profile: { name: "request-shape", saveChanges: true } });
 	assert.match(JSON.stringify(f.requests[1]?.body), /Read heading/);
 	assert.equal(JSON.stringify(f.requests[1]?.body).includes("saveChanges"), false);
-	assert.equal(browserFns(f.deps)[0]?.replay, "once");
+	assert.equal(browserFns(f.deps)[0]?.replay, "unsafe");
 });
 
 test("only explicit unfinished work causes another prompt, capped at three", async () => {

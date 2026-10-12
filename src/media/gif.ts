@@ -1,5 +1,5 @@
 import { Type } from "@earendil-works/pi-ai";
-import { defineFn, type ScriptFn } from "../code/code.ts";
+import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { saveOutput } from "./files.ts";
 
 const SEARCH_URL = "https://tenor.com/search/";
@@ -30,39 +30,39 @@ export function parseTenorPage(html: string): GifHit[] {
 	return hits;
 }
 
-export function gifFns(deps: { readonly workDir: string; readonly fetch?: typeof fetch }): ScriptFn[] {
+export function gifFns(deps: { readonly workDir: string; readonly fetch?: typeof fetch }): ToolRegistration[] {
 	const network = deps.fetch ?? fetch;
 	return [
-		defineFn({
+		defineTool({
 			name: "gif_search",
-			description: "Search Tenor GIFs, no key. Each hit has a url and a description of what it shows; pick the one that fits, then gif_save it.",
+			description: "Search Tenor for GIFs. Each hit has a url and a description of what it shows. Pick the one that fits, then save it with gif_save.",
 			parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 100 }), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }),
-			output: Type.Array(Type.Object({ url: Type.String(), description: Type.String() })),
-			replay: "read",
-			run: async ({ query, limit }, _call, context) => {
+			structuredOutputSchema: Type.Array(Type.Object({ url: Type.String(), description: Type.String() })),
+			replay: "safe",
+			execute: async ({ query, limit }, _api, context) => {
 				const slug = query.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 				if (slug === "") throw new Error("The GIF query needs letters or digits.");
 				const response = await network(`${SEARCH_URL}${slug}-gifs`, { headers: { "user-agent": BROWSER_AGENT }, signal: context.abortSignal ?? null });
 				if (!response.ok) throw new Error(`Tenor search failed with HTTP ${response.status}.`);
 				const hits = parseTenorPage(await response.text());
 				if (hits.length === 0) throw new Error("Tenor returned no GIFs for that query; its page layout may have changed.");
-				return { value: hits.slice(0, limit ?? 8) };
+				return { structuredOutput: hits.slice(0, limit ?? 8) };
 			},
 		}),
-		defineFn({
+		defineTool({
 			name: "gif_save",
 			description: "Download a gif_search url into the work directory. Send the returned path with a standalone attach: <path> line.",
 			parameters: Type.Object({ url: Type.String({ minLength: 1 }) }),
-			output: Type.Object({ path: Type.String() }),
-			replay: "once",
-			run: async ({ url }, _call, context) => {
+			structuredOutputSchema: Type.Object({ path: Type.String() }),
+			replay: "unsafe",
+			execute: async ({ url }, _api, context) => {
 				const parsed = new URL(url);
 				if (parsed.protocol !== "https:" || parsed.hostname !== MEDIA_HOST || !parsed.pathname.endsWith(".gif")) throw new Error(`Only https://${MEDIA_HOST} .gif URLs from gif_search can be saved.`);
 				const response = await network(parsed, { headers: { "user-agent": BROWSER_AGENT }, signal: context.abortSignal ?? null });
 				if (!response.ok) throw new Error(`GIF download failed with HTTP ${response.status}.`);
 				const bytes = new Uint8Array(await response.arrayBuffer());
 				if (bytes.length > MAX_GIF_BYTES) throw new Error(`The GIF is ${bytes.length} bytes, over the ${MAX_GIF_BYTES} byte limit. Pick another.`);
-				return { value: await saveOutput(deps.workDir, "gif", bytes) };
+				return { structuredOutput: await saveOutput(deps.workDir, "gif", bytes) };
 			},
 		}),
 	];

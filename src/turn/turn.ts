@@ -8,11 +8,10 @@ import {
 	type ConversationId,
 	defineDoc,
 	defineDocFamily,
-	defineExtension,
 	defineTask,
 	defineTool,
 	type EntryId,
-	type Extension,
+	type ToolRegistration,
 	type Harness,
 	type NextTaskState,
 	ROOT_CONVERSATION_ID,
@@ -183,9 +182,9 @@ export const UserDoc = defineDocFamily<{ conversation: ConversationId | null }, 
 export function userInstructions(user: ChatUser): string {
 	const about = user.name === undefined ? `iMessage ${user.handle}` : `${user.name}, iMessage ${user.handle}`;
 	const lines = [
-		`This conversation is with ${user.id} (${about}), a friend of ${OWNER_ID}, Shaurya Pratap Singh. They are not the owner. ` +
-			"In this conversation their messages instruct you, and 'the owner' in other sections still means Shaurya. " +
-			"Help them fully, in plain chat style. Shaurya's apps and accounts are his: do not send messages, email or make changes in them for a user.",
+		`This conversation is with ${user.id} (${about}). They are a friend of the owner (${OWNER_ID}), not the owner. ` +
+			"Here their messages instruct you. 'The owner' in other sections still means the owner. " +
+			"Help them fully, in plain chat style. You cannot reach the owner's apps or accounts from this conversation.",
 	];
 	if (user.persona !== undefined) lines.push(user.persona);
 	return lines.join("\n\n");
@@ -246,9 +245,7 @@ export const DELIVERED_RECORD_CHARS = 280;
 export function deliveredRecord(input: RunTurn, recipient: string): string {
 	const from = input.from.kind === "trigger" ? `trigger ${input.from.id}` : `conversation ${input.from.id}`;
 	const where = input.channel === "cli" ? "in the terminal" : `on ${input.channel}`;
-	const chars = [...input.text];
-	const text = chars.length > DELIVERED_RECORD_CHARS ? `${chars.slice(0, DELIVERED_RECORD_CHARS).join("")}…` : input.text;
-	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${text}`;
+	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${clip(input.text, DELIVERED_RECORD_CHARS)}`;
 }
 
 /** Root's input for an owner Turn, and the only builder of it, so ingest and `run` submit identical content. */
@@ -559,16 +556,13 @@ async function conversationOf(line: Line, id: ConversationId, context: Context):
 	return conversation;
 }
 
-/** `react` on the owner's chat messages. Lives in the `channels` extension, which trigger conversations leave out. */
-export function channelsExtension(channels: Channels): Extension {
-	return defineExtension({
-		name: "channels",
-		tools: [
-			defineTool({
+/** `react` on the owner's chat messages. Only the owner seat's scripts get it. */
+export function reactTool(channels: Channels): ToolRegistration {
+	return defineTool({
 				name: "react",
 				description:
-					"Tapback on an owner message; none removes it. messageId is the id= in its tag, default their newest. Use it to " +
-					"acknowledge a long job, or when it says it all.",
+					"React to an owner message with a tapback. none removes it. messageId is the id= in the message tag; the default is the owner's newest message. " +
+					"Use it to acknowledge a long job, or when a reaction says everything.",
 				parameters: Type.Object({
 					reaction: Type.Union([...REACTIONS, "none"].map((reaction) => Type.Literal(reaction))),
 					messageId: Type.Optional(Type.String({ minLength: 1 })),
@@ -584,10 +578,8 @@ export function channelsExtension(channels: Channels): Extension {
 					if (channel.react === undefined) throw new Error(`The ${target.channel} channel does not support reactions.`);
 					await channel.react(target.messageId, args.reaction);
 					const done = args.reaction === "none" ? "Removed the reaction" : `Reacted ${args.reaction}`;
-					return { content: [{ type: "text", text: `${done} on ${target.channel} message ${target.messageId}.` }] };
+					return { output: [{ type: "text", text: `${done} on ${target.channel} message ${target.messageId}.` }] };
 				},
-			}),
-		],
 	});
 }
 

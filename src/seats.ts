@@ -11,7 +11,8 @@ import {
 	type ToolRegistration,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { codeTool, type CodeDeps, type ScriptFn } from "./code/code.ts";
+import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
+import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 
 /**
  * A seat is the kind of conversation, stored in its agent and written only here.
@@ -26,34 +27,36 @@ export type Seat = (typeof SEATS)[number];
 const ALL = SEATS;
 const OWNER: readonly Seat[] = ["owner"];
 const OWNER_AND_RUN: readonly Seat[] = ["owner", "run"];
+/** A user's thread never reaches the owner's apps: Executor approvals are accepted without asking. */
+const OWNER_RUN_WORKER: readonly Seat[] = ["owner", "run", "worker"];
 
-/** Every tool mochi defines and the seats that get it. */
+/** The tools the model calls directly, and the seats that get each. Their `control` (handoff, terminate) works only on a model-issued call. */
 export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
-	read: ALL,
-	bash: ALL,
-	edit: ALL,
-	write: ALL,
-	code: ALL,
-	note: OWNER,
-	recall: ALL,
-	react: OWNER,
+	codemode: ALL,
 	notify: ["run"],
 	handoff: ["owner", "user"],
 };
 
 /** Caps, in characters, on each seat's tool schemas and each prompt section. A description that grows past one fails the build. */
 export const BUDGET: { readonly tools: Readonly<Record<Seat, number>>; readonly sections: Readonly<Record<string, number>> } = {
-	tools: { owner: 8600, run: 7000, worker: 5200, user: 5500 },
-	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000 },
+	tools: { owner: 3000, run: 3000, worker: 2600, user: 3000 },
+	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000, codemode: 9000 },
 };
 
-/** Every script function and the seats whose `code` can call it. Inline ones are declared; the rest are found with search(). */
+/** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. */
 export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readonly inline: boolean }>> = {
+	read: { seats: ALL, inline: true },
+	bash: { seats: ALL, inline: true },
+	edit: { seats: ALL, inline: true },
+	write: { seats: ALL, inline: true },
+	recall: { seats: ALL, inline: true },
+	note: { seats: OWNER, inline: true },
+	react: { seats: OWNER, inline: true },
 	web_search: { seats: ALL, inline: true },
 	web_fetch: { seats: ALL, inline: true },
 	llm: { seats: ALL, inline: true },
-	apps_search: { seats: ALL, inline: true },
-	apps_call: { seats: ALL, inline: true },
+	apps_search: { seats: OWNER_RUN_WORKER, inline: true },
+	apps_call: { seats: OWNER_RUN_WORKER, inline: true },
 	agent: { seats: OWNER, inline: true },
 	agent_start: { seats: OWNER, inline: true },
 	trigger_add: { seats: OWNER, inline: true },
@@ -61,7 +64,7 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	trigger_remove: { seats: OWNER_AND_RUN, inline: false },
 	web_map: { seats: ALL, inline: false },
 	classify: { seats: ALL, inline: false },
-	apps_skills: { seats: ALL, inline: false },
+	apps_skills: { seats: OWNER_RUN_WORKER, inline: false },
 	agent_send: { seats: OWNER, inline: false },
 	agent_stop: { seats: OWNER, inline: false },
 	agent_status: { seats: OWNER, inline: false },
@@ -92,14 +95,35 @@ export function selection(seat: Seat): string[] {
 
 const drift = (names: readonly string[], table: object): string[] => [...names.filter((name) => !Object.hasOwn(table, name)), ...Object.keys(table).filter((name) => !names.includes(name))];
 
-/** One `seat-<seat>` extension per seat, with a `code` over the seat's functions. Throws when the tables and the definitions disagree. */
-export function seatExtensions(tools: readonly ToolRegistration[], fns: readonly ScriptFn[], code: CodeDeps): Extension[] {
-	const disagree = [...drift([...tools.map((tool) => tool.name), "code"], SURFACE), ...drift(fns.map((fn) => fn.name), LIBRARY)];
+/** Longest script run, set when a script names no `timeout_ms` of its own. */
+export const SCRIPT_DEADLINE_MS = 10 * 60_000;
+const SCRIPT_MEMORY_BYTES = 256 * 1024 * 1024;
+
+/** A script with no options line gets the default deadline, so a hung call never holds a turn forever. */
+export function withDeadline(code: string, deadlineMs: number): string {
+	if (code.trimStart().startsWith("// @options:")) return code;
+	return `// @options: {"timeout_ms": ${deadlineMs}}\n${code}`;
+}
+
+/**
+ * One `seat-<seat>` extension per seat: its model tools, `codemode` with its prompt section, and the library tools its
+ * scripts may call. Throws when the tables and the definitions disagree.
+ */
+export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], deadlineMs = SCRIPT_DEADLINE_MS): Extension[] {
+	const codemode = createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: SCRIPT_MEMORY_BYTES }), models: false });
+	const tool = codemode.tools![0]!;
+	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code, deadlineMs) }, api, context) };
+	const disagree = [...drift([...modelTools.map((each) => each.name), "codemode"], SURFACE), ...drift(library.map((each) => each.name), LIBRARY)];
 	if (disagree.length > 0) throw new Error(`SURFACE, LIBRARY and the definitions disagree on ${disagree.join(", ")}.`);
 	return SEATS.map((seat) => {
-		const callable = fns.filter((fn) => LIBRARY[fn.name]!.seats.includes(seat));
-		const library = { inline: callable.filter((fn) => LIBRARY[fn.name]!.inline), tail: callable.filter((fn) => !LIBRARY[fn.name]!.inline) };
-		return defineExtension({ name: `seat-${seat}`, tools: [...tools.filter((tool) => SURFACE[tool.name]!.includes(seat)), codeTool(library, code)] });
+		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat));
+		const scripted: ToolRegistration[] = [];
+		for (const each of library) {
+			const entry = LIBRARY[each.name]!;
+			if (!entry.seats.includes(seat)) continue;
+			scripted.push(entry.inline ? { ...each, callers: ["tools"] } : { ...each, callers: ["tools"], deferred: true });
+		}
+		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted], sections: codemode.sections ?? [] });
 	});
 }
 

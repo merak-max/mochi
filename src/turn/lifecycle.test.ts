@@ -42,7 +42,7 @@ test("the proposed notify return terminates after queueing without a narration r
 			...tool,
 			execute: async (args, api, context) => {
 				const result = await tool.execute!(args, api, context);
-				const held = result.content?.some((part) => part.type === "text" && part.text.startsWith("Not sent:"));
+				const held = result.output?.some((part) => part.type === "text" && part.text.startsWith("Not sent:"));
 				return held ? result : { ...result, control: { terminate: true } };
 			},
 		}));

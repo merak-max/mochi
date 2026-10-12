@@ -131,7 +131,7 @@ test("native publisher consumes committed edits and note output distinguishes du
 	const repo = join(dir, "memory");
 	const faux = newFaux();
 	faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("note", draft("Biscuit")), { stopReason: "toolUse" }),
+		fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.note(${JSON.stringify(draft("Biscuit"))});` }), { stopReason: "toolUse" }),
 		fauxAssistantMessage("done"),
 	]);
 	const mochi = await openTestMochi(dir, faux, undefined, undefined, undefined, { memory: { repo } });

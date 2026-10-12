@@ -104,7 +104,8 @@ export async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "n
 	].join("\n");
 }
 
-async function abortTargets(deps: CommandDeps, target: Conversation, context: Context) {
+/** What a command aborts in the target and the conversations its work owns. /new keeps background work: processes and background agents. */
+async function abortTargets(deps: CommandDeps, target: Conversation, command: Command, context: Context) {
 	const graph = await deps.harness.taskGraph(context);
 	try {
 		const owned = new Set([target.id]);
@@ -116,7 +117,12 @@ async function abortTargets(deps: CommandDeps, target: Conversation, context: Co
 				for (const id of task.conversations) if (!owned.has(id)) { owned.add(id); added = true; }
 			}
 		}
-		const tasks = Object.values(graph.value.tasks).filter((task) => owned.has(task.conversationId)).map((task) => task.id);
+		const tasks = [];
+		for (const task of Object.values(graph.value.tasks)) {
+			if (!owned.has(task.conversationId)) continue;
+			if (command === "new" && task.background) continue;
+			tasks.push(task.id);
+		}
 		const submissions = (await deps.harness.inspect(context)).submissions.filter((submission) => owned.has(submission.conversationId)).map((submission) => submission.id);
 		return { tasks, submissions, running: tasks.length > 0 || submissions.length > 0 };
 	} finally {
@@ -142,7 +148,7 @@ export function commandTask(deps: CommandDeps) {
 					const text = await statusText({ ...deps, root: target }, context);
 					return runtime.commit(() => ({ status: "running", checkpoint: { phase: "reply", text, submission: null } }), context);
 				}
-				const targets = await abortTargets(deps, target, context);
+				const targets = await abortTargets(deps, target, task.input.command, context);
 				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "abort", ...targets } }), context);
 			},
 			abort: async (task, runtime, context) => {

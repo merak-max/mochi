@@ -14,10 +14,10 @@ These were decided with the owner. Do not reopen them in code review.
 | Brain | `anthropic/claude-opus-5-5` through Bifrost at `https://bifrost.shau.me/anthropic` with `x-bf-vk: $BIFROST_VIRTUAL_KEY`. Mochi holds no Anthropic credential and does no Claude Code impersonation. |
 | Fast model | `azure/gpt-6-luna` through Bifrost's OpenAI route, for subagents and summaries. |
 | Classifier | TypeSafe Jev (`typesafe/jev-1.13`) through OpenRouter directly with `OPENROUTER_API_KEY`, for yes/no and pick-one decisions before an Opus step. Not through Bifrost. |
-| Tools | Executor MCP (`https://executor.shau.me/mcp`) supplies the owner's app tools and the logged-in Firecrawl browser. pi-durable's `CodingTools` supply bash, read, edit and write, inside mochi's environment boundary (`src/env/`). Mochi builds notes, history search, and `code`, whose script functions cover web search/fetch/map on its own Firecrawl key, the fast model, the classifier, the owner's apps, subagents and triggers. |
+| Tools | Executor MCP (`https://executor.shau.me/mcp`) supplies the owner's app tools and the logged-in Firecrawl browser. pi-durable's `CodingTools` supply bash, read, edit and write, inside mochi's environment boundary (`src/env/`). Mochi builds notes, history search, and the library that pi-durable's `codemode` calls, which covers web search/fetch/map on its own Firecrawl key, the fast model, the classifier, the owner's apps, subagents and triggers. |
 | Approvals | None. |
 | Memory | Typed notes in one rewindable pi-durable document, `mochi.memory`, plus one SQLite FTS5 index over notes and past chats. No memory framework. No auto-generated skills. |
-| Browser | Plain web reading: mochi's own `web_*` functions inside `code` on `FIRECRAWL_API_KEY`, ported from `~/.pi/agent/extensions/firecrawl-web`. Logged-in browsing: Firecrawl through Executor; scrape with a persistent `profile` first, then interact. |
+| Browser | Plain web reading: mochi's own `web_*` tools inside `codemode` on `FIRECRAWL_API_KEY`, ported from `~/.pi/agent/extensions/firecrawl-web`. Logged-in browsing: Firecrawl through Executor; scrape with a persistent `profile` first, then interact. |
 | pstack | Bundled and trimmed to an assistant set in `skills/` and `agents/`. Mochi loads skills as on-demand instructions and runs `agents/*.md` as subagent types. |
 | Harness | Opus 5.5 is a strong model, so the harness stays minimal: no guard, validator or second-guess layers around the model. pi-durable features are used where they delete mochi code or add a capability. |
 | Tool names | Never `memory`, `session_search`, or a single-underscore `mcp_` prefix. Anthropic's billing classifier flags them. |
@@ -81,9 +81,8 @@ src/
     tui.ts             the TUI
     lines.ts           chat, print and JSON modes
   mochi.ts             openMochi: Harness.open, registry, environments, root and the line
-  seats.ts             SURFACE (each tool's seats), LIBRARY (each script function's seats), BUDGET (each seat's tool bytes and each section's characters), the seat-<seat> extensions with their code tool, createSeatConversation, the root seat
-  code/
-    code.ts            code tool, mochi.call (one durable child task per nested call), Journal and journaled (extension "work" carries mochi.call)
+  seats.ts             SURFACE (model tools), LIBRARY (script tools), BUDGET, the seat-<seat> extensions with codemode, createSeatConversation, the root seat
+  journal.ts           Journal and journaled: a task-scoped record of what a call created
   apps/
     apps.ts            Executor MCP connection and the apps_search, apps_call, apps_skills functions
   brain/
@@ -116,8 +115,6 @@ src/
     imessage.ts        Photon spectrum-ts, IMESSAGE_PROFILE, catch-up and the probe-only judge
   turn/
     turn.ts            ingest, the Turn task, claims and channel chain, react (extension "channels"), delivery (extension "delivery")
-  code/
-    code.ts            Journal and journaled: a task-scoped record of what a call created
   upgrade.ts           boot steps converting older live data (outbox to Turns, root seat, triggers to tasks, draining the old agent kinds, aborting a rollover checkpoint turn)
   triggers/            cron, once and webhook triggers, with classifier gates (see Jobs and webhooks)
 eval/                  live scenario eval, see Eval
@@ -199,24 +196,32 @@ The pre-2026-10-05 `data/notes/<slug>.md` files are no longer read. A store that
 
 ## Tools the model sees
 
-Each conversation has a seat, written by `createSeatConversation` (the only caller of `createConversation`) or, for root, by the `root-seat` boot step: `owner` (root), `run` (a trigger run or a background agent), `worker` (a foreground agent), `user` (a user's iMessage thread). `SURFACE` in `src/seats.ts` lists each tool's seats and `LIBRARY` each script function's, and opening mochi fails when either disagrees with the definitions. Root has no `notify`; only root has `react` and, inside `code`, the agent functions and `trigger_add`; `worker` also has no `note`, `notify` or trigger tools. `user` has `handoff` but no `note`, `react`, `notify`, agent or trigger tools, and its selection leaves out the `notes` extension, so the owner's notes are not in a user's prompt. A conversation without a seat gets the `worker` selection. `node eval/surface.ts` prints each seat's list.
+Each conversation has a seat, written by `createSeatConversation` (the only caller of `createConversation`) or, for root, by the `root-seat` boot step: `owner` (root), `run` (a trigger run or a background agent), `worker` (a foreground agent), `user` (a user's iMessage thread). A conversation without a seat gets the `worker` selection. `node eval/surface.ts` prints each seat's list.
 
-| Tool | Extension | Behavior |
+The model sees at most three tools. `SURFACE` in `src/seats.ts` lists them:
+
+| Tool | Seats | Behavior |
 |---|---|---|
-| `note` | memory | Create or replace one note in `mochi.memory`, with the calling turn's assistant entry as its source; an empty `body` forgets it. Refuses a credential (secret scan), an edit or removal of an `owner` note, and a write that would push the always-in-prompt notes (`user`, `rule`) past 4,000 characters total, so the model has to consolidate. `replay: "safe"`. |
-| `recall` | memory | With `query`: FTS5 BM25 search over past chat text and notes, optional `after`, `before`, `limit` (default 10, at most 30). Chat hits are snippets with entry ids and timestamps, leaving out the caller's entries still in its context; note hits carry the whole note. Subagent and scheduler conversations rank below the root. With `entry`: the five entries before and after it. With `asOf` (date or timestamp): every note as it stood then. `replay: "safe"`. |
-| `bash`, `read`, `edit`, `write` | CodingTools | pi-durable's coding tools in the conversation's environment, `data/work` unless the agent sets a `cwd`, with the daemon's full access. Long work keeps its files in `data/work/<slug>/`. |
-| `react` | channels | Tapback on an owner message. Arguments: `reaction`, one of `love`, `like`, `dislike`, `laugh`, `emphasize`, `question`, or `none` to remove it, and optional `messageId` (default: the owner's newest chat message, from `mochi.last-inbound`). Each channel maps the six to its own reaction. An explicit id is found by its request key on each running channel. Fails with a clear error on a channel without `react`. `replay: "safe"`. |
-| `code` | seat-<seat> | JavaScript in a QuickJS sandbox (`@earendil-works/pi-codemode`). Every `tools.<fn>(args)` call is a `mochi.call` child task of the call's task, created in the commit that records its key (`<fingerprint>#<occurrence>`, counted when the script makes the call) in the task's `mochi.journal`, so after a restart the script reruns and finished calls return their recorded result. At most 8 children per script, taken before each is created. A script stops after 10 minutes and aborts its live children. Each function declares a replay rule: `read` and `keyed` rerun after a crash mid-call, `once` (`apps_call`) completes "interrupted" and never reruns. A failed script lists the `once` calls that completed. `store`/`load` persist in `mochi.codemode-store`. 256 MB, 40,000 output characters. `replay: "safe"`. The description declares each inline function with its return type; `search(query)` returns the rest. |
+| `codemode` | all | pi-durable's durable code mode (`@earendil-works/pi-durable/codemode`). The model writes JavaScript that calls the seat's library as `await tools.<name>(args)` in a QuickJS sandbox. Each call is a nested `pi.tool` task of the codemode call. After a restart, the script replays from a journal of the results it got and continues; finished calls do not run again. A nested call running at the crash follows its own `replay`: `safe` reruns, `unsafe` returns an interrupted error. A script with no `// @options:` line gets a 10-minute `timeout_ms`. 256 MB. `store`/`load` persist per conversation in `pi.codemode.store`. The `codemode` prompt section declares the inline library tools; `searchTools()` finds the deferred ones. |
+| `notify` | run | Send a message to the owner or the trigger's recipients. Ends the run with `control.terminate`, which works only on a model-issued call, so it stays outside code mode. |
+| `handoff` | owner, user | Start a fresh context from a note. Uses `control.handoff`, which works only on a model-issued call. |
 
-Script functions, every seat today (`LIBRARY`):
+The library, `LIBRARY` in `src/seats.ts`: every other tool, registered with `callers: ["tools"]` so only scripts call it. Opening mochi fails when `SURFACE` or `LIBRARY` disagrees with the definitions. Only root has `react`, `note`, the agent tools and `trigger_add`. `worker` has no `note` or trigger tools. `user` has no `note`, `react`, agent, trigger or app tools, and its selection leaves out the `notes` extension, so the owner's notes are not in a user's prompt.
 
-| Function | Replay | Behavior |
+| Tool | Replay | Behavior |
 |---|---|---|
-| `web_search`, `web_fetch`, `web_map` | read | Firecrawl v2 with mochi's key, which bash never gets. Search returns `{ title, url, snippet }` per deduped hit; fetch returns the page cleaned with Defuddle, or with `instruction` only the extract from the fast model; map returns URLs. |
-| `llm` | read | One fast-model completion with no tools (the RLM pattern: slices of data go to the cheap model, only results reach Opus). A batch is `Promise.all`. |
-| `classify` | read | Typed `bool`, `choice` or `score` questions about a JSON object, answered by Jev with probabilities. Used to triage and to try a trigger gate on sample payloads before `trigger_add`. |
-| `apps_search`, `apps_call`, `apps_skills` | read, once, read | Executor's `execute` running `tools.search` or one tool by path, and Executor's `skills`. Executor approval prompts are declined. The guide is `skills/apps/SKILL.md`. |
+| `note` | safe | Create or replace one note in `mochi.memory`, with the codemode call's assistant entry as its source; an empty `body` forgets it. Refuses a credential (secret scan), an edit or removal of an `owner` note, and a write that would push the always-in-prompt notes (`user`, `rule`) past 4,000 characters total. |
+| `recall` | safe | With `query`: FTS5 BM25 search over past chat text and notes, optional `after`, `before`, `limit` (default 10, at most 30). Chat hits are snippets with entry ids and timestamps; note hits carry the whole note. Subagent and scheduler conversations rank below the root. With `entry`: the five entries before and after it. With `asOf`: every note as it stood then. |
+| `bash`, `read`, `edit`, `write` | pi-durable | pi-durable's coding tools in the conversation's environment, `data/work` unless the agent sets a `cwd`, with the daemon's full access. `bash` resolves in scripts to `{ output, truncated, exitCode }`. `read` returns images through pi-durable's Photon processor; HEIC, HEIF, AVIF and TIFF go through ffmpeg first. |
+| `react` | safe | Tapback on an owner message: `love`, `like`, `dislike`, `laugh`, `emphasize`, `question`, or `none`, and optional `messageId` (default: the owner's newest chat message). |
+| `web_search`, `web_fetch`, `web_map` | safe | Firecrawl v2 with mochi's key, which bash never gets. Search returns `{ title, url, snippet }`; fetch returns the page cleaned with Defuddle, or with `instruction` only the extract from the fast model; map returns URLs. |
+| `llm` | safe | One fast-model completion with no tools. A batch is `Promise.all`. |
+| `classify` | safe | Typed `bool`, `choice` or `score` questions about a JSON object, answered by Jev with probabilities. |
+| `apps_search`, `apps_call`, `apps_skills` | safe, unsafe, safe | Executor's `execute` running `tools.search` or one tool by path, and Executor's `skills`. Executor approval prompts are accepted, up to 20 per call. The guide is `skills/apps/SKILL.md`. |
+| `browse`, `browse_fast`, `image_gen`, `video_gen`, `speak`, `gif_save` | unsafe | Paid or outward effects; a crash mid-call reports interrupted. |
+| `transcribe`, `gif_search`, `proc_status`, `proc_logs` | safe | Reads. |
+| `proc_start`, `proc_stop` | unsafe, safe | Background processes; see Long work. |
+| agent and trigger tools | see below | |
 
 ## System prompt
 
@@ -255,7 +260,7 @@ Three kinds of work start without the owner typing. All three share one rule: **
 
 A trigger's `notify` field lists recipient ids: `user1` is the owner, and `user2` and up are configured users. The default is `["user1"]`. One `notify` call checks `notifyWhen` once, then opens one Turn per recipient; a user's Turn goes on iMessage. Root's `channels` section lists the users by id, so mochi can choose recipients.
 
-Triggers are the main agent's way to run itself later: root creates them with `trigger_add` inside `code`, and a trigger run may remove its own trigger but not add one. There is no built-in heartbeat; a periodic check is a `cron` trigger the model or config creates.
+Triggers are the main agent's way to run itself later: root creates them with `trigger_add` inside `codemode`, and a trigger run may remove its own trigger but not add one. There is no built-in heartbeat; a periodic check is a `cron` trigger the model or config creates.
 
 ### Triggers
 
@@ -283,7 +288,7 @@ Each trigger is one durable `mochi.trigger` task, a background task of the trigg
 - `requestId` is `<kind>:<id>:<slot ISO>` or `webhook:<id>:<delivery id>`. A restart inside a slot never double-fires. A cron slot more than 15 minutes late (downtime) is recorded `missed`; a `once` always fires, late if it must.
 - A run still going 30 minutes after it started is aborted (the conversation's ordinary scope; the trigger task is background and survives) and recorded `timed-out`, so a hung run cannot block later slots.
 - `trigger_remove` aborts the trigger task, never its conversation, so a run that removes its own trigger finishes its turn.
-- The trigger conversation has seat `run`, root's model and thinking level, written when it is created: `notify`, and `trigger_list` and `trigger_remove` inside `code`; no `react`, `agent` or `trigger_add`.
+- The trigger conversation has seat `run`, root's model and thinking level, written when it is created: `notify`, and `trigger_list` and `trigger_remove` inside `codemode`; no `react`, `agent` or `trigger_add`.
 
 ### Gates
 
@@ -302,13 +307,13 @@ Each trigger is one durable `mochi.trigger` task, a background task of the trigg
 
 ### Tools
 
-`notify` is a direct tool of seat `run`. The trigger verbs are script functions inside `code`: `trigger_add` for root only, `trigger_list` and `trigger_remove` for root and runs.
+`notify` is a direct tool of seat `run`. The trigger verbs are script functions inside `codemode`: `trigger_add` for root only, `trigger_list` and `trigger_remove` for root and runs.
 
-Subagents are one task kind, `mochi.agent`, started only from root's `code`, so every agent sits one level below root. The child conversation is created in the task's commit by `createSeatConversation`, with the `agents/<type>.md` body as instructions and the type's or the call's `model` (a tier `fast`, `default`, `strongest`, an alias, or `provider/id`) and `thinking`. The task submits the brief under requestId `agent:<task id>` and settles with the answer text; the creating call journals it under `agent`, so a rerun finds the same task and child.
+Subagents are one task kind, `mochi.agent`, started only from root's `codemode`, so every agent sits one level below root. The child conversation is created in the task's commit by `createSeatConversation`, with the `agents/<type>.md` body as instructions and the type's or the call's `model` (a tier `fast`, `default`, `strongest`, an alias, or `provider/id`) and `thinking`. The task submits the brief under requestId `agent:<task id>` and settles with the answer text; the creating call journals it under `agent`, so a rerun finds the same task and child.
 
 | Function | Contract |
 |---|---|
-| `agent` | `{ name, brief, type?, model?, thinking? }`, `type` defaulting to `worker`. Foreground: the task is owned by the `mochi.call` task, so Esc cascades to it and its child, and the call resolves to the answer. Child seat `worker`. |
+| `agent` | `{ name, brief, type?, model?, thinking? }`, `type` defaulting to `worker`. Foreground: the task is owned by the nested `agent` tool call, so Esc cascades to it and its child, and the call resolves to the answer. Child seat `worker`. |
 | `agent_start` | Same arguments. Background task of root: only `/stop` reaches it. Returns `{ name }` at once. Child seat `run`, so it may `notify` the owner; it writes nothing into root, and an agent with nothing to say finishes silent. |
 | `agent_send` | `{ name, brief }`: steer a running agent (`whenBusy: "steer"`, requestId `send:<call task id>`). A finished agent is refused; start a fresh one with its last answer. |
 | `agent_stop` | `{ name }`: `abortTask` on the newest agent with that name. |
@@ -445,9 +450,10 @@ Mochi publishes typed durable notes into a separate local Cognition-style memory
 | 2026-10-06 | One channel interface (architect U4). Adapters take bubbles, typed reactions and `typing(on)`, throw `ChannelDown`, `SendUnknown` or `SendRejected`, and return `Setup<Channel>` from the `ADAPTERS` table in `main.ts`; `present()` turns a reply into at most three bubbles on iMessage. `cli` is no longer a channel, and adapters drop the sender. | The Turn (U5) needs one error class per outcome to decide retry, retry once, or skip. The owner asked for few short bubbles and silence by default; `present()` and the profile are where that lives, as data and one pure function with table tests. Multi-bubble replies can repeat earlier bubbles after a crash until U5 checkpoints each bubble. |
 | 2026-10-06 | The Turn replaces the Router (architect U5). One `mochi.turn` task per owed message, a background task of the ownerless line conversation; `ingest` is the one inbound path; claims, the per-channel chain and the per-bubble checkpoint are documents and checkpoints; `notify` opens a Turn and the record follows the send. `mochi.outbox`, `mochi.route` and the Router's in-memory tracking are gone, converted at boot by `src/upgrade.ts`. | Exactly-once and ordered delivery across a SIGKILL at each phase (`src/turn/crash.test.ts`), `/stop` cannot drop an owed reply, and the live store's outbox converts. The owner ruling: no progress chatter, silence by default, a blank answer sends nothing. |
 | 2026-10-06 | Seats (architect U6). Every conversation's seat, model and thinking level are written when it is created, never inherited; root has no `notify` and is the only seat that starts agents or adds triggers, so agents nest one level; `SURFACE` replaces the trigger conversation's `EXCLUDED_EXTENSIONS` and the agent depth limit. The `root-seat` boot step seats the existing root. | On the real Harness a task-owned conversation copied root's agent and an ownerless one had no model (architect `check/spike/seat-probe.out`). Live-store copy: after boot root holds the owner seat, no `notify`, still `claude-opus-5-5` at `medium`. |
-| 2026-10-06 | One agent task (architect U9). `agent`, `send_message`, `list_agents` and `stop_agent` leave the surface; `mochi.agent` with `agent`, `agent_start`, `agent_send`, `agent_stop`, `agent_status` inside root's `code` replaces them, and scripts can fan out subagents again. The Anchor and Reporter tasks and the `mochi.agents` and `mochi.agent-depth` documents are gone; the `drain-agent-kinds` boot step settles live ones `orphaned` and retires the documents. Root goes from 12 tools to 8. | Owner ruling: nothing posts into root. A background agent reaches the owner only with `notify`, which leaves one passive record in root; root asks with `agent_status`. |
-| 2026-10-06 | The `code` door (architect U7). `codemode`, `web_*`, `classify`, `x_execute` and `x_skills` leave the surface; their capabilities are script functions inside `code`, each nested call a durable `mochi.call` child task keyed in the call's journal. Executor is one connection that never reinstalls an extension. Root goes from 19 tools to 15. | A crash mid-script no longer repeats an app action: an interrupted `apps_call` reports "interrupted" (gate test `src/code/code.gate.test.ts`, SIGKILL in a subprocess). Executor flapping changed root's tool list before; now nothing the model sees depends on it. |
+| 2026-10-06 | One agent task (architect U9). `agent`, `send_message`, `list_agents` and `stop_agent` leave the surface; `mochi.agent` with `agent`, `agent_start`, `agent_send`, `agent_stop`, `agent_status` inside root's `codemode` replaces them, and scripts can fan out subagents again. The Anchor and Reporter tasks and the `mochi.agents` and `mochi.agent-depth` documents are gone; the `drain-agent-kinds` boot step settles live ones `orphaned` and retires the documents. Root goes from 12 tools to 8. | Owner ruling: nothing posts into root. A background agent reaches the owner only with `notify`, which leaves one passive record in root; root asks with `agent_status`. |
+| 2026-10-06 | The `code` door (architect U7). `codemode`, `web_*`, `classify`, `x_execute` and `x_skills` leave the surface; their capabilities are script functions inside `codemode`, each nested call a durable `mochi.call` child task keyed in the call's journal. Executor is one connection that never reinstalls an extension. Root goes from 19 tools to 15. | A crash mid-script no longer repeats an app action: an interrupted `apps_call` reports "interrupted" (gate test `src/code/code.gate.test.ts`, SIGKILL in a subprocess). Executor flapping changed root's tool list before; now nothing the model sees depends on it. |
 | 2026-10-06 | One context policy and an event-fed index (architect U10). The nightly rollover is gone; pi-durable's built-in compaction, with its settings written out in `openMochi`, is the only context policy. The 5-second indexer poll became `subscribeCommits` plus a catch-up from each conversation's entry cursor at start. The `retire-rollover` boot step aborts a checkpoint turn left in flight. | Owner decision 2: the checkpoint turn was background work writing into root, which the 2026-10-06 ruling rules out. A message is searchable as soon as it commits; deleting `index.sqlite` still rebuilds it. |
 | 2026-10-06 | The surface has a budget and boot reports readiness (architect U11). `BUDGET` caps each seat's tool bytes and each prompt section; `src/seats.test.ts` fails past a cap. Descriptions were trimmed to fit (root 8,535 to 8,258 tool bytes; skills-index 2,099 to 1,960 characters, every bundled description now uncut). Boot logs one `setup` line per boundary: models, classifier, firecrawl, executor and each channel, with the fix for a broken one. | The surface can no longer grow past its caps without a failing build, and a missing key or login is named at boot instead of at the first failing call. |
 | 2026-10-06 | The iMessage line (architect U12). The adapter supervises its own connection: it catches up from `mochi.inbound-cursor` (written by the ingest commit) on every connect and every 10 minutes when the app offers `catchUp`, probes after 5 silent minutes with a `getMessage` round trip, and rebuilds on an ended stream or two failed probes, with `send` throwing `ChannelDown` meanwhile. A rebuild only logs `imessage.rebuilt`; silence alone never rebuilds. | Owner ruling: never message the owner about channel health. Spectrum 12.10.1 does not expose the advanced-imessage client or live event sequences, so the production app has no `catchUp` yet and the cursor stays empty; the replay path is proven only against a fake event log. |
 | 2026-10-06 | The jail, the file-tool allow-list, `grants`, `mochi grants`, `MOCHI_JAIL` and the eval probe are removed (supersedes U2). bash, read, edit and write have the daemon user's full access: every path, the whole environment, the network. Eval processes run unsandboxed. Only the 600-second default bash timeout stays. | Owner's call: a model that is trusted with the owner's life is not boxed in on the owner's own machine. bash went from 123 ms to 8 ms per call (eval/bench.ts). Known cost: a prompt injection in a web page, email or webhook can reach `~/.ssh`, `~/.aws`, `data/`, API keys and the EC2 metadata service, and an eval run can touch the owner's real accounts, as the Todoist incident did. |
+

@@ -11,9 +11,10 @@ import {
 	type Registry,
 	type Storage,
 	type TaskId,
+	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { mochiCodingTools } from "./media/read-image.ts";
+import { codingTools } from "./media/read-image.ts";
 import type { Channels } from "./channels/types.ts";
 import { workEnv } from "./env/work-env.ts";
 import type { SearchIndex } from "./index/fts.ts";
@@ -21,12 +22,11 @@ import type { Log } from "./log.ts";
 import type { AgentCatalog } from "./agents/catalog.ts";
 import { agentFns, AgentTask } from "./agents/subagent.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
-import { callTask, SCRIPT_DEADLINE_MS } from "./code/code.ts";
 import { noteTool, notesExtension, readMemory, recallTool, sortedNotes } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
-import { defaultSelection, seatExtensions } from "./seats.ts";
-import { channelsExtension, defineTurn, ensureLine, type Line, openTurn, RETRY, type Retry } from "./turn/turn.ts";
+import { defaultSelection, seatExtensions, SCRIPT_DEADLINE_MS } from "./seats.ts";
+import { reactTool, defineTurn, ensureLine, type Line, openTurn, RETRY, type Retry } from "./turn/turn.ts";
 import { UPGRADES } from "./upgrade.ts";
 import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
@@ -102,6 +102,7 @@ const COMPACTION: CompactionPolicy = { enabled: true, reserveTokens: 16_384, kee
 
 export async function openMochi(options: MochiOptions, context: Context): Promise<Mochi> {
 	const { index, log } = options;
+	const users = options.users ?? [];
 	const dreaming = dreamConfig(options.memory?.dreaming, options.timeZone);
 	const registry = createRegistry();
 	const fast = fastCompletion(options.models, options.fast);
@@ -111,19 +112,20 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		if (line === undefined) throw new Error("The line is bound before resume.");
 		return line;
 	};
-	const providers = [
-		mochiCodingTools(options.models),
-		defineExtension({ name: "memory", tools: [noteTool({ index, today: options.today }), recallTool(index)] }),
-		channelsExtension(options.channels),
-		defineExtension({ name: "notify", tools: [notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users: options.users ?? [] })] }),
-		defineExtension({ name: "handoff", tools: [handoffTool()] }),
+	const modelTools: ToolRegistration[] = [
+		notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users }),
+		handoffTool(),
 	];
 	const now = options.now ?? (() => new Date());
 	const dream = defineDream({ models: { brain: options.brain, fast: options.fast }, today: options.today, log });
 	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
-	const fns = [
+	const library: ToolRegistration[] = [
+		...(await codingTools()),
+		noteTool({ index, today: options.today }),
+		recallTool(index),
+		reactTool(options.channels),
 		...webFns({ apiKey: options.firecrawlKey, models: options.models, fast: options.fast }),
 		...browserFns({ apiKey: options.firecrawlKey, profile: options.firecrawlProfile }),
 		...fastBrowserFns({ apiKey: options.firecrawlKey, profile: options.firecrawlProfile, models: options.models, fast: options.fast, classify: options.classify }),
@@ -132,24 +134,20 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
 		...agentFns({ catalog: options.agents, read: (read, context) => harness.commit(read, context), abortTask: (id, context) => harness.abortTask(id, context) }),
-		...triggerFns({ task: trigger, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users: options.users ?? [] }),
+		...triggerFns({ task: trigger, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users }),
 		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 	];
-	const call = callTask(new Map(fns.map((fn) => [fn.name, fn])));
-	const code = { call, concurrency: 8, deadlineMs: options.scriptDeadlineMs ?? SCRIPT_DEADLINE_MS, abortTask: (id: TaskId, context: Context) => harness.abortTask(id, context) };
 	for (const extension of [
-		identityExtension([...options.channels.values()].map((channel) => channel.profile), options.users ?? []),
+		identityExtension([...options.channels.values()].map((channel) => channel.profile), users),
 		notesExtension(),
 		skillsExtension(options.skillsDir),
 		compactionExtension(fast),
-		...providers,
-		defineExtension({ name: "work", tasks: [call] }),
 		defineExtension({ name: "agents", tasks: [AgentTask] }),
 		defineExtension({ name: "procs", tasks: [procWatch] }),
 		defineExtension({ name: "memory-maintenance", tasks: [PublisherTask, dream] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
-		...seatExtensions(providers.flatMap((extension) => extension.tools ?? []), fns, code),
+		...seatExtensions(modelTools, library, options.scriptDeadlineMs ?? SCRIPT_DEADLINE_MS),
 	]) {
 		registry.install(extension);
 	}
@@ -176,7 +174,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 
 	const root = await harness.root(context, { agent: { model: options.brain, thinkingLevel: "medium" } });
 	await root.configure({ model: options.brain, ...(options.persona === undefined ? {} : { instructions: options.persona }) }, context);
-	const turn = defineTurn({ root, harness, users: options.users ?? [], channels: options.channels, workDir: options.workDir, media, retry: options.retry ?? RETRY, log });
+	const turn = defineTurn({ root, harness, users, channels: options.channels, workDir: options.workDir, media, retry: options.retry ?? RETRY, log });
 	if (options.scheduling === "daemon") registry.install(defineExtension({ name: "delivery", tasks: [turn] }));
 	const lineId = await ensureLine(harness, context);
 	const commands = commandTask({
@@ -200,7 +198,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		timeZone: options.timeZone,
 		workDir: options.workDir,
 		media,
-		users: options.users ?? [],
+		users,
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
 		...(idleResetMinutes > 0 ? { idleReset: (conversation: Conversation, key: string, context: Context) => idleResetIfStale({ harness, fast, idleResetMinutes, now: () => now().getTime() }, conversation, key, context) } : {}),
 	};

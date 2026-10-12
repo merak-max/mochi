@@ -1,5 +1,5 @@
 import { Type } from "@earendil-works/pi-ai";
-import { defineFn, type ScriptFn } from "../code/code.ts";
+import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { MediaClient, type MediaDeps } from "./client.ts";
 
 export { MediaClient, type MediaDeps } from "./client.ts";
@@ -9,10 +9,10 @@ export { MediaConfigSchema, parseMediaConfig, type MediaConfig } from "./provide
 
 const PathResult = Type.Object({ path: Type.String() });
 
-export function mediaFns(deps: MediaDeps): ScriptFn[] {
+export function mediaFns(deps: MediaDeps): ToolRegistration[] {
 	const client = new MediaClient(deps);
 	return [
-		defineFn({
+		defineTool({
 			name: "image_gen",
 			description: `Generate an image. Models: ${deps.config.images.providers.map((provider) => `${provider.name}${provider.name === deps.config.images.default ? " (default)" : ""}`).join(", ")}. model selects a provider name. edit is an input image path. Send the returned path with a standalone attach: <path> line.`,
 			parameters: Type.Object({
@@ -21,11 +21,11 @@ export function mediaFns(deps: MediaDeps): ScriptFn[] {
 				model: Type.Optional(Type.String({ minLength: 1 })),
 				edit: Type.Optional(Type.String({ minLength: 1 })),
 			}),
-			output: PathResult,
-			replay: "once",
-			run: async (args, _call, context) => ({ value: await client.image(args, context.abortSignal) }),
+			structuredOutputSchema: PathResult,
+			replay: "unsafe",
+			execute: async (args, _api, context) => ({ structuredOutput: await client.image(args, context.abortSignal) }),
 		}),
-		defineFn({
+		defineTool({
 			name: "video_gen",
 			description: "Generate an MP4 with the configured video model, poll and download. Costly, interrupted calls never rerun. Return a work-relative path; send it with a standalone attach: <path> line.",
 			parameters: Type.Object({
@@ -33,25 +33,25 @@ export function mediaFns(deps: MediaDeps): ScriptFn[] {
 				seconds: Type.Optional(Type.Union(["4", "8", "12"].map((seconds) => Type.Literal(seconds)))),
 				orientation: Type.Optional(Type.Union([Type.Literal("portrait"), Type.Literal("landscape")])),
 			}),
-			output: PathResult,
-			replay: "once",
-			run: async (args, _call, context) => ({ value: await client.video(args, context.abortSignal) }),
+			structuredOutputSchema: PathResult,
+			replay: "unsafe",
+			execute: async (args, _api, context) => ({ structuredOutput: await client.video(args, context.abortSignal) }),
 		}),
-		defineFn({
+		defineTool({
 			name: "speak",
 			description: "Speak English text with Deepgram Aura-2, default cordelia, a polite young female voice. Save AAC in M4A. Return a work-relative path; send it with a standalone attach: <path> line.",
 			parameters: Type.Object({ text: Type.String({ minLength: 1, maxLength: 2000 }), voice: Type.Optional(Type.String({ pattern: "^[a-z]+$" })) }),
-			output: PathResult,
-			replay: "once",
-			run: async (args, _call, context) => ({ value: await client.speak(args, context.abortSignal) }),
+			structuredOutputSchema: PathResult,
+			replay: "unsafe",
+			execute: async (args, _api, context) => ({ structuredOutput: await client.speak(args, context.abortSignal) }),
 		}),
-		defineFn({
+		defineTool({
 			name: "transcribe",
 			description: "Transcribe an audio or video file inside the work directory with Deepgram Nova-3. Return text.",
 			parameters: Type.Object({ path: Type.String({ minLength: 1 }) }),
-			output: Type.Object({ text: Type.String() }),
-			replay: "read",
-			run: async ({ path }, _call, context) => ({ value: { text: (await client.transcript(path, context.abortSignal)).text } }),
+			structuredOutputSchema: Type.Object({ text: Type.String() }),
+			replay: "safe",
+			execute: async ({ path }, _api, context) => ({ structuredOutput: { text: (await client.transcript(path, context.abortSignal)).text } }),
 		}),
 	];
 }

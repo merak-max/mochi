@@ -106,6 +106,15 @@ test("/stop aborts root background work, not ownerless triggers or line tasks", 
 	} finally { await mochi.harness.close(context); }
 });
 
+test("/new keeps root background work running", async () => {
+	const mochi = await open(await temp());
+	try {
+		const id = await mochi.harness.commit((tx) => tx.createTask(Sleeper, null, { ownership: { kind: "conversation" }, conversationId: mochi.root.id, background: true }), context);
+		await runCommand(mochi, { key: "w:n0", channel: "whatsapp", command: "new" }, context);
+		assert.notEqual((await mochi.harness.getTask(id, context))?.state.status, "terminal");
+	} finally { await mochi.harness.close(context); }
+});
+
 test("/new starts the next request from its handoff and fallback resets without it", async () => {
 	const mochi = await open(await temp());
 	try {

@@ -16,12 +16,27 @@ const tool = (name: string, args: JsonObject) => fauxAssistantMessage(fauxToolCa
 const hang = (_t: TranscriptContext, options?: { signal?: AbortSignal }) => new Promise<AssistantMessage>((_, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
 
 /** Each conversation answers its latest scripted input: one step before a tool result, one after. */
-function scripted(faux: ReturnType<typeof newFaux>, plays: Record<string, readonly [AssistantMessage | typeof hang, string]>, seen: Map<string, string[]>) {
+type Seen = { direct: string[]; scripted: string[] };
+
+/** The tools a request offers: the model's own, and the ones the `codemode` section lists for scripts. */
+function toolsOf(transcript: TranscriptContext): Seen {
+	const direct: string[] = [];
+	let section = "";
+	for (const message of transcript.messages) {
+		if (message.role !== "system") continue;
+		for (const each of message.toolsAdded ?? []) direct.push(each.name);
+		section = message.sections?.codemode ?? section;
+	}
+	const scripted = [...section.matchAll(/^### `(\w+)`$/gm)].map((match) => match[1]!);
+	return { direct, scripted };
+}
+
+function scripted(faux: ReturnType<typeof newFaux>, plays: Record<string, readonly [AssistantMessage | typeof hang, string]>, seen: Map<string, Seen>) {
 	const step = (transcript: TranscriptContext, options?: { signal?: AbortSignal }) => {
 		const { messages } = transcript;
 		const at = messages.findLastIndex((message) => message.role === "user" && Object.hasOwn(plays, messageText(message)));
 		const input = messageText(messages[at]!);
-		seen.set(input, messages.flatMap((message) => (message.role === "system" ? (message.toolsAdded ?? []).map((t) => `${t.name}:${t.description}`) : [])));
+		seen.set(input, toolsOf(transcript));
 		const [before, after] = plays[input]!;
 		if (messages.slice(at).some((message) => message.role === "toolResult")) return fauxAssistantMessage(after);
 		return typeof before === "function" ? before(transcript, options) : before;
@@ -42,23 +57,23 @@ test("agent files give instructions, model and thinking; the real catalog resolv
 
 test("a foreground agent answers through the calling script, in seat worker with no agent functions", async () => {
 	const faux = newFaux();
-	const seen = new Map<string, string[]>();
-	scripted(faux, { go: [tool("code", { code: `return await tools.agent({ name: "primes", brief: "Name three primes.", type: "tester" })` }), "done"], "Name three primes.": [fauxAssistantMessage("2, 3, 5."), ""] }, seen);
+	const seen = new Map<string, Seen>();
+	scripted(faux, { go: [tool("codemode", { code: `return await tools.agent({ name: "primes", brief: "Name three primes.", type: "tester" })` }), "done"], "Name three primes.": [fauxAssistantMessage("2, 3, 5."), ""] }, seen);
 	const mochi = await openTestMochi(await tempDir(), faux, new Map(), undefined, [{ name: "tester", instructions: "You test things.", thinking: "high" }]);
 	await (await mochi.root.submit({ type: "input", content: "go" }, context)).wait(context);
 	const result = (await rootEntries(mochi)).find((entry) => entry.kind === "pi.tool-result");
-	assert.equal(messageText(result!.model![0]!), "Script completed.\n2, 3, 5.");
+	assert.match(messageText(result!.model![0]!), /^Script completed\nWall time [\d.]+ seconds\nOutput:\n\n2, 3, 5\.$/);
 	const child = seen.get("Name three primes.")!;
-	assert.deepEqual(child.map((t) => t.split(":")[0]), ["read", "write", "edit", "bash", "recall", "code"]);
-	assert.doesNotMatch(child.find((t) => t.startsWith("code:"))!, /agent|trigger_add/);
+	assert.deepEqual(child.direct, ["codemode"]);
+	assert.deepEqual(child.scripted, ["read", "write", "edit", "bash", "recall", "web_search", "web_fetch", "llm", "apps_search", "apps_call"]);
 	await mochi.close();
 });
 
 test("background agents post nothing into root: a notify reaches the channel verbatim and leaves one record, a silent one leaves nothing", async () => {
 	const faux = newFaux();
-	const seen = new Map<string, string[]>();
+	const seen = new Map<string, Seen>();
 	const start = `return [await tools.agent_start({ name: "loud", brief: "Check the build." }), await tools.agent_start({ name: "quiet", brief: "Check the weather." })]`;
-	scripted(faux, { go: [tool("code", { code: start }), "started"], "Check the build.": [tool("notify", { text: "Build failed on main." }), "told"], "Check the weather.": [fauxAssistantMessage("Sunny."), ""] }, seen);
+	scripted(faux, { go: [tool("codemode", { code: start }), "started"], "Check the build.": [tool("notify", { text: "Build failed on main." }), "told"], "Check the weather.": [fauxAssistantMessage("Sunny."), ""] }, seen);
 	const whatsapp = recordingChannel("whatsapp");
 	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
 	await (await mochi.root.submit({ type: "input", content: "go" }, context)).wait(context);
@@ -72,14 +87,16 @@ test("background agents post nothing into root: a notify reaches the channel ver
 	const records = entries.filter((entry) => entry.kind === NOTIFY_ENTRY);
 	assert.equal(records.length, 1);
 	assert.match(messageText(records[0]!.model![0]!), /^\[context, no reply needed: told user1 on whatsapp, from conversation \d+\] Build failed on main\.$/);
-	assert.ok(seen.get("Check the build.")!.some((t) => t.startsWith("notify:")));
-	assert.doesNotMatch(seen.get("Check the build.")!.find((t) => t.startsWith("code:"))!, /agent|trigger_add/);
+	const run = seen.get("Check the build.")!;
+	assert.deepEqual(run.direct, ["notify", "codemode"]);
+	assert.ok(run.scripted.includes("trigger_list"));
+	assert.ok(!run.scripted.some((name) => name.startsWith("agent") || name === "trigger_add"), run.scripted.join(", "));
 	await mochi.close();
 });
 
 test("Esc stops a foreground agent; only /stop reaches a background one", async () => {
 	const faux = newFaux();
-	scripted(faux, { fg: [tool("code", { code: `return await tools.agent({ name: "fg", brief: "Hang in front." })` }), ""], bg: [tool("code", { code: `return await tools.agent_start({ name: "bg", brief: "Hang behind." })` }), "started"], "Hang in front.": [hang, ""], "Hang behind.": [hang, ""] }, new Map());
+	scripted(faux, { fg: [tool("codemode", { code: `return await tools.agent({ name: "fg", brief: "Hang in front." })` }), ""], bg: [tool("codemode", { code: `return await tools.agent_start({ name: "bg", brief: "Hang behind." })` }), "started"], "Hang in front.": [hang, ""], "Hang behind.": [hang, ""] }, new Map());
 	const mochi = await openTestMochi(await tempDir(), faux);
 	await (await mochi.root.submit({ type: "input", content: "bg" }, context)).wait(context);
 	void mochi.root.submit({ type: "input", content: "fg" }, context);
