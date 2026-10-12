@@ -260,7 +260,7 @@ async function inputOf(workDir: string, turn: OwnerTurn, media: Omit<MediaDeps, 
 	return images.length === 0 ? text : [{ type: "text", text }, ...images];
 }
 
-const REPLY_TEXT_CHARS = 500;
+const REPLY_TEXT_CHARS = 80;
 
 function replyLine(target: ReplyTarget): string {
 	const whose = target.fromAgent ? "your" : "their";

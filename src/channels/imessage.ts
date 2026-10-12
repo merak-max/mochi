@@ -37,7 +37,7 @@ export const IMESSAGE_PROFILE: ChannelProfile = {
 };
 
 const TAPBACKS: Readonly<Record<Reaction, string>> = { love: "❤️", like: "👍", dislike: "👎", laugh: "😂", emphasize: "‼️", question: "❓" };
-const TAPBACK_TEXT_CHARS = 200;
+const TAPBACK_TEXT_CHARS = 80;
 
 function reactionOf(emoji: string): Reaction | "emoji" {
 	for (const reaction of REACTIONS) if (TAPBACKS[reaction] === emoji) return reaction;
