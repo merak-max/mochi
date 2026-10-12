@@ -41,7 +41,7 @@ export async function createImageReadTool(): Promise<ToolRegistration> {
 			const dir = await mkdtemp(join(tmpdir(), "mochi-img-"));
 			try {
 				const jpeg = join(dir, "image.jpg");
-				await execute("/usr/bin/ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", resolved.value, "-frames:v", "1", "-q:v", "2", "-y", jpeg], { timeout: 60_000 });
+				await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", resolved.value, "-frames:v", "1", "-q:v", "2", "-y", jpeg], { timeout: 60_000 });
 				const result = await base.execute({ ...(args as object), path: jpeg }, api, context);
 				const converted = { severity: "info" as const, message: `Converted ${path} to JPEG with ffmpeg.` };
 				return withScriptOutput({ ...result, diagnostics: [...(result.diagnostics ?? []), converted] });

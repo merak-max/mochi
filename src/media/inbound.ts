@@ -24,7 +24,7 @@ export async function prepareInbound(
 			if (/^image\/hei[cf](?:-sequence)?(?:;|$)/i.test(file.mimeType) || /^image\/hei[cf]$/.test(mimeOf(file.path))) {
 				const jpeg = await outputPath(workDir, "jpg");
 				try {
-					await execute("/usr/bin/ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", absolute, "-frames:v", "1", "-q:v", "2", "-n", jpeg.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 60_000 });
+					await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", absolute, "-frames:v", "1", "-q:v", "2", "-n", jpeg.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 60_000 });
 					images.push({ type: "image", mimeType: "image/jpeg", data: (await readFile(jpeg.absolute)).toString("base64") });
 					notes.push(`[image converted from ${file.path}, JPEG saved at ${jpeg.path}]`);
 				} catch (error) {

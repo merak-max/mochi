@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, readFile, writeFile, symlink, rm, readdir } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, writeFile, symlink, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -127,7 +127,7 @@ test("video polls direct bare ids, downloads variant video, reports failures and
 test("Aura speech becomes AAC M4A and Nova sends bytes with a transcript", async (t) => {
 	const dir = await temporary(t);
 	const wav = join(dir, "sample.wav");
-	await promisify(execFile)("/usr/bin/ffmpeg", ["-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.1", wav]);
+	await promisify(execFile)("ffmpeg", ["-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.1", wav]);
 	const audio = await readFile(wav);
 	const client = new MediaClient(depsOf(dir, async (url, init) => {
 		assert.equal(new Headers(init?.headers).get("authorization"), "Token dg-key");
@@ -144,7 +144,7 @@ test("Aura speech becomes AAC M4A and Nova sends bytes with a transcript", async
 	}));
 	const spoken = await client.speak({ text: "Tea." });
 	assert.ok(spoken.path.endsWith(".m4a"));
-	const probe = await promisify(execFile)("/usr/bin/ffprobe", ["-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", join(dir, spoken.path)]);
+	const probe = await promisify(execFile)("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", join(dir, spoken.path)]);
 	assert.equal(probe.stdout.trim(), "aac");
 	assert.deepEqual(await client.transcript(spoken.path), { text: "Tea.", duration: 0.1 });
 	assert.equal((await readdir(join(dir, "out"))).filter((name) => name.endsWith(".mp3")).length, 0);
@@ -166,6 +166,11 @@ test("inbound media preserves originals, exposes voice text and degrades failure
 	assert.deepEqual(prepared.images, [{ type: "image", mimeType: "image/png", data: PNG.toString("base64") }]);
 	assert.deepEqual(prepared.notes, ['[voice note, 12 s: "Bring tea.", saved at note.m4a]', "[image attachment image/heic, 8 bytes, saved at broken.heic]"]);
 	assert.equal((await readFile(join(dir, "note.m4a"))).toString(), "voice");
+	await copyFile(join(import.meta.dirname, "fixtures", "grid.heic"), join(dir, "grid.heic"));
+	const photo = await prepareInbound([{ path: "grid.heic", mimeType: "image/heic", kind: "image", bytes: 5512 }], dir, deps);
+	const jpeg = Buffer.from(photo.images[0]!.data, "base64");
+	const size = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", "-"], { input: jpeg }).toString().trim();
+	assert.equal(size, "640,480", "every tile of a HEIC grid, not the first one");
 	const failed = await prepareInbound([files[1]!], dir, { ...deps, fetch: async () => json({}, 500) });
 	assert.deepEqual(failed.notes, ["[audio attachment audio/mp4, 5 bytes, saved at note.m4a]"]);
 });

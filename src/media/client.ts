@@ -160,7 +160,7 @@ export class MediaClient {
 		const mp3 = await saveOutput(this.deps.workDir, "mp3", new Uint8Array(await response.arrayBuffer()));
 		const m4a = await outputPath(this.deps.workDir, "m4a");
 		try {
-			await execute("/usr/bin/ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", await workPath(mp3.path, this.deps.workDir), "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-n", m4a.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 60_000 });
+			await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", await workPath(mp3.path, this.deps.workDir), "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-n", m4a.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 60_000 });
 			return { path: m4a.path };
 		} catch (error) {
 			await unlink(m4a.absolute).catch(() => {});

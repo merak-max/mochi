@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
@@ -24,21 +25,25 @@ async function runScript(dir: string, code: string): Promise<Part[]> {
 	}
 }
 
-const ffmpeg = (args: string[]) => execFileSync("/usr/bin/ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", ...args]);
+const ffmpeg = (args: string[]) => execFileSync("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", ...args]);
 
-test("a script reads a big JPEG and an AVIF and shows both to the model, scaled to fit", async () => {
+const sizeOf = (jpeg: Buffer) => execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", "-"], { input: jpeg }).toString().trim();
+
+test("a script reads a big JPEG, an AVIF and a tiled HEIC and shows each to the model whole", async () => {
 	const dir = await tempDir();
 	const work = join(dir, "work");
 	execFileSync("mkdir", ["-p", work]);
 	ffmpeg(["-f", "lavfi", "-i", "testsrc=size=3000x2000", "-frames:v", "1", join(work, "big.jpg")]);
 	ffmpeg(["-f", "lavfi", "-i", "testsrc=size=640x480", "-frames:v", "1", "-c:v", "libaom-av1", "-still-picture", "1", join(work, "photo.avif")]);
-	const paths = ["big.jpg", "photo.avif"];
+	copyFileSync(join(import.meta.dirname, "fixtures", "grid.heic"), join(work, "grid.heic"));
+	const paths = ["big.jpg", "photo.avif", "grid.heic"];
 	const parts = await runScript(dir, `for (const path of ${JSON.stringify(paths)}) { const shot = await tools.read({ path }); text(shot.note); image(shot); }`);
 	const images = parts.filter((part) => part.type === "image");
-	assert.equal(images.length, paths.length);
+	assert.deepEqual(images.map((part) => sizeOf(Buffer.from(part.data!, "base64"))), ["2000,1333", "640,480", "640,480"]);
 	const text = parts.filter((part) => part.type === "text").map((part) => part.text).join("\n");
 	assert.match(text, /Resized from 3000x2000 to 2000x1333/);
 	assert.match(text, /Converted photo\.avif to JPEG with ffmpeg/);
+	assert.match(text, /Converted grid\.heic to JPEG with ffmpeg/);
 });
 
 test("a script reads a text file as a string", async () => {
