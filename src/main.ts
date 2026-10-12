@@ -23,6 +23,7 @@ import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
 import { AgentCatalog } from "./agents/catalog.ts";
 import { triggersComponent } from "./triggers/webhooks.ts";
+import { a2aComponent, a2aServerSetup } from "./a2a/server.ts";
 import { AUTH_COMMAND, authFile, loginExecutor, storedTokenConnector } from "./auth/executor.ts";
 import { connectApps } from "./apps/apps.ts";
 import { InboundCursorDoc, ingest } from "./turn/turn.ts";
@@ -112,7 +113,8 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const { channels, report: channelReport } = channelSet === "terminal" ? { channels: new Map() as Channels, report: [] } : configuredChannels(config.env, config.users);
 	const workDir = join(config.dataDir, "work");
 	await mkdir(workDir, { recursive: true });
-	for (const line of [...setupReport(services(config)), ...channelReport]) log("setup", { line });
+	const a2a = a2aServerSetup(config.env);
+	for (const line of [...setupReport([...services(config), ["a2a", a2a]]), ...channelReport]) log("setup", { line });
 	const models = createBifrostModels(config.bifrostKey ?? "", config.openRouterKey);
 	const apps = connectApps(storedTokenConnector(config.executorUrl, authFile(config.dataDir)), log);
 
@@ -151,7 +153,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		runFeed(mochi.harness, index, running, (error) => log("index.failed", { error: String(error) })),
 		apps.run(running),
 		// A terminal-only daemon (chat, print) serves one script; triggers wait for the real daemon.
-		...(channelSet === "terminal" ? [] : [triggersComponent(mochi, config, running)]),
+		...(channelSet === "terminal" ? [] : [triggersComponent(mochi, config, running), a2aComponent(mochi, config, a2a, running)]),
 	];
 	// Channels stop after the harness, so no Turn sends on a closed channel.
 	const channelsRunning = new AbortController();
