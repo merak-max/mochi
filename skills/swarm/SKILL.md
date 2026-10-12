@@ -15,7 +15,7 @@ Fan out N subagents. They cover separate slices, race the same brief, or both. Y
 4. Pick the model. Use tier `fast` for extraction and lookups, `default` for anything that needs judgment. A race between models names each arm's model up front.
 5. When workers write, give each its own output path, such as `data/work/<slug>/<slice>.md`. Two workers never write the same file, note or browser profile.
 
-If a deterministic script can process every item in one pass, run it in `code` instead. `llm` over `Promise.all` handles the same small judgment over hundreds of items more cheaply than a swarm.
+If a deterministic script can process every item in one pass, run it in `codemode` instead. `llm` over `Promise.all` handles the same small judgment over hundreds of items more cheaply than a swarm.
 
 ## Fan out
 

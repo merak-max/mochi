@@ -7,7 +7,7 @@ On-demand instructions for mochi. The prompt's skills index shows each skill's `
 | `mochi-mode` | Any task beyond a one-line answer. Routes to a playbook and holds the rules for asking, verifying, subagents and replies. |
 | `how`, `why`, `teach` | Explaining how something works, why it happened, or teaching it. |
 | `recall` | Catching up on earlier work before resuming it. |
-| `apps` | The owner's apps through Executor, from `code`. |
+| `apps` | The owner's apps through Executor, from `codemode`. |
 | `swarm`, `arena`, `interrogate` | Parallel fan-out, a multi-model bakeoff, and multi-model challenge. |
 | `show-me-your-work` | The decision log for long or unattended work. |
 | `reflect`, `automate-me` | Learning from a run, and learning the owner's style into notes. |

@@ -18,7 +18,7 @@ When in doubt, take the simple path.
 
 ## Explore (complex only)
 
-Split the question into 2 to 4 angles, each a distinct slice. For a visa that might be eligibility, documents, the steps and timeline, and the common rejections. For a codebase, the entry point, the data, the main flow, and the boundaries. Start one explorer per angle with `agent` in `code`, `type: "worker"`, model `fast` for wide reading or `default` for hard material, using [references/explorer-prompt.md](references/explorer-prompt.md).
+Split the question into 2 to 4 angles, each a distinct slice. For a visa that might be eligibility, documents, the steps and timeline, and the common rejections. For a codebase, the entry point, the data, the main flow, and the boundaries. Start one explorer per angle with `agent` in `codemode`, `type: "worker"`, model `fast` for wide reading or `default` for hard material, using [references/explorer-prompt.md](references/explorer-prompt.md).
 
 ## Explain
 
