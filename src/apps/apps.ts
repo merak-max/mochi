@@ -76,9 +76,10 @@ export function connectApps(connect: Connect, log: Log): Apps & { run(context: C
 			value = await callTool("resume", { requestId, response: ACCEPT }, context);
 		}
 	};
+	const execute = async (code: string, context: Context): Promise<JsonValue> => completedValue(await tool("execute", { code }, context));
 	return {
-		search: (query, context) => tool("execute", { code: `return await tools.search(${JSON.stringify({ query })});` }, context),
-		call: (path, args, context) => tool("execute", { code: `return await ${toolExpression(path)}(${JSON.stringify(args)});` }, context),
+		search: (query, context) => execute(`return await tools.search(${JSON.stringify({ query })});`, context),
+		call: (path, args, context) => execute(`return await ${toolExpression(path)}(${JSON.stringify(args)});`, context),
 		skills: async (app, context) => {
 			const value = await tool("skills", app === undefined ? {} : { app }, context);
 			return typeof value === "string" ? value : JSON.stringify(value, null, 1);
@@ -156,6 +157,26 @@ function approvalRequest(value: JsonValue): string | undefined {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
 	if (value.status !== "approval-required") return undefined;
 	return typeof value.requestId === "string" ? value.requestId : undefined;
+}
+
+/**
+ * The program's value from an `execute` or `resume` result. Executor wraps it as
+ * `{ status: "completed", execution: { ok, value | error } }`; older Executors return the value raw.
+ */
+function completedValue(value: JsonValue): JsonValue {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+	if (value.status !== "completed") return value;
+	const execution = value.execution;
+	if (typeof execution !== "object" || execution === null || Array.isArray(execution)) return value;
+	if (execution.ok === true) return execution.value ?? null;
+	if (execution.ok === false) throw new ExecutorResultError(errorText(execution.error));
+	return value;
+}
+
+function errorText(error: JsonValue | undefined): string {
+	if (typeof error === "string") return error;
+	if (typeof error === "object" && error !== null && !Array.isArray(error) && typeof error.message === "string") return error.message;
+	return JSON.stringify(error ?? "Executor program failed");
 }
 
 function untilClosed(client: McpClient, context: Context): Promise<void> {

@@ -68,10 +68,32 @@ test("apps functions run Executor programs and return parsed results; mochi acce
 	assert.equal(await apps.skills("gmail", context), "Gmail: use search first.");
 	assert.equal(await apps.call("bank.pay", {}, context), "paid");
 	assert.deepEqual(answers, [{ action: "accept", content: {} }]);
-	assert.deepEqual(await apps.call("notion.update", {}, context), { status: "completed", execution: { ok: true, value: "posted" } });
+	assert.equal(await apps.call("notion.update", {}, context), "posted");
 	assert.deepEqual(seen.at(-1), { name: "resume", args: { requestId: "apr_1", response: { action: "accept", content: {} } } });
 	assert.ok(logs.includes("executor.approved"));
 	assert.deepEqual(executor.capabilities, [{ elicitation: {} }]);
+	await stop();
+});
+
+test("Executor's completed envelope unwraps to its value, a failed one throws its message, and a raw value passes through", async () => {
+	const items = { items: [{ path: "gmail.send", signature: "(to: string) => void" }] };
+	const envelope = (execution: unknown) => {
+		const body = { status: "completed", execution: { ...(execution as object), toolCalls: [] }, unavailableApps: [] };
+		return { ...text(JSON.stringify(body)), structuredContent: body };
+	};
+	const executor = fakeExecutor(async (_name, args) => {
+		const code = String(args.code);
+		if (code.includes("tools.search")) return envelope({ ok: true, value: items });
+		if (code.includes("gmail.send")) return envelope({ ok: true, value: { id: "m1" } });
+		if (code.includes("gmail.fail")) return envelope({ ok: false, error: { kind: "ExecutionFailure", message: "Uncaught: boom" } });
+		return text(JSON.stringify({ id: "raw" }));
+	});
+	const { apps, until, stop } = start(executor.connect);
+	await until("executor.up");
+	assert.deepEqual(await apps.search("mail", context), items);
+	assert.deepEqual(await apps.call("gmail.send", {}, context), { id: "m1" });
+	await assert.rejects(apps.call("gmail.fail", {}, context), (error: Error) => error.message === "Uncaught: boom");
+	assert.deepEqual(await apps.call("gmail.old", {}, context), { id: "raw" });
 	await stop();
 });
 
