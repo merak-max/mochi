@@ -83,6 +83,8 @@ Every tool except `codemode`, `notify` and `handoff` runs inside a `codemode` sc
 
 Run a command that can take more than about 30 seconds with `proc_start`, not `bash`. This includes a `pi -p` code edit. Reply to the owner at once with what you started. Do not sleep or poll. You are woken with the log tail when the command exits, and once when a line matches its `watch` regex. Use `proc_status`, `proc_logs` and `proc_stop` to check or end it.
 
+The owner's other agents, such as Hermes, are A2A peers. Ask one with `tools.a2a_ask({ agent, message })` and pass its `contextId` again to continue the thread. For long work, use `a2a_send`, then `a2a_status`. `a2a_list` shows which peers answer.
+
 Long or multi-step work keeps its files in `data/work/<slug>/`: `todo.md` with the playbook's steps copied in (a step you skip stays, marked `skip: <reason>`), and a decision log per `show-me-your-work` when the owner will review the work later.
 
 ## Models

@@ -62,6 +62,7 @@ The TUI follows pi's experimental durable TUI. It renders the shown conversation
 - The claim commit takes `mochi.claim` `<answer entry>:<channel>` (the first claimer sends; a duplicate Turn ends `merged`) and appends the Turn to `mochi.channel-tail` for its channel; the Turn waits for the previous tail before its first bubble, so messages never interleave on a channel and a restart replays the same order.
 - `send` checkpoints after each bubble, so a crash repeats at most the one bubble whose send and checkpoint it fell between. Typing runs while the answer is generated, stops after `typingMaxMs`, and its errors are ignored. Bubbles after the first wait `pace(bubble)`.
 - Steers merge into the running answer. Each steered channel gets the answer once.
+- **Other agents (A2A).** Hermes and other mochis reach mochi over A2A v1.0, JSON-RPC binding (`src/a2a/`). Each `(peer, contextId)` pair gets its own ownerless `worker` conversation, recorded in the `mochi.a2a-context` doc family. It stays out of root and the channels, and it has no A2A tools, so agents cannot loop. A message submits as `a2a:<peer>:<messageId>`, so a redelivery returns the same task. `mochi.a2a-task` maps each task id to its submission. GetTask reads the state from that submission, and only the peer that created the task may read it. SendMessage blocks until the answer or `MOCHI_A2A_REPLY_TIMEOUT_SECONDS`. With `returnImmediately` or `blocking: false`, it returns `TASK_STATE_WORKING` at once.
 
 ## Module map
 
@@ -117,6 +118,10 @@ src/
     turn.ts            ingest, the Turn task, claims and channel chain, react (extension "channels"), delivery (extension "delivery")
   upgrade.ts           boot steps converting older live data (outbox to Turns, root seat, triggers to tasks, draining the old agent kinds, aborting a rollover checkpoint turn)
   triggers/            cron, once and webhook triggers, with classifier gates (see Jobs and webhooks)
+  a2a/
+    protocol.ts        A2A v1.0 wire shapes: agent card, parts to text, tasks, reading a peer's result
+    server.ts          the agent card, SendMessage and GetTask for peers in MOCHI_A2A_PEER_TOKENS, one worker conversation per context
+    tools.ts           a2a_list, a2a_ask, a2a_send, a2a_status against the peers in data/config.json
 eval/                  live scenario eval, see Eval
 docs/                  research brief, voice spec, identity prompt, eval results
 ```
@@ -221,6 +226,7 @@ The library, `LIBRARY` in `src/seats.ts`: every other tool, registered with `cal
 | `browse`, `browse_fast`, `image_gen`, `video_gen`, `speak`, `gif_save` | unsafe | Paid or outward effects; a crash mid-call reports interrupted. |
 | `transcribe`, `gif_search`, `proc_status`, `proc_logs` | safe | Reads. |
 | `proc_start`, `proc_stop` | unsafe, safe | Background processes; see Long work. |
+| `a2a_list`, `a2a_ask`, `a2a_send`, `a2a_status` | safe, unsafe, unsafe, safe | Owner and run seats only, all deferred. The owner's other agents over A2A, from `a2a.peers` in `data/config.json`: list peers and whether each serves its card, ask and wait, send without waiting, and read a sent task. Root's `channels` section names the peers. |
 | agent and trigger tools | see below | |
 
 ## System prompt
@@ -350,6 +356,8 @@ Environment variables. Names only here; values live in the owner's shell secrets
 - `EXECUTOR_URL` (default `https://executor.shau.me/mcp`)
 - `MOCHI_BIND_HOST` (default `127.0.0.1`; set `172.17.0.1` on this box so the Caddy container reaches mochi through the Docker host gateway, the same way it reaches t3)
 - `MOCHI_HOOKS_PORT` (default 8788), `MOCHI_PUBLIC_URL` (the Caddy origin, for webhook URLs)
+- `MOCHI_A2A_PEER_TOKENS` (`name:token,name2:token2`; unset keeps the A2A server off), `MOCHI_A2A_HOST` (default `127.0.0.1`), `MOCHI_A2A_PORT` (default 8789), `MOCHI_A2A_PUBLIC_URL`, `MOCHI_A2A_AGENT_NAME` (default `mochi`), `MOCHI_A2A_REPLY_TIMEOUT_SECONDS` (default 600)
+- One variable per outbound peer token, named by `tokenEnv` in `data/config.json`: `"a2a": { "peers": { "hermes": { "url": "http://127.0.0.1:9900", "tokenEnv": "HERMES_A2A_TOKEN", "timeoutSeconds": 600 } } }`
 
 Each channel logs one readiness line at boot: `ok`, `off` when none of its variables is set, or `fix` naming the missing variables or the bad value. A channel that is not ready does not run, and the daemon starts anyway.
 
@@ -456,4 +464,4 @@ Mochi publishes typed durable notes into a separate local Cognition-style memory
 | 2026-10-06 | The surface has a budget and boot reports readiness (architect U11). `BUDGET` caps each seat's tool bytes and each prompt section; `src/seats.test.ts` fails past a cap. Descriptions were trimmed to fit (root 8,535 to 8,258 tool bytes; skills-index 2,099 to 1,960 characters, every bundled description now uncut). Boot logs one `setup` line per boundary: models, classifier, firecrawl, executor and each channel, with the fix for a broken one. | The surface can no longer grow past its caps without a failing build, and a missing key or login is named at boot instead of at the first failing call. |
 | 2026-10-06 | The iMessage line (architect U12). The adapter supervises its own connection: it catches up from `mochi.inbound-cursor` (written by the ingest commit) on every connect and every 10 minutes when the app offers `catchUp`, probes after 5 silent minutes with a `getMessage` round trip, and rebuilds on an ended stream or two failed probes, with `send` throwing `ChannelDown` meanwhile. A rebuild only logs `imessage.rebuilt`; silence alone never rebuilds. | Owner ruling: never message the owner about channel health. Spectrum 12.10.1 does not expose the advanced-imessage client or live event sequences, so the production app has no `catchUp` yet and the cursor stays empty; the replay path is proven only against a fake event log. |
 | 2026-10-06 | The jail, the file-tool allow-list, `grants`, `mochi grants`, `MOCHI_JAIL` and the eval probe are removed (supersedes U2). bash, read, edit and write have the daemon user's full access: every path, the whole environment, the network. Eval processes run unsandboxed. Only the 600-second default bash timeout stays. | Owner's call: a model that is trusted with the owner's life is not boxed in on the owner's own machine. bash went from 123 ms to 8 ms per call (eval/bench.ts). Known cost: a prompt injection in a web page, email or webhook can reach `~/.ssh`, `~/.aws`, `data/`, API keys and the EC2 metadata service, and an eval run can touch the owner's real accounts, as the Todoist incident did. |
-
+| 2026-10-12 | mochi speaks A2A v1.0 (JSON-RPC) as server and client: agent card, SendMessage, GetTask, and the a2a_list, a2a_ask, a2a_send and a2a_status functions. Each peer context gets its own worker conversation. Per-peer bearer tokens, localhost by default. No streaming or push. | The owner wants intercom-style talk between Hermes, mochi and other mochis. Hermes 2026.9.24 already ships A2A v1.0 in both directions, so mochi adopts the open standard instead of a new protocol. One server and four functions cover Hermes and mochi to mochi with config only. |
