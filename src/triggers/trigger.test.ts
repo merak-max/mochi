@@ -7,7 +7,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { AssistantEntry, ROOT_CONVERSATION_ID, UserEntry } from "@earendil-works/pi-durable";
+import { AssistantEntry, type ConversationId, ROOT_CONVERSATION_ID, UserEntry } from "@earendil-works/pi-durable";
+import { NOTIFY_ENTRY, UserDoc } from "../turn/turn.ts";
 import { messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import { TriggersDoc } from "../upgrade.ts";
@@ -170,6 +171,69 @@ test("notifyWhen holds back a notify the classifier answers no, and passes a yes
 		assert.equal(logs.includes("notify.gate_failed_open"), typeof outcome === "string");
 		await mochi.close();
 	}
+});
+
+test("a trigger notifies each recipient once, on its own line, and records it in each recipient's conversation", async () => {
+	const USER = { id: "user2", handle: "+918423152032", name: "Hemant Singh" };
+	const faux = newFaux();
+	faux.setResponses([call("notify", { text: "Rain at 6." }), fauxAssistantMessage("ok")]);
+	const imessage = recordingChannel("imessage");
+	const now = clockAt(S);
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { now, users: [USER] });
+	now.set(S - 200);
+	await add(mochi, { ...DAILY, notify: ["user1", "user2"] });
+	await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
+	await turnsSettled(mochi.harness);
+	assert.deepEqual(imessage.sentTo, [
+		{ person: undefined, text: "Rain at 6." },
+		{ person: USER.handle, text: "Rain at 6." },
+	]);
+	const records = async (id: ConversationId) => (await mochi.harness.commit((tx) => tx.scanEntries({ conversationId: id }, 100), context)).items.filter((entry) => entry.kind === NOTIFY_ENTRY).map((entry) => messageText(entry.model![0]!));
+	assert.deepEqual(await records(ROOT_CONVERSATION_ID), ["[context, no reply needed: told user1 on imessage, from trigger daily] Rain at 6."]);
+	const userConversation = (await mochi.harness.snapshot(UserDoc, USER.handle, context))!.conversation!;
+	assert.deepEqual(await records(userConversation), ["[context, no reply needed: told user2 on imessage, from trigger daily] Rain at 6."]);
+	await mochi.close();
+});
+
+test("trigger_add takes notify ids, rejects an unknown one with the valid ids, and defaults to the owner", async () => {
+	const script = `const failed = (p) => p.catch((error) => error.message);
+const unknown = await failed(tools.trigger_add({ id: "a", prompt: "x", when: "0 9 * * *", notify: ["user1", "Hemant Singh"] }));
+const both = await tools.trigger_add({ id: "b", prompt: "x", when: "0 9 * * *", notify: ["user1", "user2"] });
+const plain = await tools.trigger_add({ id: "c", prompt: "x", when: "0 9 * * *" });
+return { unknown, both, plain };`;
+	const faux = newFaux();
+	let system = "";
+	faux.setResponses([
+		(request) => {
+			system = JSON.stringify(request.messages.find((message) => message.role === "system"));
+			return call("code", { code: script });
+		},
+		fauxAssistantMessage("done"),
+	]);
+	const users = [{ id: "user2", handle: "+918423152032", name: "Hemant Singh" }];
+	const mochi = await openTestMochi(await tempDir(), faux, undefined, undefined, [], { now: clockAt(Date.parse("2026-10-05T03:00:00Z")), users });
+	await (await mochi.root.submit({ type: "input", content: "set things up" }, context)).wait(context);
+	const result = (await mochi.root.entries({}, 50, undefined, context)).items.find((entry) => entry.kind === "pi.tool-result");
+	const out = JSON.parse(messageText(result!.model![0]!).split("\n").slice(1).join("\n"));
+	assert.equal(out.unknown, 'Unknown notify recipient "Hemant Singh". Valid ids: user1, user2.');
+	assert.match(system, /People by id: user1: the owner; user2: Hemant Singh \(iMessage\)\./);
+	const tasks = await mochi.harness.commit((tx) => scanTriggers(tx), context);
+	assert.deepEqual(tasks.map((task) => [task.input.trigger.id, task.input.trigger.notify]), [["b", ["user1", "user2"]], ["c", undefined]]);
+	await mochi.close();
+});
+
+test("a trigger without notify sends only to the owner", async () => {
+	const faux = newFaux();
+	faux.setResponses([call("notify", { text: "Rain at 6." }), fauxAssistantMessage("ok")]);
+	const imessage = recordingChannel("imessage");
+	const now = clockAt(S);
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { now, users: [{ id: "user2", handle: "+918423152032" }] });
+	now.set(S - 200);
+	await add(mochi, DAILY);
+	await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
+	await turnsSettled(mochi.harness);
+	assert.deepEqual(imessage.sentTo, [{ person: undefined, text: "Rain at 6." }]);
+	await mochi.close();
 });
 
 test("seeds reconcile idempotently, keep their conversation when changed, and never touch a model trigger", async () => {

@@ -24,6 +24,8 @@ export type Gate = Static<typeof GateSchema>;
 const Prompt = Type.String({ minLength: 1 });
 /** Checked by the classifier against each `notify` text of the trigger's runs. */
 const NotifyWhen = Type.Optional(GateSchema);
+/** Who the trigger's `notify` reaches, by id: user1 is the owner, user2 and up are configured users. Absent: ["user1"]. */
+const Notify = Type.Optional(Type.Array(Type.String({ pattern: "^user[0-9]+$" }), { minItems: 1 }));
 /** The run conversation's model as `provider/id` and thinking level, set when the conversation is created; absent: root's. */
 const Model = Type.Optional(Type.String({ pattern: "^[\\w-]+/.+$" }));
 /**
@@ -35,8 +37,8 @@ const Check = Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems
 const Thinking = Type.Optional(Type.Union(["off", "low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level))));
 
 export const TriggerSchema = Type.Union([
-	Type.Object({ kind: Type.Literal("cron"), id: Id, cron: Type.String(), tz: Type.String(), prompt: Prompt, notifyWhen: NotifyWhen, model: Model, thinking: Thinking, check: Check }),
-	Type.Object({ kind: Type.Literal("once"), id: Id, at: Type.String({ format: "date-time" }), prompt: Prompt, notifyWhen: NotifyWhen, model: Model, thinking: Thinking }),
+	Type.Object({ kind: Type.Literal("cron"), id: Id, cron: Type.String(), tz: Type.String(), prompt: Prompt, notifyWhen: NotifyWhen, notify: Notify, model: Model, thinking: Thinking, check: Check }),
+	Type.Object({ kind: Type.Literal("once"), id: Id, at: Type.String({ format: "date-time" }), prompt: Prompt, notifyWhen: NotifyWhen, notify: Notify, model: Model, thinking: Thinking }),
 	Type.Object({
 		kind: Type.Literal("webhook"),
 		id: Id,
@@ -45,6 +47,7 @@ export const TriggerSchema = Type.Union([
 		/** Checked against each delivery's payload; a delivery that fails it is acknowledged and never runs. */
 		admitWhen: Type.Optional(GateSchema),
 		notifyWhen: NotifyWhen,
+		notify: Notify,
 		model: Model,
 		thinking: Thinking,
 	}),

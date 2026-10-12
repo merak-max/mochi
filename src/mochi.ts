@@ -110,7 +110,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		CodingTools,
 		defineExtension({ name: "memory", tools: [noteTool({ index, today: options.today }), recallTool(index)] }),
 		channelsExtension(options.channels),
-		defineExtension({ name: "notify", tools: [notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log })] }),
+		defineExtension({ name: "notify", tools: [notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users: options.users ?? [] })] }),
 		defineExtension({ name: "handoff", tools: [handoffTool()] }),
 	];
 	const now = options.now ?? (() => new Date());
@@ -124,12 +124,12 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
 		...agentFns({ catalog: options.agents, read: (read, context) => harness.commit(read, context), abortTask: (id, context) => harness.abortTask(id, context) }),
-		...triggerFns({ task: trigger, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime() }),
+		...triggerFns({ task: trigger, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users: options.users ?? [] }),
 	];
 	const call = callTask(new Map(fns.map((fn) => [fn.name, fn])));
 	const code = { call, concurrency: 8, deadlineMs: options.scriptDeadlineMs ?? SCRIPT_DEADLINE_MS, abortTask: (id: TaskId, context: Context) => harness.abortTask(id, context) };
 	for (const extension of [
-		identityExtension([...options.channels.values()].map((channel) => channel.profile)),
+		identityExtension([...options.channels.values()].map((channel) => channel.profile), options.users ?? []),
 		notesExtension(),
 		skillsExtension(options.skillsDir),
 		compactionExtension(fast),
@@ -166,7 +166,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 
 	const root = await harness.root(context, { agent: { model: options.brain, thinkingLevel: "medium" } });
 	await root.configure({ model: options.brain, ...(options.persona === undefined ? {} : { instructions: options.persona }) }, context);
-	const turn = defineTurn({ root, channels: options.channels, workDir: options.workDir, media, retry: options.retry ?? RETRY, log });
+	const turn = defineTurn({ root, harness, users: options.users ?? [], channels: options.channels, workDir: options.workDir, media, retry: options.retry ?? RETRY, log });
 	if (options.scheduling === "daemon") registry.install(defineExtension({ name: "delivery", tasks: [turn] }));
 	const lineId = await ensureLine(harness, context);
 	const commands = commandTask({

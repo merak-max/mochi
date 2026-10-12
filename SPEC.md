@@ -253,6 +253,8 @@ CREATE VIRTUAL TABLE docs USING fts5(
 
 Three kinds of work start without the owner typing. All three share one rule: **the run happens in its own conversation, and only the `notify` tool reaches the owner.** A run that ends without calling `notify` is silent. Silence is the expected result for most periodic checks.
 
+A trigger's `notify` field lists recipient ids: `user1` is the owner, and `user2` and up are configured users. The default is `["user1"]`. One `notify` call checks `notifyWhen` once, then opens one Turn per recipient; a user's Turn goes on iMessage. Root's `channels` section lists the users by id, so mochi can choose recipients.
+
 Triggers are the main agent's way to run itself later: root creates them with `trigger_add` inside `code`, and a trigger run may remove its own trigger but not add one. There is no built-in heartbeat; a periodic check is a `cron` trigger the model or config creates.
 
 ### Triggers
@@ -260,9 +262,9 @@ Triggers are the main agent's way to run itself later: root creates them with `t
 ```ts
 // triggers/types.ts
 export type Trigger =
-  | { readonly kind: "cron"; readonly id: string; readonly cron: string; readonly tz: string; readonly prompt: string; readonly notifyWhen?: Gate }
-  | { readonly kind: "once"; readonly id: string; readonly at: string; readonly prompt: string; readonly notifyWhen?: Gate }
-  | { readonly kind: "webhook"; readonly id: string; readonly auth: WebhookAuth; readonly prompt: string; readonly admitWhen?: Gate; readonly notifyWhen?: Gate };
+  | { readonly kind: "cron"; readonly id: string; readonly cron: string; readonly tz: string; readonly prompt: string; readonly notifyWhen?: Gate; readonly notify?: string[] }
+  | { readonly kind: "once"; readonly id: string; readonly at: string; readonly prompt: string; readonly notifyWhen?: Gate; readonly notify?: string[] }
+  | { readonly kind: "webhook"; readonly id: string; readonly auth: WebhookAuth; readonly prompt: string; readonly admitWhen?: Gate; readonly notifyWhen?: Gate; readonly notify?: string[] };  // notify: recipient ids, default ["user1"]
 
 // A yes/no question for the classifier. Passes when P(yes) >= threshold (default 0.5). A classifier error passes.
 export interface Gate { readonly question: string; readonly yes: string; readonly no: string; readonly threshold?: number }
@@ -314,8 +316,8 @@ Subagents are one task kind, `mochi.agent`, started only from root's `code`, so 
 
 | Tool | Behavior |
 |---|---|
-| `notify` | Opens a Turn that sends `text` verbatim. Optional `channel`; default is the channel of the owner's newest chat message. After the send, the Turn writes one passive `app.notify` entry into root, `[context, no reply needed: told the owner on <channel>, from <trigger or conversation>] <text, at most 280 characters>`, so the owner's reply has context. No root turn runs. Idempotent per tool call through `mochi.journal`. |
-| `trigger_add` | `{ id, prompt, when, tz?, auth?, admitWhen?, notifyWhen? }`. `when` is five cron fields (tz defaults to the owner's), an ISO time with offset, or `webhook`. Validates the cron expression and time zone. For a webhook it generates the secret or token and returns it with the public URL `${MOCHI_PUBLIC_URL}/hooks/<id>`, because the owner or a tool has to configure the sender. Re-adding an id replaces the trigger and keeps its conversation. |
+| `notify` | Opens a Turn per recipient that sends `text` verbatim. In a trigger run the recipients are the trigger's `notify` ids; elsewhere only the owner. Optional `channel` for the owner; default is the channel of the owner's newest chat message. A user always gets iMessage. After the send, the Turn writes one passive `app.notify` entry into the recipient's conversation (root for `user1`), `[context, no reply needed: told <id> on <channel>, from <trigger or conversation>] <text, at most 280 characters>`, so a reply has context. No turn runs. Idempotent per tool call and recipient through `mochi.journal`. |
+| `trigger_add` | `{ id, prompt, when, tz?, auth?, admitWhen?, notifyWhen?, notify? }`. `notify` takes ids only and rejects an unknown id with the list of valid ones. `when` is five cron fields (tz defaults to the owner's), an ISO time with offset, or `webhook`. Validates the cron expression and time zone. For a webhook it generates the secret or token and returns it with the public URL `${MOCHI_PUBLIC_URL}/hooks/<id>`, because the owner or a tool has to configure the sender. Re-adding an id replaces the trigger and keeps its conversation. |
 | `trigger_list` | Live triggers, including one added a moment ago: `when`, `origin`, next slot, last result (`done`, `unanswered`, `skipped-busy`, `missed`, `timed-out`). |
 | `trigger_remove` | Abort a trigger's task by id; a run may remove its own. Its conversation stays for history. A config trigger returns at the next start. |
 

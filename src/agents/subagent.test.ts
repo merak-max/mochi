@@ -71,7 +71,7 @@ test("background agents post nothing into root: a notify reaches the channel ver
 	assert.deepEqual([kinds.filter((kind) => kind === "pi.user").length, kinds.filter((kind) => kind === "pi.assistant").length], [1, 2]);
 	const records = entries.filter((entry) => entry.kind === NOTIFY_ENTRY);
 	assert.equal(records.length, 1);
-	assert.match(messageText(records[0]!.model![0]!), /^\[context, no reply needed: told the owner on whatsapp, from conversation \d+\] Build failed on main\.$/);
+	assert.match(messageText(records[0]!.model![0]!), /^\[context, no reply needed: told user1 on whatsapp, from conversation \d+\] Build failed on main\.$/);
 	assert.ok(seen.get("Check the build.")!.some((t) => t.startsWith("notify:")));
 	assert.doesNotMatch(seen.get("Check the build.")!.find((t) => t.startsWith("code:"))!, /agent|trigger_add/);
 	await mochi.close();

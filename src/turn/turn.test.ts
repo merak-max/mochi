@@ -353,13 +353,13 @@ test("a notify sends verbatim and leaves root with exactly one new entry, framed
 	const entries = (await mochi.root.entries({}, 100, undefined, context)).items;
 	assert.equal(entries.length, before + 1);
 	const text = entries[0]?.model?.[0]?.role === "user" ? entries[0].model[0].content : undefined;
-	assert.equal(text, `[context, no reply needed: told the owner on whatsapp, from conversation ${run.id}] Build failed on main.`);
+	assert.equal(text, `[context, no reply needed: told user1 on whatsapp, from conversation ${run.id}] Build failed on main.`);
 	await mochi.close();
 });
 
 test("the delivered-record is capped at 280 characters", () => {
 	const input: RunTurn = { source: "run", channel: "imessage", text: "x".repeat(300), from: { kind: "trigger", id: "t" } };
-	assert.equal(deliveredRecord(input), `[context, no reply needed: told the owner on imessage, from trigger t] ${"x".repeat(280)}…`);
+	assert.equal(deliveredRecord(input, "user1"), `[context, no reply needed: told user1 on imessage, from trigger t] ${"x".repeat(280)}…`);
 });
 
 test("a local process leaves a pending Turn waiting, and the next daemon start delivers it", async () => {

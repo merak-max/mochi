@@ -85,7 +85,14 @@ export type OwnerTurn = {
 	/** The inbound message id. The first text bubble of the answer is a threaded reply to it. */
 	readonly threadOn?: string;
 };
-export type RunTurn = { readonly source: "run"; readonly channel: ChannelId; readonly text: string; readonly from: Origin };
+export type RunTurn = {
+	readonly source: "run";
+	readonly channel: ChannelId;
+	readonly text: string;
+	readonly from: Origin;
+	/** A configured user's normalized handle, on imessage. Absent: the owner. */
+	readonly person?: string;
+};
 export type TurnInput = OwnerTurn | RunTurn | CommandTurn;
 
 /** What `send` sends. `input` is a notify's own text, read from the task input, not copied. */
@@ -221,6 +228,9 @@ export interface Line {
 export interface TurnHost {
 	/** The host root Conversation: the record is a passive write, which a task's conversation handle cannot submit. */
 	readonly root: Conversation;
+	/** Opens a user's conversation for a notify record, for the same reason. */
+	readonly harness: Harness;
+	readonly users: readonly ChatUser[];
 	/** Channels running in this process. An absent one is ChannelDown. */
 	readonly channels: Channels;
 	readonly workDir: string;
@@ -232,13 +242,13 @@ export interface TurnHost {
 export const NOTIFY_ENTRY = "app.notify";
 export const DELIVERED_RECORD_CHARS = 280;
 
-/** The one passive line a notify leaves in root, framed as context so root does not answer it. */
-export function deliveredRecord(input: RunTurn): string {
+/** The one passive line a notify leaves in the recipient's conversation, framed as context so it is not answered. */
+export function deliveredRecord(input: RunTurn, recipient: string): string {
 	const from = input.from.kind === "trigger" ? `trigger ${input.from.id}` : `conversation ${input.from.id}`;
 	const where = input.channel === "cli" ? "in the terminal" : `on ${input.channel}`;
 	const chars = [...input.text];
 	const text = chars.length > DELIVERED_RECORD_CHARS ? `${chars.slice(0, DELIVERED_RECORD_CHARS).join("")}…` : input.text;
-	return `[context, no reply needed: told the owner ${where}, from ${from}] ${text}`;
+	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${text}`;
 }
 
 /** Root's input for an owner Turn, and the only builder of it, so ingest and `run` submit identical content. */
@@ -298,7 +308,7 @@ function keepTyping(channel: Channel | undefined, person: string | undefined): (
 }
 
 /** Who a Turn's bubbles go to. Absent: the owner. */
-const personOf = (input: TurnInput): string | undefined => (input.source === "run" ? undefined : input.person);
+const personOf = (input: TurnInput): string | undefined => input.person;
 
 /** A user's replies chain apart from the owner's, so one never waits behind the other. */
 const tailKey = (channel: ChatChannelId, person: string | undefined): string => (person === undefined ? channel : `${channel}:${person}`);
@@ -318,7 +328,7 @@ function claimKey(answer: Answer, task: TaskId, channel: ChatChannelId): string 
 }
 
 export function defineTurn(host: TurnHost): TurnTask {
-	const { root, channels, workDir, media, retry, log } = host;
+	const { root, harness, users, channels, workDir, media, retry, log } = host;
 	return defineTask<TurnInput, TurnState, TurnResult>({
 		name: "mochi.turn",
 		version: 1,
@@ -435,8 +445,18 @@ export function defineTurn(host: TurnHost): TurnTask {
 			record: async (task, runtime, context) => {
 				const input = task.input;
 				if (input.source !== "run") throw new Error("Only a notify Turn records.");
-				const model = [{ role: "user" as const, content: deliveredRecord(input), timestamp: Date.now() }];
-				await root.submit({ type: "write", requestId: `record:${task.id}`, entry: { kind: NOTIFY_ENTRY, data: { channel: input.channel, text: input.text }, model } }, context);
+				let target = root;
+				let recipient = OWNER_ID;
+				if (input.person !== undefined) {
+					const user = userOf(users, input.person);
+					const id = await harness.commit((tx) => ensureUser(tx, user), context);
+					const found = await harness.conversation(id, context);
+					if (found === undefined) throw new Error(`Conversation ${id} is missing.`);
+					target = found;
+					recipient = user.id;
+				}
+				const model = [{ role: "user" as const, content: deliveredRecord(input, recipient), timestamp: Date.now() }];
+				await target.submit({ type: "write", requestId: `record:${task.id}`, entry: { kind: NOTIFY_ENTRY, data: { channel: input.channel, text: input.text }, model } }, context);
 				await runtime.commit(() => completed("sent"), context);
 			},
 		},
@@ -466,7 +486,7 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 			return (await root.submit({ type: "input", content, requestId: requestKey("cli", inbound.messageId), whenBusy: "steer" }, context)).id;
 		}
 		case "tapback": {
-			const user = inbound.person === undefined ? undefined : userOf(line, inbound.person);
+			const user = inbound.person === undefined ? undefined : userOf(line.users, inbound.person);
 			const who = user === undefined ? OWNER_ID : user.id;
 			const whose = inbound.fromAgent ? "your" : "their";
 			const what = inbound.reaction === "none" ? "removed a reaction from" : `reacted ${inbound.emoji ?? inbound.reaction} to`;
@@ -478,7 +498,7 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 		}
 		case "message": {
 			const key = requestKey(inbound.channel, inbound.messageId);
-			const user = inbound.person === undefined ? undefined : userOf(line, inbound.person);
+			const user = inbound.person === undefined ? undefined : userOf(line.users, inbound.person);
 			// Only the owner's messages move notify's default channel and react's default target.
 			const recordInbound = async (tx: Tx) => {
 				if (user === undefined) (await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
@@ -527,8 +547,8 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 	}
 }
 
-function userOf(line: Line, person: string): ChatUser {
-	for (const user of line.users) if (user.handle === person) return user;
+function userOf(users: readonly ChatUser[], person: string): ChatUser {
+	for (const user of users) if (user.handle === person) return user;
 	throw new Error(`No user ${person} is configured.`);
 }
 

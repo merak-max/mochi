@@ -37,7 +37,7 @@ test("the proposed notify return terminates after queueing without a narration r
 	const channel = recordingChannel("whatsapp");
 	const mochi = await openTestMochi(await temp(), faux, new Map([["whatsapp", channel.channel]]));
 	try {
-		const base = notifyTool({ line: () => mochi.line, channels: ["whatsapp"], classify: fixedClassify(1), log: () => {} });
+		const base = notifyTool({ line: () => mochi.line, channels: ["whatsapp"], classify: fixedClassify(1), log: () => {}, users: [] });
 		const patched = wrapTool(base, (tool) => ({
 			...tool,
 			execute: async (args, api, context) => {

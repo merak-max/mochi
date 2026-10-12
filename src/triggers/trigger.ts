@@ -13,8 +13,9 @@ import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
 import { createSeatConversation } from "../seats.ts";
+import { type ChatUser, OWNER_ID } from "../config.ts";
 import { formatStamp } from "../text.ts";
-import { LastInboundDoc, type Line, openTurn } from "../turn/turn.ts";
+import { LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
 import { assertTimeZone, nextCronSlot, parseCron } from "./cron.ts";
 import { GateSchema, SeedsSchema, type Trigger, TriggerSchema } from "./types.ts";
 
@@ -238,18 +239,25 @@ const AddParams = Type.Object({
 	auth: Type.Optional(Type.Union([Type.Literal("hmac"), Type.Literal("bearer")])),
 	admitWhen: Type.Optional(GateSchema),
 	notifyWhen: Type.Optional(GateSchema),
+	notify: Type.Optional(Type.Array(Type.String())),
 });
 
-function parseWhen(args: Static<typeof AddParams>, timeZone: string): Trigger {
-	const { id, prompt, when, admitWhen, notifyWhen } = args;
+function parseWhen(args: Static<typeof AddParams>, timeZone: string, users: readonly ChatUser[]): Trigger {
+	const { id, prompt, when, admitWhen, notifyWhen, notify } = args;
 	if (admitWhen !== undefined && when !== "webhook") throw new Error("admitWhen applies only to webhook triggers.");
+	if (notify !== undefined) {
+		const valid = [OWNER_ID, ...users.map((user) => user.id)];
+		for (const recipient of notify) {
+			if (!valid.includes(recipient)) throw new Error(`Unknown notify recipient "${recipient}". Valid ids: ${valid.join(", ")}.`);
+		}
+	}
 	const secret = randomBytes(32).toString("hex");
 	const draft =
 		when === "webhook"
-			? { kind: "webhook", id, prompt, admitWhen, notifyWhen, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
+			? { kind: "webhook", id, prompt, admitWhen, notifyWhen, notify, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
 			: when.trim().split(/\s+/).length === 5
-				? { kind: "cron", id, prompt, notifyWhen, cron: when.trim(), tz: args.tz ?? timeZone }
-				: { kind: "once", id, prompt, notifyWhen, at: when };
+				? { kind: "cron", id, prompt, notifyWhen, notify, cron: when.trim(), tz: args.tz ?? timeZone }
+				: { kind: "once", id, prompt, notifyWhen, notify, at: when };
 	return validateTrigger(parseWith(TriggerSchema, JSON.parse(JSON.stringify(draft)), "trigger"));
 }
 
@@ -274,6 +282,8 @@ export interface TriggerFnDeps {
 	readonly publicUrl: string | undefined;
 	readonly timeZone: string;
 	readonly now: () => number;
+	/** Configured users, whose ids a trigger may notify. */
+	readonly users: readonly ChatUser[];
 }
 
 export function triggerFns(deps: TriggerFnDeps): ScriptFn[] {
@@ -281,15 +291,15 @@ export function triggerFns(deps: TriggerFnDeps): ScriptFn[] {
 		defineFn({
 			name: "trigger_add",
 			description:
-				"Run a prompt later in its own conversation; it reaches the owner only through notify, silent by default. " +
-				"when: cron 'm h dom mon dow' (tz defaults to the owner's), an ISO time with offset, or 'webhook', which returns the URL " +
+				"Run a prompt later in its own conversation, silent unless it calls notify (sent to notify ids, default user1). " +
+				"when: cron 'm h dom mon dow' (owner's tz), an ISO time with offset, or 'webhook', which returns the URL " +
 				"and secret (hmac: GitHub's X-Hub-Signature-256; bearer: Authorization header). Gates are yes/no classifier questions, " +
-				"yes meaning proceed: admitWhen per payload, notifyWhen per notify text. Re-adding an id replaces it, same conversation.",
+				"yes proceeds: admitWhen per payload, notifyWhen per notify text. Re-adding an id replaces it, same thread.",
 			parameters: AddParams,
 			output: Type.Object({ id: Type.String(), next: Type.Optional(Type.String()), url: Type.Optional(Type.String()), secret: Type.Optional(Type.String()) }),
 			replay: "keyed",
 			run: async (args, call, context) => {
-				const draft = parseWhen(args, deps.timeZone);
+				const draft = parseWhen(args, deps.timeZone, deps.users);
 				let trigger = draft;
 				let replaced: TaskId | undefined;
 				await call.commit(async (tx) => {
@@ -342,6 +352,8 @@ export interface NotifyDeps {
 	readonly channels: readonly ChannelId[];
 	readonly classify: Classify;
 	readonly log: Log;
+	/** Configured users, the ids a trigger's `notify` may name. */
+	readonly users: readonly ChatUser[];
 }
 
 export function notifyTool(deps: NotifyDeps): ToolRegistration {
@@ -349,8 +361,8 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 	return defineTool({
 		name: "notify",
 		description:
-			"Send a message to the owner now. In a trigger run (cron, once, webhook) this is the only way to reach " +
-			"the owner; call it only when something needs their attention. channel defaults to where the owner last wrote.",
+			"Send a message now to the owner, or in a trigger run to the trigger's recipients. In a trigger run (cron, once, webhook) this is the only way to reach " +
+			"them; call it only when something needs their attention. channel is the owner's, default where they last wrote.",
 		parameters: Type.Object({
 			text: Type.String({ minLength: 1, maxLength: 4000 }),
 			channel: Type.Optional(Type.Union(channelNames.map((id) => Type.Literal(id)))),
@@ -374,9 +386,27 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 			const last = (await api.snapshot(LastInboundDoc, context))?.last?.channel;
 			const channel = (args.channel as ChannelId | undefined) ?? (last !== undefined && deps.channels.includes(last) ? last : (deps.channels[0] ?? "cli"));
 			const from = trigger === undefined ? ({ kind: "conversation", id: api.conversationId } as const) : ({ kind: "trigger", id: trigger.id } as const);
-			await api.commit((tx) => journaled(tx, api.taskId, "turn", () => openTurn(tx, deps.line(), { source: "run", channel, text: args.text, from })), context);
+			const turns: RunTurn[] = [];
+			const queued: string[] = [];
+			for (const recipient of trigger?.notify ?? [OWNER_ID]) {
+				if (recipient === OWNER_ID) {
+					turns.push({ source: "run", channel, text: args.text, from });
+					queued.push(`${OWNER_ID} on ${channel}`);
+					continue;
+				}
+				const user = deps.users.find((candidate) => candidate.id === recipient);
+				if (user === undefined) throw new Error(`Notify recipient ${recipient} is not configured.`);
+				turns.push({ source: "run", channel: "imessage", text: args.text, from, person: user.handle });
+				queued.push(`${recipient} on imessage`);
+			}
+			await api.commit(async (tx) => {
+				for (const turn of turns) {
+					const key = turn.person === undefined ? "turn" : `turn:${turn.person}`;
+					await journaled(tx, api.taskId, key, () => openTurn(tx, deps.line(), turn));
+				}
+			}, context);
 			// The run is done once its message is queued; ending here skips a model request that would only narrate the send.
-			return { content: [{ type: "text", text: `Queued for the owner on ${channel}; it goes out verbatim.` }], control: { terminate: true } };
+			return { content: [{ type: "text", text: `Queued for ${queued.join(" and ")}; it goes out verbatim.` }], control: { terminate: true } };
 		},
 	});
 }
