@@ -21,6 +21,7 @@ import { allPages } from "./pages.ts";
 import { AgentCatalog, type AgentType } from "./agents/catalog.ts";
 import type { Retry } from "./turn/turn.ts";
 import type { ChatUser } from "./config.ts";
+import type { A2APeers } from "./a2a/tools.ts";
 
 
 export const FAUX = { provider: "faux", modelId: "faux-1" } as const;
@@ -65,6 +66,7 @@ export async function openTestMochi(
 		readonly triggerDeadlineMs?: number;
 		readonly procPollMs?: number;
 		readonly users?: readonly ChatUser[];
+		readonly a2aPeers?: A2APeers;
 	} = {},
 ): Promise<TestMochi> {
 	const { skillsDir, agents, scheduling, log, ...options } = overrides;

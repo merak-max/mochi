@@ -41,6 +41,7 @@ import type { ChatUser } from "./config.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
 import { bindRepo, PublisherTask } from "./memory/publication.ts";
+import { type A2APeers, a2aFns } from "./a2a/tools.ts";
 import { defineDream, dreamConfig, type DreamConfigInput, reconcileDream } from "./memory/dream.ts";
 
 export interface MochiOptions {
@@ -86,6 +87,8 @@ export interface MochiOptions {
 	readonly persona?: string;
 	/** Users who may write on iMessage, with normalized handles. */
 	readonly users?: readonly ChatUser[];
+	/** The owner's other agents that root and runs may call over A2A. */
+	readonly a2aPeers?: A2APeers;
 }
 
 export interface Mochi {
@@ -103,6 +106,7 @@ const COMPACTION: CompactionPolicy = { enabled: true, reserveTokens: 16_384, kee
 export async function openMochi(options: MochiOptions, context: Context): Promise<Mochi> {
 	const { index, log } = options;
 	const users = options.users ?? [];
+	const a2aPeers = options.a2aPeers ?? new Map();
 	const dreaming = dreamConfig(options.memory?.dreaming, options.timeZone);
 	const registry = createRegistry();
 	const fast = fastCompletion(options.models, options.fast);
@@ -136,9 +140,10 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...agentFns({ catalog: options.agents, read: (read, context) => harness.commit(read, context), abortTask: (id, context) => harness.abortTask(id, context) }),
 		...triggerFns({ task: trigger, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users }),
 		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
+		...a2aFns(a2aPeers),
 	];
 	for (const extension of [
-		identityExtension([...options.channels.values()].map((channel) => channel.profile), users),
+		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),
 		notesExtension(),
 		skillsExtension(options.skillsDir),
 		compactionExtension(fast),

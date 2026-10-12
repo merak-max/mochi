@@ -80,6 +80,10 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	proc_status: { seats: OWNER_AND_RUN, inline: false },
 	proc_logs: { seats: OWNER_AND_RUN, inline: false },
 	proc_stop: { seats: OWNER_AND_RUN, inline: false },
+	a2a_list: { seats: OWNER_AND_RUN, inline: false },
+	a2a_ask: { seats: OWNER_AND_RUN, inline: false },
+	a2a_send: { seats: OWNER_AND_RUN, inline: false },
+	a2a_status: { seats: OWNER_AND_RUN, inline: false },
 };
 
 /** Anthropic's billing classifier flags these names. */

@@ -5,6 +5,7 @@ import { MediaConfigSchema } from "./media/media.ts";
 import { parseWith } from "./parse.ts";
 import { DreamConfigSchema, dreamConfig } from "./memory/dream.ts";
 import { normalizeHandle } from "./channels/imessage.ts";
+import type { A2APeer, A2APeers } from "./a2a/tools.ts";
 
 /** The owner's id. Configured users take user2, user3 and so on. */
 export const OWNER_ID = "user1";
@@ -16,6 +17,16 @@ const ChatUserSchema = Type.Object(
 /** Someone other than the owner who may message mochi on iMessage, in a conversation of their own. */
 export type ChatUser = Static<typeof ChatUserSchema>;
 
+const A2APeerSchema = Type.Object(
+	{
+		url: Type.String({ pattern: "^https?://" }),
+		/** The env variable that holds the bearer token, so the secret stays in the env file. */
+		tokenEnv: Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" }),
+		timeoutSeconds: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+	},
+	{ additionalProperties: false },
+);
+
 /** data/config.json. Later units add their own keys, such as trigger seeds. */
 const FileSchema = Type.Object(
 	{
@@ -26,6 +37,8 @@ const FileSchema = Type.Object(
 		/** Minutes of silence after which an owner message starts a fresh thread; 0 never resets. Default 60. */
 		idleResetMinutes: Type.Optional(Type.Integer({ minimum: 0 })),
 		users: Type.Optional(Type.Array(ChatUserSchema)),
+		/** The owner's other agents that mochi may call over A2A, by name. */
+		a2a: Type.Optional(Type.Object({ peers: Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), A2APeerSchema) }, { additionalProperties: false })),
 	},
 	{ additionalProperties: true },
 );
@@ -43,6 +56,8 @@ export interface Config {
 	readonly timeZone: string;
 	/** `file.users` with each handle normalized as the iMessage adapter compares senders. */
 	readonly users: readonly ChatUser[];
+	/** `file.a2a.peers` with each token read from its env variable. */
+	readonly a2aPeers: A2APeers;
 	readonly file: FileConfig;
 	readonly env: Readonly<Record<string, string | undefined>>;
 }
@@ -61,6 +76,7 @@ export async function loadConfig(env: Readonly<Record<string, string | undefined
 		firecrawlKey: env.FIRECRAWL_API_KEY?.trim() || undefined,
 		timeZone,
 		users: chatUsers(file.users ?? []),
+		a2aPeers: a2aPeers(file, env),
 		file,
 		env,
 	};
@@ -76,6 +92,15 @@ function chatUsers(users: readonly ChatUser[]): ChatUser[] {
 		normalized.push({ ...user, handle: normalizeHandle(user.handle) });
 	}
 	return normalized;
+}
+
+function a2aPeers(file: FileConfig, env: Readonly<Record<string, string | undefined>>): A2APeers {
+	const peers = new Map<string, A2APeer>();
+	for (const [name, peer] of Object.entries(file.a2a?.peers ?? {})) {
+		const token = env[peer.tokenEnv]?.trim() || undefined;
+		peers.set(name, { name, url: peer.url, token, tokenEnv: peer.tokenEnv, timeoutMs: (peer.timeoutSeconds ?? 600) * 1000 });
+	}
+	return peers;
 }
 
 async function readJson(path: string): Promise<unknown> {
