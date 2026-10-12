@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import type { Models } from "@earendil-works/pi-ai";
 import {
@@ -32,6 +33,7 @@ import { browserFns } from "./browser/browser.ts";
 import { fastBrowserFns } from "./browser/fast.ts";
 import { type MediaDeps, mediaFns } from "./media/media.ts";
 import { gifFns } from "./media/gif.ts";
+import { defineProcWatch, PROC_POLL_MS, procFns } from "./procs/procs.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
 import { compactionExtension, fastCompletion, handoffTool, idleResetIfStale } from "./turn/lifecycle.ts";
 import type { Classify } from "./brain/classifier.ts";
@@ -62,6 +64,8 @@ export interface MochiOptions {
 	readonly scriptDeadlineMs?: number;
 	/** Wall-clock limit of one trigger run. */
 	readonly triggerDeadlineMs?: number;
+	/** How often a background process's watcher reads its files. */
+	readonly procPollMs?: number;
 	readonly index: SearchIndex;
 	/** Bundled skills, `<skillsDir>/<name>/SKILL.md`, listed in the prompt and opened with `read`. */
 	readonly skillsDir: string;
@@ -117,6 +121,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const now = options.now ?? (() => new Date());
 	const dream = defineDream({ models: { brain: options.brain, fast: options.fast }, today: options.today, log });
 	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log });
+	const procDir = join(options.workDir, ".procs");
+	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
 	const fns = [
 		...webFns({ apiKey: options.firecrawlKey, models: options.models, fast: options.fast }),
 		...browserFns({ apiKey: options.firecrawlKey, profile: options.firecrawlProfile }),
@@ -127,6 +133,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...appsFns(options.apps ?? NO_APPS),
 		...agentFns({ catalog: options.agents, read: (read, context) => harness.commit(read, context), abortTask: (id, context) => harness.abortTask(id, context) }),
 		...triggerFns({ task: trigger, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users: options.users ?? [] }),
+		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 	];
 	const call = callTask(new Map(fns.map((fn) => [fn.name, fn])));
 	const code = { call, concurrency: 8, deadlineMs: options.scriptDeadlineMs ?? SCRIPT_DEADLINE_MS, abortTask: (id: TaskId, context: Context) => harness.abortTask(id, context) };
@@ -138,6 +145,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...providers,
 		defineExtension({ name: "work", tasks: [call] }),
 		defineExtension({ name: "agents", tasks: [AgentTask] }),
+		defineExtension({ name: "procs", tasks: [procWatch] }),
 		defineExtension({ name: "memory-maintenance", tasks: [PublisherTask, dream] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),

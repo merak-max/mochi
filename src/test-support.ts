@@ -63,6 +63,7 @@ export async function openTestMochi(
 		readonly apps?: Apps;
 		readonly scriptDeadlineMs?: number;
 		readonly triggerDeadlineMs?: number;
+		readonly procPollMs?: number;
 		readonly users?: readonly ChatUser[];
 	} = {},
 ): Promise<TestMochi> {

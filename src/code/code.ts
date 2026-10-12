@@ -118,8 +118,8 @@ const StoreDoc = defineDoc<{ values: { [key: string]: JsonValue } }>({
 const INTRO =
 	"Run JavaScript, an async function body, for everything beyond your direct tools. Only what it returns or prints " +
 	"reaches you, so loop, filter and fan out with Promise.all inside it. tools.* calls are durable: after a restart the " +
-	"script reruns and finished calls return their recorded result. Calls are real and not undone if the script fails; " +
-	"a failed script lists the completed actions, so read it before rerunning. Scripts stop after 10 minutes. Pass times " +
+	"script reruns and finished calls replay their result. Calls are real and not undone if the script fails; " +
+	"a failed script lists completed actions; read it before rerunning. Scripts stop after 10 minutes. Pass times " +
 	"in as arguments, never Date.now(). store(key, value) and load(key) keep small JSON between scripts; writes land on success.";
 
 const declare = (fns: readonly ScriptFn[]): string =>
@@ -141,7 +141,7 @@ export function codeTool(library: SeatLibrary, deps: CodeDeps): ToolRegistration
 	return defineTool({
 		name: "code",
 		// Constant per seat, so it never churns the prompt cache.
-		description: `${INTRO}\n\n${declare(library.inline)}\n/** Declarations of more functions: ${library.tail.map((fn) => fn.name).join(", ")}. */\ndeclare function search(query: string): Promise<string>;`,
+		description: `${INTRO}\n\n${declare(library.inline)}\n/** More functions: ${library.tail.map((fn) => fn.name).join(", ")}. */\ndeclare function search(query: string): Promise<string>;`,
 		parameters: Type.Object({ code: Type.String({ minLength: 1 }) }),
 		replay: "safe",
 		execute: async (args, api, context) => {

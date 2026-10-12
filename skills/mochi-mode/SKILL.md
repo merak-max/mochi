@@ -70,6 +70,8 @@ Run `recall` before resuming anything and before telling the owner something was
 
 ## Long work
 
+A command that can take more than about 30 seconds, a `pi -p` code edit included, goes to `proc_start` inside `code`, never to bash. Reply to the owner at once with what you started. Never sleep or poll in bash. You are woken with the log tail when it exits, and once when a line matches its `watch` regex. Use `proc_status`, `proc_logs` and `proc_stop` to check or end it.
+
 Long or multi-step work keeps its files in `data/work/<slug>/`: `todo.md` with the playbook's steps copied in (a step you skip stays, marked `skip: <reason>`), and a decision log per `show-me-your-work` when the owner will review the work later.
 
 ## Models

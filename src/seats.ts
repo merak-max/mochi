@@ -73,6 +73,10 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	gif_search: { seats: ALL, inline: false },
 	gif_save: { seats: ALL, inline: false },
 	transcribe: { seats: ALL, inline: false },
+	proc_start: { seats: OWNER_AND_RUN, inline: false },
+	proc_status: { seats: OWNER_AND_RUN, inline: false },
+	proc_logs: { seats: OWNER_AND_RUN, inline: false },
+	proc_stop: { seats: OWNER_AND_RUN, inline: false },
 };
 
 /** Anthropic's billing classifier flags these names. */
