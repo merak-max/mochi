@@ -37,7 +37,7 @@ import {
 	SendRejected,
 	SendUnknown,
 } from "../channels/types.ts";
-import type { Guest } from "../config.ts";
+import { type ChatUser, OWNER_ID } from "../config.ts";
 import type { Log } from "../log.ts";
 import { formatStamp, messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
@@ -75,9 +75,9 @@ export type OwnerTurn = {
 	readonly files: readonly SavedFile[];
 	/** Images and transcripts prepared once at ingest, so a rerun of `run` never transcribes again. */
 	readonly preparedMedia?: Awaited<ReturnType<typeof prepareInbound>>;
-	/** A guest's own conversation. Absent: root. */
+	/** A user's own conversation. Absent: root. */
 	readonly conversation?: ConversationId;
-	/** The guest's normalized handle, where the reply goes. Absent: the owner. */
+	/** The user's normalized handle, where the reply goes. Absent: the owner. */
 	readonly person?: string;
 };
 export type RunTurn = { readonly source: "run"; readonly channel: ChannelId; readonly text: string; readonly from: Origin };
@@ -159,30 +159,30 @@ export const LineDoc = defineDoc<{ conversation: ConversationId | null }>({
 	initial: () => ({ conversation: null }),
 });
 
-/** Each guest's own conversation, keyed by normalized handle. One writer: `ensureGuest`. */
-export const GuestDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
-	kind: "mochi.guest",
+/** Each user's own conversation, keyed by normalized handle. One writer: `ensureUser`. */
+export const UserDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
+	kind: "mochi.user",
 	version: 1,
 	scope: "session",
 	family: true,
 	initial: () => ({ conversation: null }),
 });
 
-export function guestInstructions(guest: Guest): string {
-	const who = guest.name ?? "a guest";
+export function userInstructions(user: ChatUser): string {
+	const about = user.name === undefined ? `iMessage ${user.handle}` : `${user.name}, iMessage ${user.handle}`;
 	const lines = [
-		`This conversation is with ${who} (iMessage ${guest.handle}), a friend of the owner, Shaurya. They are not the owner. ` +
+		`This conversation is with ${user.id} (${about}), a friend of ${OWNER_ID}, Shaurya Pratap Singh. They are not the owner. ` +
 			"In this conversation their messages instruct you, and 'the owner' in other sections still means Shaurya. " +
-			"Help them fully, in plain chat style. Shaurya's apps and accounts are his: do not send messages, email or make changes in them for a guest.",
+			"Help them fully, in plain chat style. Shaurya's apps and accounts are his: do not send messages, email or make changes in them for a user.",
 	];
-	if (guest.persona !== undefined) lines.push(guest.persona);
+	if (user.persona !== undefined) lines.push(user.persona);
 	return lines.join("\n\n");
 }
 
-/** Inside ingest's commit: the guest's conversation, created on their first message with root's model and thinking. */
-export async function ensureGuest(tx: Tx, guest: Guest): Promise<ConversationId> {
-	const doc = await tx.doc(GuestDoc, guest.handle, null);
-	if (doc.conversation === null) doc.conversation = await createSeatConversation(tx, "guest", { kind: "ownerless" }, { instructions: guestInstructions(guest) });
+/** Inside ingest's commit: the user's conversation, created on their first message with root's model and thinking. */
+export async function ensureUser(tx: Tx, user: ChatUser): Promise<ConversationId> {
+	const doc = await tx.doc(UserDoc, user.handle, null);
+	if (doc.conversation === null) doc.conversation = await createSeatConversation(tx, "user", { kind: "ownerless" }, { instructions: userInstructions(user) });
 	return doc.conversation;
 }
 
@@ -204,8 +204,8 @@ export interface Line {
 	readonly timeZone: string;
 	readonly workDir: string;
 	readonly media: Omit<MediaDeps, "workDir">;
-	/** Guests who may write on iMessage, each in a conversation of their own. */
-	readonly guests: readonly Guest[];
+	/** Users who may write on iMessage, each in a conversation of their own. */
+	readonly users: readonly ChatUser[];
 	/** Runs a command (`/new`, `/stop`, `/status`) instead of a model turn. */
 	readonly command?: (input: CommandInput, context: Context) => Promise<CommandReply>;
 	/** Resets a stale conversation before a message to it; true when it reset. */
@@ -285,7 +285,7 @@ function keepTyping(channel: Channel | undefined, person: string | undefined): (
 /** Who a Turn's bubbles go to. Absent: the owner. */
 const personOf = (input: TurnInput): string | undefined => (input.source === "run" ? undefined : input.person);
 
-/** A guest's replies chain apart from the owner's, so one never waits behind the other. */
+/** A user's replies chain apart from the owner's, so one never waits behind the other. */
 const tailKey = (channel: ChatChannelId, person: string | undefined): string => (person === undefined ? channel : `${channel}:${person}`);
 
 const running = (checkpoint: TurnState): NextTaskState<TurnState, TurnResult> => ({ status: "running", checkpoint });
@@ -455,10 +455,10 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 		}
 		case "message": {
 			const key = requestKey(inbound.channel, inbound.messageId);
-			const guest = inbound.person === undefined ? undefined : guestOf(line, inbound.person);
+			const user = inbound.person === undefined ? undefined : userOf(line, inbound.person);
 			// Only the owner's messages move notify's default channel and react's default target.
 			const recordInbound = async (tx: Tx) => {
-				if (guest === undefined) (await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
+				if (user === undefined) (await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
 				if (inbound.sequence !== undefined) {
 					const cursor = await tx.doc(InboundCursorDoc, inbound.channel, null);
 					cursor.sequence = Math.max(cursor.sequence ?? inbound.sequence, inbound.sequence);
@@ -468,12 +468,12 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 			if (command !== undefined && line.command !== undefined) {
 				const conversation = await harness.commit(async (tx) => {
 					await recordInbound(tx);
-					return guest === undefined ? undefined : ensureGuest(tx, guest);
+					return user === undefined ? undefined : ensureUser(tx, user);
 				}, context);
-				const forGuest = guest === undefined || conversation === undefined ? {} : { conversation, person: guest.handle };
-				return (await line.command({ key, command, channel: inbound.channel, ...forGuest }, context)).submission;
+				const forUser = user === undefined || conversation === undefined ? {} : { conversation, person: user.handle };
+				return (await line.command({ key, command, channel: inbound.channel, ...forUser }, context)).submission;
 			}
-			const known = guest === undefined ? ROOT_CONVERSATION_ID : ((await harness.snapshot(GuestDoc, guest.handle, context))?.conversation ?? null);
+			const known = user === undefined ? ROOT_CONVERSATION_ID : ((await harness.snapshot(UserDoc, user.handle, context))?.conversation ?? null);
 			if (known !== null) {
 				const prior = await harness.commit((tx) => tx.submissionByRequest(known, key), context);
 				if (prior !== undefined) return prior.id;
@@ -485,13 +485,13 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 			const preparedMedia = files.length === 0 ? undefined : await prepareInbound(files, line.workDir, line.media, context.abortSignal);
 			const turn: OwnerTurn = { source: "owner", channel: inbound.channel, key, tag, text: inbound.text, files, ...(preparedMedia === undefined ? {} : { preparedMedia }) };
 			const opened = await harness.commit(async (tx) => {
-				const known = guest === undefined ? ROOT_CONVERSATION_ID : (await tx.doc(GuestDoc, guest.handle, null)).conversation;
+				const known = user === undefined ? ROOT_CONVERSATION_ID : (await tx.doc(UserDoc, user.handle, null)).conversation;
 				if (known !== null) {
 					const submission = await tx.submissionByRequest(known, key);
 					if (submission !== undefined) return { kind: "existing" as const, submission: submission.id };
 				}
-				const conversation = known ?? (await ensureGuest(tx, guest!));
-				await openTurn(tx, line, guest === undefined ? turn : { ...turn, conversation, person: guest.handle });
+				const conversation = known ?? (await ensureUser(tx, user!));
+				await openTurn(tx, line, user === undefined ? turn : { ...turn, conversation, person: user.handle });
 				await recordInbound(tx);
 				return { kind: "opened" as const, conversation };
 			}, context);
@@ -503,9 +503,9 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 	}
 }
 
-function guestOf(line: Line, person: string): Guest {
-	for (const guest of line.guests) if (guest.handle === person) return guest;
-	throw new Error(`No guest ${person} is configured.`);
+function userOf(line: Line, person: string): ChatUser {
+	for (const user of line.users) if (user.handle === person) return user;
+	throw new Error(`No user ${person} is configured.`);
 }
 
 async function conversationOf(line: Line, id: ConversationId, context: Context): Promise<Conversation> {

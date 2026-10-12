@@ -92,7 +92,7 @@ test("Dreaming rejects a changed revision even when memory bytes return to the p
 	await assert.rejects(mochi.harness.commit((tx) => applyDreamBatch(tx, pin, [], "2026-10-05"), context), /Stale/);
 	await mochi.close();
 });
-test("Dreaming never reads a guest's conversation as evidence", async () => {
+test("Dreaming never reads a user's conversation as evidence", async () => {
 	const dir = await tempDir();
 	const faux = newFaux();
 	let supplied: { text: string }[] = [];
@@ -108,8 +108,8 @@ test("Dreaming never reads a guest's conversation as evidence", async () => {
 	const mochi = await openTestMochi(dir, faux, undefined, undefined, undefined, { memory, now });
 	await mochi.harness.commit(async (tx) => {
 		await tx.appendEntry(ROOT_CONVERSATION_ID, { kind: "test.source", model: [{ role: "user", content: "My sister is Asha.", timestamp: now().getTime() }] });
-		const guest = await createSeatConversation(tx, "guest", { kind: "ownerless" }, { instructions: "A guest." });
-		await tx.appendEntry(guest, { kind: "test.source", model: [{ role: "user", content: "My dog is Bruno.", timestamp: now().getTime() }] });
+		const user = await createSeatConversation(tx, "user", { kind: "ownerless" }, { instructions: "A user." });
+		await tx.appendEntry(user, { kind: "test.source", model: [{ role: "user", content: "My dog is Bruno.", timestamp: now().getTime() }] });
 	}, context);
 	mochi.harness.resume();
 	try {

@@ -28,7 +28,7 @@ export const commandOf = (text: string): Command | undefined => {
 	}
 };
 
-/** `conversation` and `person` are set for a guest's command, which acts on the guest's own conversation. */
+/** `conversation` and `person` are set for a user's command, which acts on the user's own conversation. */
 export type CommandInput = { readonly key: string; readonly command: Command; readonly channel: ChatChannelId; readonly conversation?: ConversationId; readonly person?: string };
 export type CommandTurn = { readonly source: "command"; readonly key: string; readonly channel: ChatChannelId; readonly text: string; readonly person?: string };
 export type CommandReply = { readonly submission: SubmissionId; readonly text: string };

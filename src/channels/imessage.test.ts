@@ -47,13 +47,13 @@ describe("imessage message mapping", () => {
 		assert.deepEqual(await toInbound(echo, OWNER), { kind: "ignored", reason: "outbound" });
 	});
 
-	it("accepts a configured guest with person set, still drops strangers, and never marks the owner a guest", async () => {
-		const GUEST = "+918423152032";
-		const fromGuest = fx.message(log, { id: "g", sender: "+91 84231 52032", content: fx.contents.text });
-		const parsed = await toInbound(fromGuest, OWNER, [GUEST]);
-		assert.equal(parsed.kind === "message" && parsed.message.kind === "message" ? parsed.message.person : "dropped", GUEST);
-		assert.deepEqual(await toInbound(fx.message(log, { id: "x", sender: "+15551234567", content: fx.contents.text }), OWNER, [GUEST]), { kind: "ignored", reason: "not-owner" });
-		const fromOwner = await toInbound(fx.message(log, { id: "o", sender: fx.OWNER, content: fx.contents.text }), OWNER, [GUEST, OWNER]);
+	it("accepts a configured user with person set, still drops strangers, and never marks the owner a user", async () => {
+		const USER = "+918423152032";
+		const fromUser = fx.message(log, { id: "g", sender: "+91 84231 52032", content: fx.contents.text });
+		const parsed = await toInbound(fromUser, OWNER, [USER]);
+		assert.equal(parsed.kind === "message" && parsed.message.kind === "message" ? parsed.message.person : "dropped", USER);
+		assert.deepEqual(await toInbound(fx.message(log, { id: "x", sender: "+15551234567", content: fx.contents.text }), OWNER, [USER]), { kind: "ignored", reason: "not-owner" });
+		const fromOwner = await toInbound(fx.message(log, { id: "o", sender: fx.OWNER, content: fx.contents.text }), OWNER, [USER, OWNER]);
 		assert.equal(fromOwner.kind === "message" && fromOwner.message.kind === "message" && "person" in fromOwner.message, false);
 	});
 
@@ -116,25 +116,25 @@ describe("imessage adapter", () => {
 		await assert.rejects(channel.send({ kind: "text", text: "after stop" }), ChannelDown);
 	});
 
-	it("replies to a guest in the guest's own DM and to the owner in the owner's", async () => {
-		const GUEST = "+918423152032";
-		const GUEST_DM = "any;-;+918423152032";
+	it("replies to a user in the user's own DM and to the owner in the owner's", async () => {
+		const USER = "+918423152032";
+		const USER_DM = "any;-;+918423152032";
 		const log = fx.events();
 		const ownerSpace = fx.space(log, fx.OWNER_DM);
-		const guestSpace = fx.space(log, GUEST_DM);
-		const fake = { ...fx.app(ownerSpace, []), dm: async (handle: string) => (handle === GUEST ? guestSpace : ownerSpace) };
-		const channel = channelWith(fake, { guests: [GUEST] });
+		const userSpace = fx.space(log, USER_DM);
+		const fake = { ...fx.app(ownerSpace, []), dm: async (handle: string) => (handle === USER ? userSpace : ownerSpace) };
+		const channel = channelWith(fake, { users: [USER] });
 		const controller = new AbortController();
 		const running = channel.run(async () => {}, controller.signal);
 		await new Promise((resolve) => setImmediate(resolve));
-		await channel.send({ kind: "text", text: "for the guest" }, GUEST);
-		await channel.typing(true, GUEST);
+		await channel.send({ kind: "text", text: "for the user" }, USER);
+		await channel.typing(true, USER);
 		await channel.send({ kind: "text", text: "for the owner" });
 		assert.deepEqual(log.sent, [
-			{ space: GUEST_DM, text: "for the guest" },
+			{ space: USER_DM, text: "for the user" },
 			{ space: fx.OWNER_DM, text: "for the owner" },
 		]);
-		assert.deepEqual(log.typing, [`${GUEST_DM}:on`]);
+		assert.deepEqual(log.typing, [`${USER_DM}:on`]);
 		controller.abort();
 		await running;
 	});

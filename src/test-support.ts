@@ -20,7 +20,7 @@ import type { Log } from "./log.ts";
 import { allPages } from "./pages.ts";
 import { AgentCatalog, type AgentType } from "./agents/catalog.ts";
 import type { Retry } from "./turn/turn.ts";
-import type { Guest } from "./config.ts";
+import type { ChatUser } from "./config.ts";
 
 
 export const FAUX = { provider: "faux", modelId: "faux-1" } as const;
@@ -63,7 +63,7 @@ export async function openTestMochi(
 		readonly apps?: Apps;
 		readonly scriptDeadlineMs?: number;
 		readonly triggerDeadlineMs?: number;
-		readonly guests?: readonly Guest[];
+		readonly users?: readonly ChatUser[];
 	} = {},
 ): Promise<TestMochi> {
 	const { skillsDir, agents, scheduling, log, ...options } = overrides;
@@ -119,7 +119,7 @@ export function newFaux(): FauxProviderHandle {
 
 export const PROFILES: Readonly<Record<ChatChannelId, ChannelProfile>> = { imessage: IMESSAGE_PROFILE, telegram: TELEGRAM_PROFILE, whatsapp: WHATSAPP_PROFILE };
 
-/** A channel that records each bubble it sends (a link as its URL, a file as its name), each reaction, and each guest's bubbles by handle. */
+/** A channel that records each bubble it sends (a link as its URL, a file as its name), each reaction, and each user's bubbles by handle. */
 export function recordingChannel(id: ChatChannelId, options: { react: boolean } = { react: true }) {
 	const sent: string[] = [];
 	const sentTo: { person: string | undefined; text: string }[] = [];

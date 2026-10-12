@@ -6,12 +6,15 @@ import { parseWith } from "./parse.ts";
 import { DreamConfigSchema, dreamConfig } from "./memory/dream.ts";
 import { normalizeHandle } from "./channels/imessage.ts";
 
-const GuestSchema = Type.Object(
-	{ handle: Type.String({ minLength: 1 }), name: Type.Optional(Type.String({ minLength: 1 })), persona: Type.Optional(Type.String({ minLength: 1 })) },
+/** The owner's id. Configured users take user2, user3 and so on. */
+export const OWNER_ID = "user1";
+
+const ChatUserSchema = Type.Object(
+	{ id: Type.String({ pattern: "^user[0-9]+$" }), handle: Type.String({ minLength: 1 }), name: Type.Optional(Type.String({ minLength: 1 })), persona: Type.Optional(Type.String({ minLength: 1 })) },
 	{ additionalProperties: false },
 );
 /** Someone other than the owner who may message mochi on iMessage, in a conversation of their own. */
-export type Guest = Static<typeof GuestSchema>;
+export type ChatUser = Static<typeof ChatUserSchema>;
 
 /** data/config.json. Later units add their own keys, such as trigger seeds. */
 const FileSchema = Type.Object(
@@ -22,7 +25,7 @@ const FileSchema = Type.Object(
 		media: Type.Optional(MediaConfigSchema),
 		/** Minutes of silence after which an owner message starts a fresh thread; 0 never resets. Default 60. */
 		idleResetMinutes: Type.Optional(Type.Integer({ minimum: 0 })),
-		guests: Type.Optional(Type.Array(GuestSchema)),
+		users: Type.Optional(Type.Array(ChatUserSchema)),
 	},
 	{ additionalProperties: true },
 );
@@ -38,8 +41,8 @@ export interface Config {
 	/** Absent: the web functions in `code` fail with a clear error. */
 	readonly firecrawlKey: string | undefined;
 	readonly timeZone: string;
-	/** `file.guests` with each handle normalized as the iMessage adapter compares senders. */
-	readonly guests: readonly Guest[];
+	/** `file.users` with each handle normalized as the iMessage adapter compares senders. */
+	readonly users: readonly ChatUser[];
 	readonly file: FileConfig;
 	readonly env: Readonly<Record<string, string | undefined>>;
 }
@@ -57,10 +60,22 @@ export async function loadConfig(env: Readonly<Record<string, string | undefined
 		openRouterKey: env.OPENROUTER_API_KEY || undefined,
 		firecrawlKey: env.FIRECRAWL_API_KEY?.trim() || undefined,
 		timeZone,
-		guests: (file.guests ?? []).map((guest) => ({ ...guest, handle: normalizeHandle(guest.handle) })),
+		users: chatUsers(file.users ?? []),
 		file,
 		env,
 	};
+}
+
+function chatUsers(users: readonly ChatUser[]): ChatUser[] {
+	const seen = new Set<string>([OWNER_ID]);
+	const normalized: ChatUser[] = [];
+	for (const user of users) {
+		if (user.id === OWNER_ID) throw new Error(`Invalid data/config.json: users id ${OWNER_ID} is the owner's.`);
+		if (seen.has(user.id)) throw new Error(`Invalid data/config.json: users id ${user.id} appears twice.`);
+		seen.add(user.id);
+		normalized.push({ ...user, handle: normalizeHandle(user.handle) });
+	}
+	return normalized;
 }
 
 async function readJson(path: string): Promise<unknown> {

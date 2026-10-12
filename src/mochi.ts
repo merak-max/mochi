@@ -34,7 +34,7 @@ import { type MediaDeps, mediaFns } from "./media/media.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
 import { compactionExtension, fastCompletion, handoffTool, idleResetIfStale } from "./turn/lifecycle.ts";
 import type { Classify } from "./brain/classifier.ts";
-import type { Guest } from "./config.ts";
+import type { ChatUser } from "./config.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
 import { bindRepo, PublisherTask } from "./memory/publication.ts";
@@ -79,8 +79,8 @@ export interface MochiOptions {
 	readonly log: Log;
 	/** Root's own instructions (`data/persona.md`), rendered after every section; absent leaves root's as they are. */
 	readonly persona?: string;
-	/** Guests who may write on iMessage, with normalized handles. */
-	readonly guests?: readonly Guest[];
+	/** Users who may write on iMessage, with normalized handles. */
+	readonly users?: readonly ChatUser[];
 }
 
 export interface Mochi {
@@ -190,7 +190,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		timeZone: options.timeZone,
 		workDir: options.workDir,
 		media,
-		guests: options.guests ?? [],
+		users: options.users ?? [],
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
 		...(idleResetMinutes > 0 ? { idleReset: (conversation: Conversation, key: string, context: Context) => idleResetIfStale({ harness, fast, idleResetMinutes, now: () => now().getTime() }, conversation, key, context) } : {}),
 	};

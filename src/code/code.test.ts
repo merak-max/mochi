@@ -78,7 +78,7 @@ test("every seat's code declares a return type per function and finds the rest w
 		const description = mochi.registry.snapshot().extension(`seat-${seat}`)?.tools?.find((tool) => tool.name === "code")?.description ?? "";
 		assert.match(description, /web_search\(args: \{ excludeDomains\?: Array<string>; includeDomains\?: Array<string>; limit\?: number; query: string; recency\?: [^}]*\}\): Promise<Array<\{ snippet: string; title: string; url: string; \}>>/);
 		assert.match(description, /apps_search\(args: \{ query: string; \}\): Promise<\{ items: Array<\{ path: string; signature: string; \}>; \}>/);
-		const tail = { owner: ", agent_send, agent_stop, agent_status, trigger_remove", run: ", trigger_remove", worker: "", guest: "" }[seat];
+		const tail = { owner: ", agent_send, agent_stop, agent_status, trigger_remove", run: ", trigger_remove", worker: "", user: "" }[seat];
 		assert.ok(description.includes(`more functions: web_map, browse, browse_fast, image_gen, video_gen, speak, transcribe, classify, apps_skills${tail}.`));
 		assert.equal(/trigger_add\(/.test(description), seat === "owner");
 		assert.equal(/trigger_list\(/.test(description), seat === "owner" || seat === "run");

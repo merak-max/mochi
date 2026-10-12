@@ -34,7 +34,7 @@ export interface Attachment {
 	readonly bytes: Uint8Array;
 }
 
-/** What an adapter hands the sink. The owner or a configured guest: the adapter has already dropped everyone else. */
+/** What an adapter hands the sink. The owner or a configured user: the adapter has already dropped everyone else. */
 export type OwnerInbound =
 	| {
 			readonly kind: "message";
@@ -45,7 +45,7 @@ export type OwnerInbound =
 			readonly attachments: readonly Attachment[];
 			/** The platform's durable event sequence, where it has one (iMessage). */
 			readonly sequence?: number;
-			/** A configured guest's normalized handle. Absent: the owner wrote it. */
+			/** A configured user's normalized handle. Absent: the owner wrote it. */
 			readonly person?: string;
 	  }
 	/** The owner reacted to a message. It becomes a passive transcript write, never a model turn. */

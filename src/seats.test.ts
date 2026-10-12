@@ -13,7 +13,7 @@ import { FAUX, newFaux, openTestMochi, tempDir } from "./test-support.ts";
 
 const CODING = ["read", "write", "edit", "bash"];
 
-test("each seat's request carries its tools within BUDGET: only root starts agents or adds triggers, root has no notify, and a guest has no owner notes", async () => {
+test("each seat's request carries its tools within BUDGET: only root starts agents or adds triggers, root has no notify, and a user has no owner notes", async () => {
 	const surfaces = await Promise.all(SEATS.map(async (seat) => [seat, await measureSurface(seat)] as const));
 	const over = surfaces.flatMap(([seat, { tools, sections }]) =>
 		[["tools", tools.reduce((sum, tool) => sum + tool.bytes, 0), BUDGET.tools[seat]] as const, ...sections.map(({ name, bytes }) => [name, bytes, BUDGET.sections[name] ?? 0] as const)]
@@ -26,10 +26,10 @@ test("each seat's request carries its tools within BUDGET: only root starts agen
 		owner: [...CODING, "note", "recall", "react", "handoff", "code"],
 		run: [...CODING, "recall", "notify", "code"],
 		worker: [...CODING, "recall", "code"],
-		guest: [...CODING, "recall", "handoff", "code"],
+		user: [...CODING, "recall", "handoff", "code"],
 	});
-	const guestSections = surfaces.find(([seat]) => seat === "guest")![1].sections.map((section) => section.name);
-	assert.deepEqual(guestSections.filter((name) => name === "owner" || name === "notes-index"), []);
+	const userSections = surfaces.find(([seat]) => seat === "user")![1].sections.map((section) => section.name);
+	assert.deepEqual(userSections.filter((name) => name === "owner" || name === "notes-index"), []);
 	assert.deepEqual(Object.values(seen).flat().filter((name) => FORBIDDEN_TOOL_NAME.test(name)), []);
 });
 

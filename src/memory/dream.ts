@@ -66,13 +66,13 @@ async function pinMemory(tx: Tx, model: ModelRef, slot: number, task: TaskId): P
 	let cutoff = 0;
 	let chars = 0;
 	let selected = 0;
-	const guestSelection = JSON.stringify(selection("guest"));
+	const userSelection = JSON.stringify(selection("user"));
 	const ordered = [...conversations.filter((conversation) => conversation.id === ROOT_CONVERSATION_ID), ...conversations.filter((conversation) => conversation.id !== ROOT_CONVERSATION_ID).reverse()];
 	for (const conversation of ordered) {
 		const marker = await tx.doc(MemoryConversationDoc, conversation.id);
 		const agent = await tx.doc(AgentDoc, conversation.id);
 		if (marker.maintenance || agent.instructions === INSTRUCTIONS || agent.instructions === "Local memory publication. No model input.") continue;
-		if (JSON.stringify(agent.extensions) === guestSelection) continue;
+		if (JSON.stringify(agent.extensions) === userSelection) continue;
 		if (selected >= 64) break;
 		selected++;
 		const entries = await tx.scanEntries({ conversationId: conversation.id }, 50);

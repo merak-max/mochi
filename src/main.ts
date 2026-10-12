@@ -12,7 +12,7 @@ import { createIMessageChannel } from "./channels/imessage.ts";
 import { createTelegramChannel } from "./channels/telegram.ts";
 import { createWhatsAppChannel } from "./channels/whatsapp.ts";
 import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./channels/types.ts";
-import { type Config, type Guest, loadConfig } from "./config.ts";
+import { type Config, type ChatUser, loadConfig } from "./config.ts";
 import { SearchIndex } from "./index/fts.ts";
 import { acquireLock } from "./lock.ts";
 import { log, setLogFile } from "./log.ts";
@@ -28,9 +28,9 @@ import { connectApps } from "./apps/apps.ts";
 import { InboundCursorDoc, ingest } from "./turn/turn.ts";
 import { runFeed } from "./memory/feed.ts";
 
-/** Only iMessage serves guests; the other adapters stay owner-only. */
-const ADAPTERS: Readonly<Record<ChatChannelId, (env: Env, guests: readonly Guest[]) => Setup<Channel>>> = {
-	imessage: (env, guests) => createIMessageChannel(env, { guests: guests.map((guest) => guest.handle) }),
+/** Only iMessage serves users; the other adapters stay owner-only. */
+const ADAPTERS: Readonly<Record<ChatChannelId, (env: Env, users: readonly ChatUser[]) => Setup<Channel>>> = {
+	imessage: (env, users) => createIMessageChannel(env, { users: users.map((user) => user.handle) }),
 	telegram: (env) => createTelegramChannel(env),
 	whatsapp: (env) => createWhatsAppChannel(env),
 };
@@ -109,7 +109,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const running = withAbortSignal(controller.signal, BACKGROUND_CONTEXT);
 	const index = new SearchIndex(join(config.dataDir, "index.sqlite"));
 
-	const { channels, report: channelReport } = channelSet === "terminal" ? { channels: new Map() as Channels, report: [] } : configuredChannels(config.env, config.guests);
+	const { channels, report: channelReport } = channelSet === "terminal" ? { channels: new Map() as Channels, report: [] } : configuredChannels(config.env, config.users);
 	const workDir = join(config.dataDir, "work");
 	await mkdir(workDir, { recursive: true });
 	for (const line of [...setupReport(services(config)), ...channelReport]) log("setup", { line });
@@ -134,7 +134,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			agents: await AgentCatalog.load(join(REPO, "agents")),
 			workDir,
 			channels,
-			guests: config.guests,
+			users: config.users,
 			timeZone: config.timeZone,
 			publicUrl: config.env.MOCHI_PUBLIC_URL,
 			scheduling: channelSet === "terminal" ? "local" : "daemon",
@@ -203,8 +203,8 @@ export function services(config: Pick<Config, "bifrostKey" | "openRouterKey" | "
 }
 
 /** Every ready adapter, and one readiness line per adapter. */
-export function configuredChannels(env: Env, guests: readonly Guest[] = []): { readonly channels: Channels; readonly report: readonly string[] } {
-	const setups = (Object.keys(ADAPTERS) as ChatChannelId[]).map((id) => [id, ADAPTERS[id](env, guests)] as const);
+export function configuredChannels(env: Env, users: readonly ChatUser[] = []): { readonly channels: Channels; readonly report: readonly string[] } {
+	const setups = (Object.keys(ADAPTERS) as ChatChannelId[]).map((id) => [id, ADAPTERS[id](env, users)] as const);
 	const channels = new Map(setups.flatMap(([id, setup]) => (setup.kind === "ready" ? [[id, setup.value] as const] : [])));
 	return { channels, report: setupReport(setups) };
 }
