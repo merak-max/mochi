@@ -7,6 +7,12 @@ export function messageText(message: Message): string {
 	return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
 }
 
+/** `text` cut to `max` characters with "…", never inside a surrogate pair. */
+export function clip(text: string, max: number): string {
+	const chars = [...text];
+	return chars.length > max ? `${chars.slice(0, max).join("")}…` : text;
+}
+
 /** `2026-10-05 14:02 IST` in the owner's zone. */
 export function formatStamp(date: Date, timeZone: string): string {
 	const parts = Object.fromEntries(

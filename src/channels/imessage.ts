@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Content } from "spectrum-ts";
 import { type Log, log as defaultLog } from "../log.ts";
+import { clip } from "../text.ts";
 import type { Setup } from "../setup.ts";
 import {
 	type Attachment,
@@ -15,6 +16,7 @@ import {
 	type OwnerInbound,
 	type Reaction,
 	REACTIONS,
+	type ReplyTarget,
 	SendRejected,
 	SendUnknown,
 } from "./types.ts";
@@ -35,6 +37,12 @@ export const IMESSAGE_PROFILE: ChannelProfile = {
 };
 
 const TAPBACKS: Readonly<Record<Reaction, string>> = { love: "❤️", like: "👍", dislike: "👎", laugh: "😂", emphasize: "‼️", question: "❓" };
+const TAPBACK_TEXT_CHARS = 200;
+
+function reactionOf(emoji: string): Reaction | "emoji" {
+	for (const reaction of REACTIONS) if (TAPBACKS[reaction] === emoji) return reaction;
+	return "emoji";
+}
 
 export interface ReactionHandle {
 	unsend(): Promise<void>;
@@ -48,10 +56,14 @@ export interface IMessageMessage {
 	readonly timestamp: Date;
 	readonly content: Content;
 	react(emoji: string): Promise<ReactionHandle | undefined>;
+	/** Sends a read receipt. Only inbound messages can be marked read. */
+	read?(): Promise<void>;
 }
 
 export interface IMessageSpace {
 	send(text: string): Promise<unknown>;
+	/** A threaded reply to `targetMessageId`; a plain send when the target cannot be found. */
+	sendReply(text: string, targetMessageId: string): Promise<unknown>;
 	sendLink(url: string): Promise<unknown>;
 	sendFile(file: { readonly name: string; readonly mimeType: string; readonly bytes: Uint8Array }): Promise<unknown>;
 	startTyping(): Promise<void>;
@@ -93,6 +105,30 @@ const IMESSAGE_ENV = ["PHOTON_PROJECT_ID", "PHOTON_PROJECT_SECRET", "IMESSAGE_OW
 interface Collected {
 	readonly text: string[];
 	readonly attachments: Attachment[];
+	replyTo?: ReplyTarget;
+}
+
+/** The text a message shows: its text, its link, or its group's texts. "" for anything else, such as a stub reply target. */
+function contentText(content: Content): string {
+	switch (content.type) {
+		case "text":
+			return content.text;
+		case "richlink":
+			return content.url;
+		case "reply":
+		case "effect":
+			return contentText(content.content);
+		case "group": {
+			const texts: string[] = [];
+			for (const item of content.items) {
+				const text = contentText(item.content);
+				if (text !== "") texts.push(text);
+			}
+			return texts.join("\n");
+		}
+		default:
+			return "";
+	}
 }
 
 async function collect(content: Content, into: Collected): Promise<void> {
@@ -110,6 +146,9 @@ async function collect(content: Content, into: Collected): Promise<void> {
 			into.text.push(content.url);
 			return;
 		case "reply":
+			into.replyTo = { messageId: content.target.id, text: contentText(content.target.content), fromAgent: content.target.direction === "outbound" };
+			await collect(content.content, into);
+			return;
 		case "effect":
 			await collect(content.content, into);
 			return;
@@ -128,12 +167,25 @@ export async function toInbound(message: IMessageMessage, owner: string, users: 
 	const sender = message.sender?.id === undefined ? "" : normalizeHandle(message.sender.id);
 	const isUser = sender !== "" && sender !== owner && users.includes(sender);
 	if (sender === "" || (sender !== owner && !isUser)) return { kind: "ignored", reason: "not-owner" };
+	const person = isUser ? { person: sender } : {};
+	const sequence = message.sequence === undefined ? {} : { sequence: message.sequence };
+	const content = message.content;
+	if (content.type === "reaction") {
+		const target = content.target;
+		const onText = clip(contentText(target.content), TAPBACK_TEXT_CHARS);
+		const reaction = reactionOf(content.emoji);
+		return {
+			kind: "message",
+			message: { kind: "tapback", channel: "imessage", messageId: message.id, on: target.id, reaction, emoji: content.emoji, onText, fromAgent: target.direction === "outbound", at: message.timestamp, ...person },
+		};
+	}
 	const collected: Collected = { text: [], attachments: [] };
-	await collect(message.content, collected);
+	await collect(content, collected);
 	if (collected.text.length === 0 && collected.attachments.length === 0) return { kind: "ignored", reason: "empty" };
+	const replyTo = collected.replyTo === undefined ? {} : { replyTo: collected.replyTo };
 	return {
 		kind: "message",
-		message: { kind: "message", channel: "imessage", messageId: message.id, text: collected.text.join("\n"), at: message.timestamp, attachments: collected.attachments, ...(message.sequence === undefined ? {} : { sequence: message.sequence }), ...(isUser ? { person: sender } : {}) },
+		message: { kind: "message", channel: "imessage", messageId: message.id, text: collected.text.join("\n"), at: message.timestamp, attachments: collected.attachments, ...sequence, ...person, ...replyTo },
 	};
 }
 
@@ -161,13 +213,18 @@ export function classifyIMessageError(error: unknown): DeliveryError {
 }
 
 async function connectPhoton(credentials: { readonly projectId: string; readonly projectSecret: string }): Promise<IMessageApp> {
-	const { Spectrum, attachment, richlink } = await import("spectrum-ts");
+	const { Spectrum, attachment, reply, richlink } = await import("spectrum-ts");
 	const { imessage } = await import("spectrum-ts/providers/imessage");
 	// @ts-expect-error spectrum-ts 12.10.1 provider types do not resolve under exactOptionalPropertyTypes; runtime accepts an empty config.
 	const app = await Spectrum({ ...credentials, providers: [imessage.config()] });
 	const platform = imessage(app);
 	const wrap = (space: Awaited<ReturnType<typeof platform.space.create>>): IMessageSpace => ({
 		send: (text) => space.send(text),
+		sendReply: async (text, targetMessageId) => {
+			const target = await space.getMessage(targetMessageId).catch(() => undefined);
+			if (target === undefined) return space.send(text);
+			return space.send(reply(text, target));
+		},
 		sendLink: (url) => space.send(richlink(url)),
 		sendFile: (file) => space.send(attachment(Buffer.from(file.bytes), { name: file.name, mimeType: file.mimeType })),
 		startTyping: () => space.startTyping(),
@@ -228,8 +285,9 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 						if (!quiet) log("channel.message_dropped", { channel: "imessage", reason: parsed.reason, content: message.content.type });
 						return;
 					}
-					spaces.set(parsed.message.kind === "message" ? (parsed.message.person ?? owner) : owner, from);
+					spaces.set(parsed.message.person ?? owner, from);
 					remember(message);
+					if (parsed.message.kind === "message") message.read?.().catch(() => {});
 					await sink(parsed.message);
 				} catch (error) {
 					log("channel.handler_failed", { channel: "imessage", error: String(error) });
@@ -287,11 +345,17 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 			}
 		},
 
-		async send(bubble, person) {
+		async send(bubble, person, options) {
 			try {
 				const target = await space(person);
-				if (bubble.kind === "text") for (const text of chunkText(bubble.text, TEXT_LIMIT)) await target.send(text);
-				else if (bubble.kind === "link") await target.sendLink(bubble.url);
+				if (bubble.kind === "text") {
+					const chunks = chunkText(bubble.text, TEXT_LIMIT);
+					for (let index = 0; index < chunks.length; index++) {
+						const replyTo = index === 0 ? options?.replyTo : undefined;
+						if (replyTo === undefined) await target.send(chunks[index]!);
+						else await target.sendReply(chunks[index]!, replyTo);
+					}
+				} else if (bubble.kind === "link") await target.sendLink(bubble.url);
 				else await target.sendFile(bubble);
 			} catch (error) {
 				throw classifyIMessageError(error);

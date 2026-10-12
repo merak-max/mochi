@@ -34,12 +34,13 @@ import {
 	DeliveryError,
 	type OwnerInbound,
 	REACTIONS,
+	type ReplyTarget,
 	SendRejected,
 	SendUnknown,
 } from "../channels/types.ts";
 import { type ChatUser, OWNER_ID } from "../config.ts";
 import type { Log } from "../log.ts";
-import { formatStamp, messageText } from "../text.ts";
+import { clip, formatStamp, messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import { loadAttachment, type MediaDeps, prepareInbound, splitAttachments } from "../media/media.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
@@ -79,6 +80,10 @@ export type OwnerTurn = {
 	readonly conversation?: ConversationId;
 	/** The user's normalized handle, where the reply goes. Absent: the owner. */
 	readonly person?: string;
+	/** The message this one replies to, shown to the model. */
+	readonly replyTo?: ReplyTarget;
+	/** The inbound message id. The first text bubble of the answer is a threaded reply to it. */
+	readonly threadOn?: string;
 };
 export type RunTurn = { readonly source: "run"; readonly channel: ChannelId; readonly text: string; readonly from: Origin };
 export type TurnInput = OwnerTurn | RunTurn | CommandTurn;
@@ -239,8 +244,18 @@ export function deliveredRecord(input: RunTurn): string {
 /** Root's input for an owner Turn, and the only builder of it, so ingest and `run` submit identical content. */
 async function inputOf(workDir: string, turn: OwnerTurn, media: Omit<MediaDeps, "workDir">, signal?: AbortSignal): Promise<UserInput> {
 	const { notes, images } = turn.preparedMedia ?? (await prepareInbound(turn.files, workDir, media, signal));
-	const text = [turn.tag, turn.text, ...notes].join("\n");
+	const lines = [turn.tag];
+	if (turn.replyTo !== undefined) lines.push(replyLine(turn.replyTo));
+	const text = [...lines, turn.text, ...notes].join("\n");
 	return images.length === 0 ? text : [{ type: "text", text }, ...images];
+}
+
+const REPLY_TEXT_CHARS = 500;
+
+function replyLine(target: ReplyTarget): string {
+	const whose = target.fromAgent ? "your" : "their";
+	const text = target.text === "" ? "(text not available; use recall)" : clip(target.text, REPLY_TEXT_CHARS);
+	return `[replying to ${whose} message id=${target.messageId}] ${text}`;
 }
 
 async function saveFiles(workDir: string, message: Extract<OwnerInbound, { kind: "message" }>): Promise<SavedFile[]> {
@@ -384,7 +399,9 @@ export function defineTurn(host: TurnHost): TurnTask {
 								throw new SendRejected(`The attachment ${bubble.name} could not be read inside the work directory.`);
 							}
 						}
-						await channel.send(outgoingBubble, person);
+						const threadOn = task.input.source === "owner" ? task.input.threadOn : undefined;
+						if (sent === 0 && outgoingBubble.kind === "text" && threadOn !== undefined) await channel.send(outgoingBubble, person, { replyTo: threadOn });
+						else await channel.send(outgoingBubble, person);
 					} catch (error) {
 						if (!(error instanceof DeliveryError)) {
 							log("turn.faulted", { task: task.id, answer, error: String(error) });
@@ -449,9 +466,15 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 			return (await root.submit({ type: "input", content, requestId: requestKey("cli", inbound.messageId), whenBusy: "steer" }, context)).id;
 		}
 		case "tapback": {
-			const what = inbound.reaction === "none" ? `removed their reaction on message id=${inbound.on}` : `reacted ${inbound.reaction} to message id=${inbound.on}`;
-			const model = [{ role: "user" as const, content: `[context, no reply needed: the owner ${what} on ${inbound.channel}]`, timestamp: inbound.at.getTime() }];
-			return (await root.submit({ type: "write", requestId: requestKey(inbound.channel, inbound.messageId), entry: { kind: "mochi.tapback", model } }, context)).id;
+			const user = inbound.person === undefined ? undefined : userOf(line, inbound.person);
+			const who = user === undefined ? OWNER_ID : user.id;
+			const whose = inbound.fromAgent ? "your" : "their";
+			const what = inbound.reaction === "none" ? "removed a reaction from" : `reacted ${inbound.emoji ?? inbound.reaction} to`;
+			const quoted = inbound.onText === "" ? "" : `: "${inbound.onText}"`;
+			const model = [{ role: "user" as const, content: `[context, no reply needed: ${who} ${what} ${whose} message id=${inbound.on}${quoted}]`, timestamp: inbound.at.getTime() }];
+			const id = user === undefined ? ROOT_CONVERSATION_ID : await harness.commit((tx) => ensureUser(tx, user), context);
+			const target = await conversationOf(line, id, context);
+			return (await target.submit({ type: "write", requestId: requestKey(inbound.channel, inbound.messageId), entry: { kind: "mochi.tapback", model } }, context)).id;
 		}
 		case "message": {
 			const key = requestKey(inbound.channel, inbound.messageId);
@@ -483,7 +506,8 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 			const tag = tagOf(inbound.channel, inbound.messageId, inbound.at, line.timeZone);
 			const files = await saveFiles(line.workDir, inbound);
 			const preparedMedia = files.length === 0 ? undefined : await prepareInbound(files, line.workDir, line.media, context.abortSignal);
-			const turn: OwnerTurn = { source: "owner", channel: inbound.channel, key, tag, text: inbound.text, files, ...(preparedMedia === undefined ? {} : { preparedMedia }) };
+			const thread = inbound.replyTo === undefined ? {} : { replyTo: inbound.replyTo, threadOn: inbound.messageId };
+			const turn: OwnerTurn = { source: "owner", channel: inbound.channel, key, tag, text: inbound.text, files, ...(preparedMedia === undefined ? {} : { preparedMedia }), ...thread };
 			const opened = await harness.commit(async (tx) => {
 				const known = user === undefined ? ROOT_CONVERSATION_ID : (await tx.doc(UserDoc, user.handle, null)).conversation;
 				if (known !== null) {

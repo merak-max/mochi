@@ -18,12 +18,13 @@ export const contents = {
 export interface FakeEvents {
 	readonly reacted: Array<{ readonly id: string; readonly emoji: string }>;
 	readonly unsent: string[];
-	readonly sent: Array<{ readonly space: string; readonly text?: string; readonly link?: string; readonly file?: string }>;
+	readonly sent: Array<{ readonly space: string; readonly text?: string; readonly link?: string; readonly file?: string; readonly replyTo?: string }>;
 	readonly typing: string[];
+	readonly read: string[];
 }
 
 export function events(): FakeEvents {
-	return { reacted: [], unsent: [], sent: [], typing: [] };
+	return { reacted: [], unsent: [], sent: [], typing: [], read: [] };
 }
 
 export function message(
@@ -40,6 +41,9 @@ export function message(
 			log.reacted.push({ id: fields.id, emoji });
 			return { unsend: async () => void log.unsent.push(`${fields.id}:${emoji}`) };
 		},
+		async read() {
+			log.read.push(fields.id);
+		},
 	};
 }
 
@@ -51,6 +55,7 @@ export function space(log: FakeEvents, id: string, known: readonly IMessageMessa
 	};
 	return {
 		send: (text) => record({ space: id, text }),
+		sendReply: (text, replyTo) => record({ space: id, text, replyTo }),
 		sendLink: (link) => record({ space: id, link }),
 		sendFile: (file) => record({ space: id, file: file.name }),
 		async startTyping() {

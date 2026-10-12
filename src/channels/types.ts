@@ -34,6 +34,14 @@ export interface Attachment {
 	readonly bytes: Uint8Array;
 }
 
+/** The message an inbound message replies to. `text` is "" when the platform did not send it. */
+export interface ReplyTarget {
+	readonly messageId: string;
+	readonly text: string;
+	/** Mochi sent the target. */
+	readonly fromAgent: boolean;
+}
+
 /** What an adapter hands the sink. The owner or a configured user: the adapter has already dropped everyone else. */
 export type OwnerInbound =
 	| {
@@ -47,14 +55,26 @@ export type OwnerInbound =
 			readonly sequence?: number;
 			/** A configured user's normalized handle. Absent: the owner wrote it. */
 			readonly person?: string;
+			/** Set when the message is a threaded reply. */
+			readonly replyTo?: ReplyTarget;
 	  }
-	/** The owner reacted to a message. It becomes a passive transcript write, never a model turn. */
+	/** The owner or a user reacted to a message. It becomes a passive transcript write, never a model turn. */
 	| {
 			readonly kind: "tapback";
 			readonly channel: ChatChannelId;
+			/** The reaction event's own id, so a redelivery dedupes. */
 			readonly messageId: string;
 			readonly on: string;
-			readonly reaction: Reaction | "none";
+			/** `emoji`: a reaction outside the six tapbacks. */
+			readonly reaction: Reaction | "none" | "emoji";
+			/** The raw emoji. */
+			readonly emoji?: string;
+			/** The reacted message's text, clipped; "" when unknown. */
+			readonly onText: string;
+			/** Mochi sent the reacted message. */
+			readonly fromAgent: boolean;
+			/** A configured user's normalized handle. Absent: the owner reacted. */
+			readonly person?: string;
 			readonly at: Date;
 	  };
 
@@ -86,7 +106,7 @@ export interface Channel {
 	/** Runs until `signal` aborts, never messaging the owner about itself. `cursor` reads the sequence `ingest` stored, for replay. */
 	run(sink: InboundSink, signal: AbortSignal, cursor?: () => Promise<number | null>): Promise<void>;
 	/** Throws only DeliveryError subclasses for platform failures. `person` absent: the owner. */
-	send(bubble: Bubble, person?: string): Promise<void>;
+	send(bubble: Bubble, person?: string, options?: { readonly replyTo?: string }): Promise<void>;
 	typing(on: boolean, person?: string): Promise<void>;
 	/** Present only when `profile.reactions` is non-empty. `none` removes the reaction. */
 	react?(messageId: string, reaction: Reaction | "none"): Promise<void>;

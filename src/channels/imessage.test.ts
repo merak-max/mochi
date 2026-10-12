@@ -6,6 +6,7 @@ import { newFaux, openTestMochi, tempDir, turnsSettled } from "../test-support.t
 import { InboundCursorDoc, ingest } from "../turn/turn.ts";
 import * as fx from "./fixtures/imessage.ts";
 import { createIMessageChannel, type IMessageApp, type IMessageDeps, type IMessageMessage, judge, LINK, toInbound } from "./imessage.ts";
+import type { Content } from "spectrum-ts";
 import { type Channel, ChannelDown, type OwnerInbound, SendRejected, SendUnknown } from "./types.ts";
 
 const env = { PHOTON_PROJECT_ID: "proj", PHOTON_PROJECT_SECRET: "secret", IMESSAGE_OWNER: "+91 83539 32755" };
@@ -57,6 +58,29 @@ describe("imessage message mapping", () => {
 		assert.equal(fromOwner.kind === "message" && fromOwner.message.kind === "message" && "person" in fromOwner.message, false);
 	});
 
+	it("records the target of a reply, with its text and whether mochi sent it", async () => {
+		const target = fx.message(log, { id: "GUID-A", sender: fx.OWNER, direction: "outbound", content: { type: "text", text: "Dinner at 8?" } });
+		const stub = { id: "GUID-S", content: { type: "custom", raw: { imessage_type: "reply-target", stub: true } }, direction: "inbound" } as unknown as IMessageMessage;
+		const replyWith = (to: IMessageMessage) => fx.message(log, { id: "GUID-R", sender: fx.OWNER, content: { type: "reply", content: fx.contents.text, target: to } as unknown as Content });
+		const parsed = await toInbound(replyWith(target), OWNER);
+		assert.deepEqual(parsed.kind === "message" && parsed.message.kind === "message" ? [parsed.message.text, parsed.message.replyTo] : parsed, ["hey mochi", { messageId: "GUID-A", text: "Dinner at 8?", fromAgent: true }]);
+		const fromStub = await toInbound(replyWith(stub), OWNER);
+		assert.deepEqual(fromStub.kind === "message" && fromStub.message.kind === "message" ? fromStub.message.replyTo : fromStub, { messageId: "GUID-S", text: "", fromAgent: false });
+	});
+
+	it("maps a reaction from the owner or a user to a tapback and drops a stranger's", async () => {
+		const USER = "+918423152032";
+		const target = fx.message(log, { id: "GUID-A", direction: "outbound", content: { type: "text", text: "Dinner at 8?" } });
+		const reactionFrom = (sender: string, emoji: string) => fx.message(log, { id: `GUID-A:reaction:${emoji}`, sender, content: { type: "reaction", emoji, target } as unknown as Content });
+		assert.deepEqual(await toInbound(reactionFrom("+91 84231 52032", "👍"), OWNER, [USER]), {
+			kind: "message",
+			message: { kind: "tapback", channel: "imessage", messageId: "GUID-A:reaction:👍", on: "GUID-A", reaction: "like", emoji: "👍", onText: "Dinner at 8?", fromAgent: true, at: new Date("2026-10-05T08:32:00Z"), person: USER },
+		});
+		const fromOwner = await toInbound(reactionFrom(fx.OWNER, "🔥"), OWNER, [USER]);
+		assert.deepEqual(fromOwner.kind === "message" && fromOwner.message.kind === "tapback" ? [fromOwner.message.reaction, fromOwner.message.emoji, "person" in fromOwner.message] : fromOwner, ["emoji", "🔥", false]);
+		assert.deepEqual(await toInbound(reactionFrom("+15551234567", "👍"), OWNER, [USER]), { kind: "ignored", reason: "not-owner" });
+	});
+
 	it("maps image, file and voice content to attachments and ignores signal-only content", async () => {
 		const map = async (content: Parameters<typeof fx.message>[1]["content"]) => {
 			const parsed = await toInbound(fx.message(log, { id: "m", sender: fx.OWNER, content }), OWNER);
@@ -88,6 +112,7 @@ describe("imessage adapter", () => {
 		}, controller.signal);
 		await done;
 		assert.deepEqual(received.map((m) => m.messageId), ["GUID-OWNER"]);
+		assert.deepEqual(log.read, ["GUID-OWNER"], "only the accepted message gets a read receipt");
 
 		await channel.send({ kind: "text", text: `${"a".repeat(4000)} tail` });
 		await channel.send({ kind: "link", url: "https://example.com" });
@@ -129,10 +154,10 @@ describe("imessage adapter", () => {
 		await new Promise((resolve) => setImmediate(resolve));
 		await channel.send({ kind: "text", text: "for the user" }, USER);
 		await channel.typing(true, USER);
-		await channel.send({ kind: "text", text: "for the owner" });
+		await channel.send({ kind: "text", text: "for the owner" }, undefined, { replyTo: "GUID-R" });
 		assert.deepEqual(log.sent, [
 			{ space: USER_DM, text: "for the user" },
-			{ space: fx.OWNER_DM, text: "for the owner" },
+			{ space: fx.OWNER_DM, text: "for the owner", replyTo: "GUID-R" },
 		]);
 		assert.deepEqual(log.typing, [`${USER_DM}:on`]);
 		controller.abort();

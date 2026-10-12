@@ -147,8 +147,10 @@ export const REACTIONS = ["love", "like", "dislike", "laugh", "emphasize", "ques
 export type Reaction = (typeof REACTIONS)[number];
 
 export type OwnerInbound =                       // the owner or a configured user: the adapter dropped everyone else
-  | { kind: "message"; channel: ChatChannelId; messageId: string; text: string; at: Date; attachments: readonly Attachment[]; sequence?: number; person?: string }  // person: a user's handle
-  | { kind: "tapback"; channel: ChatChannelId; messageId: string; on: string; reaction: Reaction | "none"; at: Date };
+  | { kind: "message"; channel: ChatChannelId; messageId: string; text: string; at: Date; attachments: readonly Attachment[]; sequence?: number; person?: string; replyTo?: ReplyTarget }  // person: a user's handle
+  | { kind: "tapback"; channel: ChatChannelId; messageId: string; on: string; reaction: Reaction | "none" | "emoji"; emoji?: string; onText: string; fromAgent: boolean; person?: string; at: Date };  // messageId: the reaction event's id
+
+export interface ReplyTarget { messageId: string; text: string; fromAgent: boolean }  // text "" when the platform did not send it
 
 export type Bubble =
   | { kind: "text"; text: string }
@@ -163,13 +165,15 @@ export class SendRejected extends DeliveryError {}  // refused for good (an atta
 export interface Channel {
   readonly profile: ChannelProfile;
   run(sink: (inbound: OwnerInbound) => Promise<void>, signal: AbortSignal, cursor?: () => Promise<number | null>): Promise<void>;  // until signal aborts; cursor reads mochi.inbound-cursor
-  send(bubble: Bubble, person?: string): Promise<void>;  // throws only DeliveryError subclasses; person absent: the owner
+  send(bubble: Bubble, person?: string, options?: { replyTo?: string }): Promise<void>;  // throws only DeliveryError subclasses; person absent: the owner; only iMessage reads replyTo
   typing(on: boolean, person?: string): Promise<void>;
   react?(messageId: string, reaction: Reaction | "none"): Promise<void>;
 }
 ```
 
-`present(text, profile)` (`channels/present.ts`) is pure. Blank text, meaning only whitespace and U+200B, U+FEFF and U+2060, gives no bubbles, so silence sends nothing; U+200D and U+200C are content and survive. On iMessage each blank-line paragraph is a bubble, a line that is only a URL is a link bubble, text under 12 characters merges into its neighbour, and a reply has at most three bubbles. Telegram and WhatsApp send one bubble per reply. Each adapter maps every platform error to one `DeliveryError` class: an unreachable service, 429 and auth failures are `ChannelDown`; a timeout or a 5xx is `SendUnknown`; any other refusal is `SendRejected`. The Turn sleeps to a stored retry time on `ChannelDown` (5 s doubling to 5 min; a channel absent from this process counts as down) and gives up after an hour of back-off with one `turn.undelivered` log line; it retries a `SendUnknown` once, accepting a possible duplicate; it skips a `SendRejected` bubble; any other throw faults the Turn and is logged with the answer. Inbound tapbacks are typed but no adapter emits them yet.
+`present(text, profile)` (`channels/present.ts`) is pure. Blank text, meaning only whitespace and U+200B, U+FEFF and U+2060, gives no bubbles, so silence sends nothing; U+200D and U+200C are content and survive. On iMessage each blank-line paragraph is a bubble, a line that is only a URL is a link bubble, text under 12 characters merges into its neighbour, and a reply has at most three bubbles. Telegram and WhatsApp send one bubble per reply. Each adapter maps every platform error to one `DeliveryError` class: an unreachable service, 429 and auth failures are `ChannelDown`; a timeout or a 5xx is `SendUnknown`; any other refusal is `SendRejected`. The Turn sleeps to a stored retry time on `ChannelDown` (5 s doubling to 5 min; a channel absent from this process counts as down) and gives up after an hour of back-off with one `turn.undelivered` log line; it retries a `SendUnknown` once, accepting a possible duplicate; it skips a `SendRejected` bubble; any other throw faults the Turn and is logged with the answer.
+
+On iMessage, a threaded reply carries `replyTo`. The model input gets one line after the tag: `[replying to your message id=<id>] <text>` when mochi sent the target, else `their message`. The text is clipped to 500 characters. When the target text is not available, the line says `(text not available; use recall)`. The first text bubble of the answer is then a threaded reply to the inbound message. iMessage emits tapbacks for reactions from the owner or a user. A tapback is a passive write to the reactor's conversation: `[context, no reply needed: user2 reacted 👍 to your message id=<id>: "<text>"]`. The adapter sends a read receipt for each message it accepts.
 
 ```ts
 // notes/schema.ts

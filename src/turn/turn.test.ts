@@ -410,13 +410,52 @@ test("react defaults to the owner's newest message, takes an explicit id, and fa
 test("an owner tapback is a passive write with no model turn", async () => {
 	const faux = newFaux();
 	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", recordingChannel("imessage").channel]]));
-	const tapback: OwnerInbound = { kind: "tapback", channel: "imessage", messageId: "tb1", on: "g9", reaction: "love", at: new Date() };
+	const tapback: OwnerInbound = { kind: "tapback", channel: "imessage", messageId: "tb1", on: "g9", reaction: "love", emoji: "❤️", onText: "Dinner at 8?", fromAgent: true, at: new Date() };
 	await ingest(mochi.line, tapback, context);
 	await ingest(mochi.line, tapback, context);
 	const entries = (await mochi.root.entries({}, 10, undefined, context)).items;
 	assert.equal(entries.length, 1);
-	assert.equal(entries[0]?.model?.[0]?.role === "user" && entries[0].model[0].content, "[context, no reply needed: the owner reacted love to message id=g9 on imessage]");
+	assert.equal(entries[0]?.model?.[0]?.role === "user" && entries[0].model[0].content, '[context, no reply needed: user1 reacted ❤️ to your message id=g9: "Dinner at 8?"]');
 	assert.equal(faux.state.callCount, 0);
+	await mochi.close();
+});
+
+test("a user's tapback is written to the user's conversation, not root", async () => {
+	const faux = newFaux();
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", recordingChannel("imessage").channel]]), undefined, [], { users: [USER] });
+	const tapback: OwnerInbound = { kind: "tapback", channel: "imessage", messageId: "tb2", on: "m4", reaction: "emoji", emoji: "🔥", onText: "", fromAgent: false, person: USER.handle, at: new Date() };
+	await ingest(mochi.line, tapback, context);
+	await ingest(mochi.line, tapback, context);
+	assert.deepEqual((await mochi.root.entries({}, 10, undefined, context)).items, []);
+	const userConversation = (await mochi.harness.snapshot(UserDoc, USER.handle, context))!.conversation!;
+	const entries = (await mochi.harness.commit((tx) => tx.scanEntries({ conversationId: userConversation }, 100), context)).items.filter((entry) => entry.kind === "mochi.tapback");
+	assert.deepEqual(entries.map((entry) => entry.model?.[0]?.role === "user" && entry.model[0].content), ["[context, no reply needed: user2 reacted 🔥 to their message id=m4]"]);
+	assert.equal(faux.state.callCount, 0);
+	await mochi.close();
+});
+
+test("a reply shows its target to the model and threads the first text bubble of the answer", async () => {
+	const faux = newFaux();
+	faux.setResponses([fauxAssistantMessage("Yes, still on at 8.\n\nI booked the table for two.")]);
+	const sends: { text: string; replyTo: string | undefined }[] = [];
+	const imessage = recordingChannel("imessage");
+	const channel: Channel = {
+		...imessage.channel,
+		send: async (bubble, _person, options) => void sends.push({ text: bubble.kind === "text" ? bubble.text : bubble.kind, replyTo: options?.replyTo }),
+	};
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", channel]]));
+	const replyTo = { messageId: "a7", text: "Dinner at 8?", fromAgent: true };
+	const inbound: OwnerInbound = { kind: "message", channel: "imessage", messageId: "r1", text: "is that still on", at: new Date("2026-10-05T08:32:00Z"), attachments: [], replyTo };
+	await ingest(mochi.line, inbound, context);
+	await turnsSettled(mochi.harness);
+	const users = (await mochi.root.entries({}, 50, undefined, context)).items.filter((entry) => UserEntry.is(entry));
+	assert.deepEqual(users.map((entry) => entry.model?.[0]?.role === "user" && entry.model[0].content), [
+		"[imessage 2026-10-05 14:02 IST id=r1]\n[replying to your message id=a7] Dinner at 8?\nis that still on",
+	]);
+	assert.deepEqual(sends, [
+		{ text: "Yes, still on at 8.", replyTo: "r1" },
+		{ text: "I booked the table for two.", replyTo: undefined },
+	]);
 	await mochi.close();
 });
 
