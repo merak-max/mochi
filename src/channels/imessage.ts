@@ -13,7 +13,7 @@ import {
 	chunkText,
 	DeliveryError,
 	type Env,
-	type OwnerInbound,
+	type Inbound,
 	type Reaction,
 	REACTIONS,
 	type ReplyTarget,
@@ -38,11 +38,6 @@ export const IMESSAGE_PROFILE: ChannelProfile = {
 
 const TAPBACKS: Readonly<Record<Reaction, string>> = { love: "❤️", like: "👍", dislike: "👎", laugh: "😂", emphasize: "‼️", question: "❓" };
 const TAPBACK_TEXT_CHARS = 80;
-
-function reactionOf(emoji: string): Reaction | "emoji" {
-	for (const reaction of REACTIONS) if (TAPBACKS[reaction] === emoji) return reaction;
-	return "emoji";
-}
 
 export interface ReactionHandle {
 	unsend(): Promise<void>;
@@ -160,7 +155,7 @@ async function collect(content: Content, into: Collected): Promise<void> {
 	}
 }
 
-type ParsedIMessage = { readonly kind: "message"; readonly message: OwnerInbound } | { readonly kind: "ignored"; readonly reason: "outbound" | "not-owner" | "empty" };
+type ParsedIMessage = { readonly kind: "message"; readonly message: Inbound } | { readonly kind: "ignored"; readonly reason: "outbound" | "not-owner" | "empty" };
 
 export async function toInbound(message: IMessageMessage, owner: string, users: readonly string[] = []): Promise<ParsedIMessage> {
 	if (message.direction === "outbound") return { kind: "ignored", reason: "outbound" };
@@ -173,10 +168,9 @@ export async function toInbound(message: IMessageMessage, owner: string, users: 
 	if (content.type === "reaction") {
 		const target = content.target;
 		const onText = clip(contentText(target.content), TAPBACK_TEXT_CHARS);
-		const reaction = reactionOf(content.emoji);
 		return {
 			kind: "message",
-			message: { kind: "tapback", channel: "imessage", messageId: message.id, on: target.id, reaction, emoji: content.emoji, onText, fromAgent: target.direction === "outbound", at: message.timestamp, ...person },
+			message: { kind: "tapback", channel: "imessage", messageId: message.id, on: target.id, emoji: content.emoji, onText, fromAgent: target.direction === "outbound", at: message.timestamp, ...person },
 		};
 	}
 	const collected: Collected = { text: [], attachments: [] };

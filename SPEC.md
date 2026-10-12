@@ -108,7 +108,7 @@ src/
   index/
     fts.ts             SQLite FTS5 over notes and conversation entries
   channels/
-    types.ts           Channel, ChannelProfile, OwnerInbound, Bubble, Reaction, DeliveryError classes, channelSetup
+    types.ts           Channel, ChannelProfile, Inbound, Bubble, Reaction, DeliveryError classes, channelSetup
     present.ts         reply text to bubbles, pure
     telegram.ts        grammY, long polling, TELEGRAM_PROFILE
     whatsapp.ts        WhatsApp Cloud API webhook and send, media upload, WHATSAPP_PROFILE
@@ -143,9 +143,9 @@ export interface ChannelProfile {                // the one source for present()
 export const REACTIONS = ["love", "like", "dislike", "laugh", "emphasize", "question"] as const;
 export type Reaction = (typeof REACTIONS)[number];
 
-export type OwnerInbound =                       // the owner or a configured user: the adapter dropped everyone else
+export type Inbound =                       // the owner or a configured user: the adapter dropped everyone else
   | { kind: "message"; channel: ChatChannelId; messageId: string; text: string; at: Date; attachments: readonly Attachment[]; sequence?: number; person?: string; replyTo?: ReplyTarget }  // person: a user's handle
-  | { kind: "tapback"; channel: ChatChannelId; messageId: string; on: string; reaction: Reaction | "none" | "emoji"; emoji?: string; onText: string; fromAgent: boolean; person?: string; at: Date };  // messageId: the reaction event's id
+  | { kind: "tapback"; channel: ChatChannelId; messageId: string; on: string; emoji: string; onText: string; fromAgent: boolean; person?: string; at: Date };  // messageId: the reaction event's id
 
 export interface ReplyTarget { messageId: string; text: string; fromAgent: boolean }  // text "" when the platform did not send it
 
@@ -161,7 +161,7 @@ export class SendRejected extends DeliveryError {}  // refused for good (an atta
 
 export interface Channel {
   readonly profile: ChannelProfile;
-  run(sink: (inbound: OwnerInbound) => Promise<void>, signal: AbortSignal, cursor?: () => Promise<number | null>): Promise<void>;  // until signal aborts; cursor reads mochi.inbound-cursor
+  run(sink: (inbound: Inbound) => Promise<void>, signal: AbortSignal, cursor?: () => Promise<number | null>): Promise<void>;  // until signal aborts; cursor reads mochi.inbound-cursor
   send(bubble: Bubble, person?: string, options?: { replyTo?: string }): Promise<void>;  // throws only DeliveryError subclasses; person absent: the owner; only iMessage reads replyTo
   typing(on: boolean, person?: string): Promise<void>;
   react?(messageId: string, reaction: Reaction | "none"): Promise<void>;

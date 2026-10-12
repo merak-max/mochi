@@ -43,7 +43,7 @@ export interface ReplyTarget {
 }
 
 /** What an adapter hands the sink. The owner or a configured user: the adapter has already dropped everyone else. */
-export type OwnerInbound =
+export type Inbound =
 	| {
 			readonly kind: "message";
 			readonly channel: ChatChannelId;
@@ -65,10 +65,7 @@ export type OwnerInbound =
 			/** The reaction event's own id, so a redelivery dedupes. */
 			readonly messageId: string;
 			readonly on: string;
-			/** `emoji`: a reaction outside the six tapbacks. */
-			readonly reaction: Reaction | "none" | "emoji";
-			/** The raw emoji. */
-			readonly emoji?: string;
+			readonly emoji: string;
 			/** The reacted message's text, clipped; "" when unknown. */
 			readonly onText: string;
 			/** Mochi sent the reacted message. */
@@ -78,7 +75,7 @@ export type OwnerInbound =
 			readonly at: Date;
 	  };
 
-export type InboundSink = (inbound: OwnerInbound) => Promise<void>;
+export type InboundSink = (inbound: Inbound) => Promise<void>;
 
 export type Bubble =
 	| { readonly kind: "text"; readonly text: string }

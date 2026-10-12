@@ -8,7 +8,7 @@ import type { TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { JsonValue } from "@earendil-works/chord";
 import { type CommitChange, type ConversationId, ROOT_CONVERSATION_ID, UserEntry } from "@earendil-works/pi-durable";
-import { type Attachment, type Channel, ChannelDown, type OwnerInbound } from "../../channels/types.ts";
+import { type Attachment, type Channel, ChannelDown, type Inbound } from "../../channels/types.ts";
 import { messageText } from "../../text.ts";
 import { fixedClassify, newFaux, openTestMochi, PROFILES, turnsSettled } from "../../test-support.ts";
 import { createSeatConversation } from "../../seats.ts";
@@ -46,7 +46,7 @@ const imessage: Channel = {
 type Turn = { kind: string; input: { source: string; key?: string }; state: { status: string; checkpoint?: { phase: string; sent?: number; outage?: JsonValue } } };
 const turn = (change: CommitChange): Turn | undefined => (change.type === "task" && change.value.kind === "mochi.turn" ? (change.value as unknown as Turn) : undefined);
 const KILLS: Record<string, (change: CommitChange) => boolean> = {
-	"ingest-commit": (change) => turn(change)?.input.source === "owner" && turn(change)?.state.status === "pending",
+	"ingest-commit": (change) => turn(change)?.input.source === "chat" && turn(change)?.state.status === "pending",
 	submit: (change) => change.type === "submission" && change.value.requestId === "imessage:m1",
 	settled: (change) => turn(change)?.state.checkpoint?.phase === "claim",
 	"bubble-checkpoint": (change) => turn(change)?.state.checkpoint?.sent === 1,
@@ -69,7 +69,7 @@ async function once(name: string, step: () => Promise<unknown>): Promise<void> {
 	await step();
 }
 
-const owner = (messageId: string, attachments: readonly Attachment[] = []): OwnerInbound => ({
+const owner = (messageId: string, attachments: readonly Attachment[] = []): Inbound => ({
 	kind: "message",
 	channel: "imessage",
 	messageId,

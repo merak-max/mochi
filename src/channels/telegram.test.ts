@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import { createTelegramChannel, parseMessageId, parseTelegramMessage } from "./telegram.ts";
-import { type Channel, ChannelDown, type OwnerInbound, SendRejected, SendUnknown } from "./types.ts";
+import { type Channel, ChannelDown, type Inbound, SendRejected, SendUnknown } from "./types.ts";
 
 const OWNER = 7712345678;
 const TOKEN = "123:abc";
@@ -117,7 +117,7 @@ describe("telegram payload parsing", () => {
 describe("telegram adapter against a fake Bot API", () => {
 	it("long-polls, drops strangers, downloads voice bytes and delivers owner messages", async (t) => {
 		const api = await fakeBotApi(["telegram-stranger.json", "telegram-voice.json"].map(fixture));
-		const received: OwnerInbound[] = [];
+		const received: Inbound[] = [];
 		const controller = new AbortController();
 		let arrived: () => void = () => {};
 		const done = new Promise<void>((resolve) => (arrived = resolve));

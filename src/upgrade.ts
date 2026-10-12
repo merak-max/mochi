@@ -23,7 +23,7 @@ const RouteDoc = defineDocFamily<Route, Route>({ kind: "mochi.route", version: 1
 const OutboxDoc = defineDoc<{ pending: SubmissionId[] }>({ kind: "mochi.outbox", version: 1, scope: "session", initial: () => ({ pending: [] }) });
 
 /**
- * Each answer still pending in the Router's `mochi.outbox` becomes an owner Turn. Its `run` phase submits under the
+ * Each answer still pending in the Router's `mochi.outbox` becomes a chat Turn. Its `run` phase submits under the
  * stored request key, so admission returns the original submission and the Turn delivers its answer. Then the outbox
  * and every `mochi.route` member retire.
  */
@@ -47,7 +47,7 @@ export const outboxToTurns: UpgradeStep = {
 				const route = routes.get(String(id));
 				if (route === undefined || route.channel === "cli") continue;
 				const key = `${route.channel}:${route.messageId}`;
-				await openTurn(tx, line, { source: "owner", channel: route.channel, key, tag: "", text: "", files: [] });
+				await openTurn(tx, line, { source: "chat", channel: route.channel, key, tag: "", text: "", files: [] });
 				changed++;
 			}
 			if (outbox !== undefined) await tx.retireDoc(OutboxDoc);

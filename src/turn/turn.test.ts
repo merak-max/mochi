@@ -4,7 +4,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { AgentDoc, defineDoc, defineDocFamily, ResetEntry, ROOT_CONVERSATION_ID, type SubmissionId, ToolResultEntry, UserEntry } from "@earendil-works/pi-durable";
-import { type Bubble, type Channel, ChannelDown, type ChatChannelId, type OwnerInbound, SendRejected, SendUnknown } from "../channels/types.ts";
+import { type Bubble, type Channel, ChannelDown, type ChatChannelId, type Inbound, SendRejected, SendUnknown } from "../channels/types.ts";
 import { createSeatConversation } from "../seats.ts";
 import { newFaux, openTestMochi, recordingChannel, type TestMochi, tempDir, turnsSettled } from "../test-support.ts";
 import { deliveredRecord, UserDoc, ingest, InboundCursorDoc, LastInboundDoc, NOTIFY_ENTRY, nextOutage, openTurn, RETRY, type RunTurn } from "./turn.ts";
@@ -12,7 +12,7 @@ import { deliveredRecord, UserDoc, ingest, InboundCursorDoc, LastInboundDoc, NOT
 const context = BACKGROUND_CONTEXT;
 const FAST_RETRY = { firstMs: 20, maxMs: 40, giveUpMs: 5_000 };
 
-function message(channel: ChatChannelId, messageId: string, text = "hi"): OwnerInbound {
+function message(channel: ChatChannelId, messageId: string, text = "hi"): Inbound {
 	return { kind: "message", channel, messageId, text, at: new Date("2026-10-05T08:32:00Z"), attachments: [] };
 }
 
@@ -64,7 +64,7 @@ test("inbound becomes one tagged submission per channel message id, answered onc
 
 const USER = { id: "user2", handle: "+918423152032", name: "Hemant Singh" };
 
-function userMessage(messageId: string, text: string, sequence?: number): OwnerInbound {
+function userMessage(messageId: string, text: string, sequence?: number): Inbound {
 	return { kind: "message", channel: "imessage", messageId, text, at: new Date("2026-10-05T08:32:00Z"), attachments: [], person: USER.handle, ...(sequence === undefined ? {} : { sequence }) };
 }
 
@@ -410,7 +410,7 @@ test("react defaults to the owner's newest message, takes an explicit id, and fa
 test("an owner tapback is a passive write with no model turn", async () => {
 	const faux = newFaux();
 	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", recordingChannel("imessage").channel]]));
-	const tapback: OwnerInbound = { kind: "tapback", channel: "imessage", messageId: "tb1", on: "g9", reaction: "love", emoji: "❤️", onText: "Dinner at 8?", fromAgent: true, at: new Date() };
+	const tapback: Inbound = { kind: "tapback", channel: "imessage", messageId: "tb1", on: "g9", emoji: "❤️", onText: "Dinner at 8?", fromAgent: true, at: new Date() };
 	await ingest(mochi.line, tapback, context);
 	await ingest(mochi.line, tapback, context);
 	const entries = (await mochi.root.entries({}, 10, undefined, context)).items;
@@ -423,7 +423,7 @@ test("an owner tapback is a passive write with no model turn", async () => {
 test("a user's tapback is written to the user's conversation, not root", async () => {
 	const faux = newFaux();
 	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", recordingChannel("imessage").channel]]), undefined, [], { users: [USER] });
-	const tapback: OwnerInbound = { kind: "tapback", channel: "imessage", messageId: "tb2", on: "m4", reaction: "emoji", emoji: "🔥", onText: "", fromAgent: false, person: USER.handle, at: new Date() };
+	const tapback: Inbound = { kind: "tapback", channel: "imessage", messageId: "tb2", on: "m4", emoji: "🔥", onText: "", fromAgent: false, person: USER.handle, at: new Date() };
 	await ingest(mochi.line, tapback, context);
 	await ingest(mochi.line, tapback, context);
 	assert.deepEqual((await mochi.root.entries({}, 10, undefined, context)).items, []);
@@ -445,7 +445,7 @@ test("a reply shows its target to the model and threads the first text bubble of
 	};
 	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", channel]]));
 	const replyTo = { messageId: "a7", text: "Dinner at 8?", fromAgent: true };
-	const inbound: OwnerInbound = { kind: "message", channel: "imessage", messageId: "r1", text: "is that still on", at: new Date("2026-10-05T08:32:00Z"), attachments: [], replyTo };
+	const inbound: Inbound = { kind: "message", channel: "imessage", messageId: "r1", text: "is that still on", at: new Date("2026-10-05T08:32:00Z"), attachments: [], replyTo };
 	await ingest(mochi.line, inbound, context);
 	await turnsSettled(mochi.harness);
 	const users = (await mochi.root.entries({}, 50, undefined, context)).items.filter((entry) => UserEntry.is(entry));

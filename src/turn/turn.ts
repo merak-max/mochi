@@ -31,7 +31,7 @@ import {
 	type Channels,
 	type ChatChannelId,
 	DeliveryError,
-	type OwnerInbound,
+	type Inbound,
 	REACTIONS,
 	type ReplyTarget,
 	SendRejected,
@@ -66,8 +66,8 @@ export interface SavedFile {
 	readonly bytes: number;
 }
 
-export type OwnerTurn = {
-	readonly source: "owner";
+export type ChatTurn = {
+	readonly source: "chat";
 	readonly channel: ChatChannelId;
 	readonly key: string;
 	readonly tag: string;
@@ -92,7 +92,7 @@ export type RunTurn = {
 	/** A configured user's normalized handle, on imessage. Absent: the owner. */
 	readonly person?: string;
 };
-export type TurnInput = OwnerTurn | RunTurn | CommandTurn;
+export type TurnInput = ChatTurn | RunTurn | CommandTurn;
 
 /** What `send` sends. `input` is a notify's own text, read from the task input, not copied. */
 export type Answer =
@@ -248,8 +248,8 @@ export function deliveredRecord(input: RunTurn, recipient: string): string {
 	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${clip(input.text, DELIVERED_RECORD_CHARS)}`;
 }
 
-/** Root's input for an owner Turn, and the only builder of it, so ingest and `run` submit identical content. */
-async function inputOf(workDir: string, turn: OwnerTurn, media: Omit<MediaDeps, "workDir">, signal?: AbortSignal): Promise<UserInput> {
+/** A conversation's input for a chat Turn, and the only builder of it, so ingest and `run` submit identical content. */
+async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "workDir">, signal?: AbortSignal): Promise<UserInput> {
 	const { notes, images } = turn.preparedMedia ?? (await prepareInbound(turn.files, workDir, media, signal));
 	const lines = [turn.tag];
 	if (turn.replyTo !== undefined) lines.push(replyLine(turn.replyTo));
@@ -265,7 +265,7 @@ function replyLine(target: ReplyTarget): string {
 	return `[replying to ${whose} message id=${target.messageId}] ${text}`;
 }
 
-async function saveFiles(workDir: string, message: Extract<OwnerInbound, { kind: "message" }>): Promise<SavedFile[]> {
+async function saveFiles(workDir: string, message: Extract<Inbound, { kind: "message" }>): Promise<SavedFile[]> {
 	if (message.attachments.length === 0) return [];
 	const dir = join("inbox", message.messageId.replace(/[^A-Za-z0-9._-]/g, "_"));
 	await mkdir(join(workDir, dir), { recursive: true });
@@ -328,15 +328,20 @@ export function defineTurn(host: TurnHost): TurnTask {
 	const { root, harness, users, channels, workDir, media, retry, log } = host;
 	return defineTask<TurnInput, TurnState, TurnResult>({
 		name: "mochi.turn",
-		version: 1,
+		version: 2,
+		migrate: (input, checkpoint) => {
+			const turn = input as { source: string };
+			const source = turn.source === "owner" ? "chat" : turn.source;
+			return { input: { ...turn, source } as TurnInput, checkpoint: checkpoint as TurnState };
+		},
 		initial: (input) => {
-			if (input.source === "owner") return { phase: "run" };
+			if (input.source === "chat") return { phase: "run" };
 			return input.channel === "cli" ? { phase: "record" } : { phase: "claim", channel: input.channel, answer: { kind: "input" } };
 		},
 		phases: {
 			run: async (task, runtime, context) => {
 				const input = task.input;
-				if (input.source !== "owner") throw new Error("Only an owner Turn runs root.");
+				if (input.source !== "chat") throw new Error("Only a chat Turn runs a conversation.");
 				const stopTyping = keepTyping(channels.get(input.channel), input.person);
 				let settled;
 				try {
@@ -406,7 +411,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 								throw new SendRejected(`The attachment ${bubble.name} could not be read inside the work directory.`);
 							}
 						}
-						const threadOn = task.input.source === "owner" ? task.input.threadOn : undefined;
+						const threadOn = task.input.source === "chat" ? task.input.threadOn : undefined;
 						if (sent === 0 && outgoingBubble.kind === "text" && threadOn !== undefined) await channel.send(outgoingBubble, person, { replyTo: threadOn });
 						else await channel.send(outgoingBubble, person);
 					} catch (error) {
@@ -475,7 +480,7 @@ const tagOf = (channel: ChannelId, messageId: string, at: Date, timeZone: string
  * The one entry for owner input. A chat message opens its Turn in the commit that finds no submission for its request
  * key, then submits itself, so arrival order is root's order. A tapback is a passive write.
  */
-export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, context: Context): Promise<SubmissionId> {
+export async function ingest(line: Line, inbound: Inbound | CliInbound, context: Context): Promise<SubmissionId> {
 	const { root, harness } = line;
 	switch (inbound.kind) {
 		case "cli": {
@@ -486,9 +491,8 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 			const user = inbound.person === undefined ? undefined : userOf(line.users, inbound.person);
 			const who = user === undefined ? OWNER_ID : user.id;
 			const whose = inbound.fromAgent ? "your" : "their";
-			const what = inbound.reaction === "none" ? "removed a reaction from" : `reacted ${inbound.emoji ?? inbound.reaction} to`;
 			const quoted = inbound.onText === "" ? "" : `: "${inbound.onText}"`;
-			const model = [{ role: "user" as const, content: `[context, no reply needed: ${who} ${what} ${whose} message id=${inbound.on}${quoted}]`, timestamp: inbound.at.getTime() }];
+			const model = [{ role: "user" as const, content: `[context, no reply needed: ${who} reacted ${inbound.emoji} to ${whose} message id=${inbound.on}${quoted}]`, timestamp: inbound.at.getTime() }];
 			const id = user === undefined ? ROOT_CONVERSATION_ID : await harness.commit((tx) => ensureUser(tx, user), context);
 			const target = await conversationOf(line, id, context);
 			return (await target.submit({ type: "write", requestId: requestKey(inbound.channel, inbound.messageId), entry: { kind: "mochi.tapback", model } }, context)).id;
@@ -524,7 +528,7 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 			const files = await saveFiles(line.workDir, inbound);
 			const preparedMedia = files.length === 0 ? undefined : await prepareInbound(files, line.workDir, line.media, context.abortSignal);
 			const thread = inbound.replyTo === undefined ? {} : { replyTo: inbound.replyTo, threadOn: inbound.messageId };
-			const turn: OwnerTurn = { source: "owner", channel: inbound.channel, key, tag, text: inbound.text, files, ...(preparedMedia === undefined ? {} : { preparedMedia }), ...thread };
+			const turn: ChatTurn = { source: "chat", channel: inbound.channel, key, tag, text: inbound.text, files, ...(preparedMedia === undefined ? {} : { preparedMedia }), ...thread };
 			const opened = await harness.commit(async (tx) => {
 				const known = user === undefined ? ROOT_CONVERSATION_ID : (await tx.doc(UserDoc, user.handle, null)).conversation;
 				if (known !== null) {

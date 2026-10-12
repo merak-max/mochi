@@ -176,7 +176,7 @@ export interface ProcWatchDeps {
 type ProcRuntime = TaskRuntime<ProcInput, ProcState, ProcResult, object>;
 
 /**
- * The watcher. A wake into root goes through an owner Turn on the owner's last chat channel, so the reply reaches
+ * The watcher. A wake into root goes through a chat Turn on the owner's last chat channel, so the reply reaches
  * them; any other conversation, or a root with no chat yet, gets the input directly. Both use a request id per task
  * and event, so a rerun after a crash delivers nothing twice.
  */
@@ -187,7 +187,7 @@ export function defineProcWatch(deps: ProcWatchDeps): ProcTask {
 		const last = runtime.conversationId === ROOT_CONVERSATION_ID ? (await runtime.snapshot(LastInboundDoc, context))?.last : undefined;
 		if (last !== undefined && last !== null) {
 			await runtime.commit(async (tx) => {
-				await openTurn(tx, deps.line(), { source: "owner", channel: last.channel, key, tag, text: body, files: [] });
+				await openTurn(tx, deps.line(), { source: "chat", channel: last.channel, key, tag, text: body, files: [] });
 				return next;
 			}, context);
 			return;

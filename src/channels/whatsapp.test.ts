@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { describe, it } from "node:test";
-import { type Channel, ChannelDown, chunkText, type OwnerInbound, SendRejected, SendUnknown } from "./types.ts";
+import { type Channel, ChannelDown, chunkText, type Inbound, SendRejected, SendUnknown } from "./types.ts";
 import { createWhatsAppChannel, extractMessages, GRAPH_API, parseWhatsAppMessage } from "./whatsapp.ts";
 import { validSha256Signature } from "../http.ts";
 import { endlessChunkedPost } from "../test-support.ts";
@@ -49,7 +49,7 @@ function fakeGraph(): { readonly fetch: typeof fetch; readonly calls: Call[] } {
 async function startChannel(): Promise<{
 	readonly base: string;
 	readonly channel: Channel;
-	readonly received: OwnerInbound[];
+	readonly received: Inbound[];
 	readonly graph: ReturnType<typeof fakeGraph>;
 	readonly waitFor: (count: number) => Promise<void>;
 	readonly stop: () => void;
@@ -68,7 +68,7 @@ async function startChannel(): Promise<{
 		{ fetch: graph.fetch, log: () => {} },
 	);
 	assert.equal(channel.kind, "ready");
-	const received: OwnerInbound[] = [];
+	const received: Inbound[] = [];
 	const waiters: Array<() => void> = [];
 	const controller = new AbortController();
 	void channel.value.run(async (message) => {

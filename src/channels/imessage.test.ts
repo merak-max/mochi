@@ -7,7 +7,7 @@ import { InboundCursorDoc, ingest } from "../turn/turn.ts";
 import * as fx from "./fixtures/imessage.ts";
 import { createIMessageChannel, type IMessageApp, type IMessageDeps, type IMessageMessage, judge, LINK, toInbound } from "./imessage.ts";
 import type { Content } from "spectrum-ts";
-import { type Channel, ChannelDown, type OwnerInbound, SendRejected, SendUnknown } from "./types.ts";
+import { type Channel, ChannelDown, type Inbound, SendRejected, SendUnknown } from "./types.ts";
 
 const env = { PHOTON_PROJECT_ID: "proj", PHOTON_PROJECT_SECRET: "secret", IMESSAGE_OWNER: "+91 83539 32755" };
 const OWNER = "+918353932755";
@@ -74,10 +74,10 @@ describe("imessage message mapping", () => {
 		const reactionFrom = (sender: string, emoji: string) => fx.message(log, { id: `GUID-A:reaction:${emoji}`, sender, content: { type: "reaction", emoji, target } as unknown as Content });
 		assert.deepEqual(await toInbound(reactionFrom("+91 84231 52032", "👍"), OWNER, [USER]), {
 			kind: "message",
-			message: { kind: "tapback", channel: "imessage", messageId: "GUID-A:reaction:👍", on: "GUID-A", reaction: "like", emoji: "👍", onText: "Dinner at 8?", fromAgent: true, at: new Date("2026-10-05T08:32:00Z"), person: USER },
+			message: { kind: "tapback", channel: "imessage", messageId: "GUID-A:reaction:👍", on: "GUID-A", emoji: "👍", onText: "Dinner at 8?", fromAgent: true, at: new Date("2026-10-05T08:32:00Z"), person: USER },
 		});
 		const fromOwner = await toInbound(reactionFrom(fx.OWNER, "🔥"), OWNER, [USER]);
-		assert.deepEqual(fromOwner.kind === "message" && fromOwner.message.kind === "tapback" ? [fromOwner.message.reaction, fromOwner.message.emoji, "person" in fromOwner.message] : fromOwner, ["emoji", "🔥", false]);
+		assert.deepEqual(fromOwner.kind === "message" && fromOwner.message.kind === "tapback" ? [fromOwner.message.emoji, "person" in fromOwner.message] : fromOwner, ["🔥", false]);
 		assert.deepEqual(await toInbound(reactionFrom("+15551234567", "👍"), OWNER, [USER]), { kind: "ignored", reason: "not-owner" });
 	});
 
@@ -102,7 +102,7 @@ describe("imessage adapter", () => {
 			fx.message(log, { id: "GUID-OWNER", sender: fx.OWNER, content: fx.contents.text }),
 		]);
 		const channel = channelWith(fake);
-		const received: OwnerInbound[] = [];
+		const received: Inbound[] = [];
 		const controller = new AbortController();
 		let arrived: () => void = () => {};
 		const done = new Promise<void>((resolve) => (arrived = resolve));
@@ -223,7 +223,7 @@ describe("imessage link", () => {
 			const mochi = await openTestMochi(dir, faux, new Map([["imessage", channel]]));
 			const cursor = async () => (await mochi.harness.snapshot(InboundCursorDoc, "imessage", BACKGROUND_CONTEXT))?.sequence ?? null;
 			const controller = new AbortController();
-			const sink = async (message: OwnerInbound) => {
+			const sink = async (message: Inbound) => {
 				await ingest(mochi.line, message, BACKGROUND_CONTEXT);
 				await turnsSettled(mochi.harness);
 			};
