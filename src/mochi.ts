@@ -31,6 +31,7 @@ import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
 import { fastBrowserFns } from "./browser/fast.ts";
 import { type MediaDeps, mediaFns } from "./media/media.ts";
+import { gifFns } from "./media/gif.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
 import { compactionExtension, fastCompletion, handoffTool, idleResetIfStale } from "./turn/lifecycle.ts";
 import type { Classify } from "./brain/classifier.ts";
@@ -121,6 +122,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...browserFns({ apiKey: options.firecrawlKey, profile: options.firecrawlProfile }),
 		...fastBrowserFns({ apiKey: options.firecrawlKey, profile: options.firecrawlProfile, models: options.models, fast: options.fast, classify: options.classify }),
 		...mediaFns({ ...media, workDir: options.workDir }),
+		...gifFns({ workDir: options.workDir }),
 		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
 		...agentFns({ catalog: options.agents, read: (read, context) => harness.commit(read, context), abortTask: (id, context) => harness.abortTask(id, context) }),

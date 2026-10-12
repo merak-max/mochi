@@ -43,7 +43,7 @@ export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 
 /** Caps, in characters, on each seat's tool schemas and each prompt section. A description that grows past one fails the build. */
 export const BUDGET: { readonly tools: Readonly<Record<Seat, number>>; readonly sections: Readonly<Record<string, number>> } = {
-	tools: { owner: 8560, run: 7000, worker: 5200, user: 5500 },
+	tools: { owner: 8600, run: 7000, worker: 5200, user: 5500 },
 	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000 },
 };
 
@@ -70,6 +70,8 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	image_gen: { seats: ALL, inline: false },
 	video_gen: { seats: ALL, inline: false },
 	speak: { seats: ALL, inline: false },
+	gif_search: { seats: ALL, inline: false },
+	gif_save: { seats: ALL, inline: false },
 	transcribe: { seats: ALL, inline: false },
 };
 
