@@ -12,7 +12,7 @@ import {
 	type TaskId,
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { MochiCodingTools } from "./media/read-image.ts";
 import type { Channels } from "./channels/types.ts";
 import { workEnv } from "./env/work-env.ts";
 import type { SearchIndex } from "./index/fts.ts";
@@ -108,7 +108,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		return line;
 	};
 	const providers = [
-		CodingTools,
+		MochiCodingTools,
 		defineExtension({ name: "memory", tools: [noteTool({ index, today: options.today }), recallTool(index)] }),
 		channelsExtension(options.channels),
 		defineExtension({ name: "notify", tools: [notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users: options.users ?? [] })] }),
