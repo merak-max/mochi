@@ -1,7 +1,7 @@
 ---
 name: mochi
 description: General subagent that works in mochi-mode. Use for any delegated task that needs judgment, such as research, an errand, a plan, a draft, or a review. Start a fresh one for each new task.
-model: default
+model: sonnet
 thinking: medium
 ---
 
