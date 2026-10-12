@@ -10,7 +10,7 @@ Executor holds the owner's connected apps. Reach them from `code` with three fun
 - `apps_call({ path, args })` calls one tool by that path. It acts for real. If a restart interrupts it, the script gets "interrupted" and the call is not run again, so read the app before you retry.
 - `apps_skills({ app })` returns an app's instructions, or the list of apps without `app`. Read it before unfamiliar work in that app.
 
-Approval prompts are off for mochi, so a call that needs approval fails. Tell the owner instead of retrying.
+Mochi accepts Executor approvals by itself, so a gated call runs without the owner. A call can still fail on its own error; read the app's state before you retry.
 
 Ordinary web search, page reading and site maps use `web_search`, `web_fetch` and `web_map`. Use Executor's Firecrawl only for the logged-in browser. Scrape a page first with `profile: { name: "mochi", saveChanges: true }`, then interact with it using the same profile, so logins and cookies persist. If no interact tool shows up in `apps_search`, say so instead of improvising.
 

@@ -3,23 +3,23 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { JsonRpcMessage, JsonRpcRequest } from "@earendil-works/pi-mcp";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
-import { type Connect, connectApps } from "./apps.ts";
+import { type Connect, connectApps, toolExpression } from "./apps.ts";
 
 const context = BACKGROUND_CONTEXT;
 
 /** A scripted Executor on the in-memory transport: each tools/call goes to `onCall`, which may ask mochi for approval. */
-function fakeExecutor(onCall: (name: string, args: Record<string, unknown>, ask: (message: string) => Promise<void>) => Promise<unknown>) {
+function fakeExecutor(onCall: (name: string, args: Record<string, unknown>, ask: (message: string) => Promise<unknown>) => Promise<unknown>) {
 	const { client, server } = createInMemoryTransportPair();
 	const capabilities: unknown[] = [];
-	const replies = new Map<number, () => void>();
+	const replies = new Map<number, (result: unknown) => void>();
 	const ask = (message: string) =>
-		new Promise<void>((resolve) => {
+		new Promise<unknown>((resolve) => {
 			replies.set(9, resolve);
 			void server.send({ jsonrpc: "2.0", id: 9, method: "elicitation/create", params: { message } });
 		});
 	server.onMessage(async (message: JsonRpcMessage) => {
 		if (!("method" in message)) {
-			if ("id" in message) replies.get(message.id as number)?.();
+			if ("id" in message) replies.get(message.id as number)?.("result" in message ? message.result : undefined);
 			return;
 		}
 		if (!("id" in message)) return;
@@ -49,29 +49,37 @@ function start(connect: Connect) {
 
 const text = (value: string, isError = false) => ({ content: [{ type: "text", text: value }], isError });
 
-test("apps functions run Executor programs and return parsed results; approvals are declined and named", async () => {
+test("apps functions run Executor programs and return parsed results; mochi accepts every approval", async () => {
 	const seen: unknown[] = [];
+	const answers: unknown[] = [];
 	const executor = fakeExecutor(async (name, args, ask) => {
 		seen.push({ name, args });
+		if (name === "resume") return text(JSON.stringify({ status: "completed", execution: { ok: true, value: "posted" } }));
+		if (String(args.code).includes("notion.update")) return text(JSON.stringify({ status: "approval-required", requestId: "apr_1" }));
 		if (String(args.code).includes("bank.pay")) {
-			await ask("Pay Rs 500?");
-			return text("approval required", true);
+			answers.push(await ask("Pay Rs 500?"));
+			return text("paid");
 		}
 		return name === "skills" ? text("Gmail: use search first.") : text(JSON.stringify({ items: [{ path: "gmail.send", signature: "(to: string) => void" }] }));
 	});
-	const { apps, until, stop } = start(executor.connect);
+	const { apps, until, logs, stop } = start(executor.connect);
 	await until("executor.up");
 	assert.deepEqual(await apps.search("mail", context), { items: [{ path: "gmail.send", signature: "(to: string) => void" }] });
-	await apps.call("gmail.send", { to: "riya" }, context);
 	assert.equal(await apps.skills("gmail", context), "Gmail: use search first.");
-	await assert.rejects(apps.call("bank.pay", {}, context), /declined Executor approval prompts \(approvals are off\): Pay Rs 500\?\napproval required/);
-	assert.deepEqual(seen.slice(0, 3), [
-		{ name: "execute", args: { code: 'return await tools.search({"query":"mail"});' } },
-		{ name: "execute", args: { code: 'return await tools.gmail.send({"to":"riya"});' } },
-		{ name: "skills", args: { app: "gmail" } },
-	]);
+	assert.equal(await apps.call("bank.pay", {}, context), "paid");
+	assert.deepEqual(answers, [{ action: "accept", content: {} }]);
+	assert.deepEqual(await apps.call("notion.update", {}, context), { status: "completed", execution: { ok: true, value: "posted" } });
+	assert.deepEqual(seen.at(-1), { name: "resume", args: { requestId: "apr_1", response: { action: "accept", content: {} } } });
+	assert.ok(logs.includes("executor.approved"));
 	assert.deepEqual(executor.capabilities, [{ elicitation: {} }]);
 	await stop();
+});
+
+test("a path from apps_search, with or without the tools prefix, becomes one callable expression", () => {
+	assert.equal(toolExpression("gmail.send"), "tools.gmail.send");
+	assert.equal(toolExpression('tools["approval-probe"].ping'), 'tools["approval-probe"].ping');
+	assert.equal(toolExpression('["approval-probe"].ping'), 'tools["approval-probe"].ping');
+	assert.equal(toolExpression('tools.notion.profiles["ins_1"]["notion-fetch"]'), 'tools.notion.profiles["ins_1"]["notion-fetch"]');
 });
 
 test("without tokens or with Executor unreachable, each function throws one line and the state is logged once", async () => {
