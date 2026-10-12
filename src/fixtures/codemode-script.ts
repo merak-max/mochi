@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { type CommitChange, type TaskId, ToolTask, type ToolTaskInput } from "@earendil-works/pi-durable";
+import { type CommitChange, ROOT_CONVERSATION_ID, type TaskId, ToolTask, type ToolTaskInput, UserEntry } from "@earendil-works/pi-durable";
 import type { Apps } from "../apps/apps.ts";
 import { messageText } from "../text.ts";
 import { newFaux, openTestMochi } from "../test-support.ts";
@@ -19,6 +19,7 @@ const b = await tools.apps_search({ query: "mail" });
 const c = await tools.apps_call({ path: "gmail.send", args: { to: "riya" } });
 return { a, b, c };`,
 	fanout: `return await Promise.all([0, 1, 2, 3, 4, 5].map((n) => tools.apps_call({ path: "gmail.send", args: { to: n % 3 } })));`,
+	agent: `return await tools.agent({ name: "primes", brief: "List the first three primes." });`,
 };
 const die = () => process.kill(process.pid, "SIGKILL");
 const effectsFile = join(dir, "effects.jsonl");
@@ -47,6 +48,10 @@ const faux = newFaux();
 const respond = (transcript: TranscriptContext) => {
 	const last = transcript.messages.findLast((message) => message.role !== "system");
 	if (last?.role === "toolResult") return fauxAssistantMessage("done");
+	if (last !== undefined && messageText(last).includes("first three primes")) {
+		record("agent-answer");
+		return fauxAssistantMessage("2, 3, 5.");
+	}
 	return fauxAssistantMessage(fauxToolCall("codemode", { code: SCRIPTS[scenario]! }), { stopReason: "toolUse" });
 };
 faux.setResponses(Array.from({ length: 6 }, () => respond));
@@ -61,6 +66,7 @@ const finished = (change: CommitChange, name: string): boolean => nestedName(cha
 const KILLS: Record<string, (change: CommitChange) => boolean> = {
 	done: (change) => finished(change, "apps_call"),
 	"fanout-3": (change) => finished(change, "apps_call") && change.type === "task" && terminal.add(change.value.id).size === 3,
+	"agent-brief": (change) => change.type === "entry" && change.value.conversationId !== ROOT_CONVERSATION_ID && UserEntry.is(change.value),
 };
 
 const mochi = await openTestMochi(dir, faux, new Map(), undefined, [], { apps });
@@ -80,6 +86,8 @@ const summary = {
 	effects: effects(),
 	result: entries.filter((entry) => entry.kind === "pi.tool-result").map((entry) => (entry.model?.[0] === undefined ? "" : messageText(entry.model[0]))),
 	calls: tools.filter((task) => (task.input as ToolTaskInput).kind === "nested").length,
+	agents: (await mochi.harness.commit((tx) => tx.scanTasks({ kind: "mochi.agent" }, 100), context)).items.map((task) => task.state.status),
+	conversations: (await mochi.harness.commit((tx) => tx.scanConversations({}, 100), context)).items.length,
 	replay: mochi.registry.snapshot().extension("seat-owner")?.tools?.find((tool) => tool.name === "codemode")?.replay,
 };
 await mochi.close();

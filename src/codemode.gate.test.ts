@@ -6,7 +6,7 @@ import { tempDir } from "./test-support.ts";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "codemode-script.ts");
 
-type Summary = { effects: { op: string; args?: unknown }[]; result: string[]; calls: number; replay: string };
+type Summary = { effects: { op: string; args?: unknown }[]; result: string[]; calls: number; agents: string[]; conversations: number; replay: string };
 
 async function crashAt(scenario: string, kill: string): Promise<Summary> {
 	const dir = await tempDir();
@@ -57,4 +57,14 @@ test("a Promise.all fan-out of unsafe calls acts once per call across a SIGKILL"
 	);
 	assert.equal(summary.calls, 6);
 	assert.match(summary.result[0]!, /^Script failed\n[\s\S]*apps_call was interrupted/);
+});
+
+test("a SIGKILL during a foreground agent call resumes onto the same agent and child, and the answer returns once", async (t) => {
+	const summary = await crashAt("agent", "agent-brief");
+	t.diagnostic(JSON.stringify(summary));
+	assert.deepEqual(ops(summary), ["agent-answer"]);
+	assert.deepEqual(summary.agents, ["terminal"]);
+	assert.equal(summary.conversations, 3, "root, the line and one child");
+	assert.equal(summary.result.length, 1);
+	assert.match(summary.result[0]!, /^Script completed\n[\s\S]*2, 3, 5\.$/);
 });
