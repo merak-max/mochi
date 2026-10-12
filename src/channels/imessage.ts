@@ -79,9 +79,11 @@ export interface IMessageDeps {
 	readonly connect?: (credentials: { readonly projectId: string; readonly projectSecret: string }) => Promise<IMessageApp>;
 	readonly link?: typeof LINK;
 	readonly log?: Log;
+	/** Normalized handles of the guests who may write besides the owner. */
+	readonly guests?: readonly string[];
 }
 
-function normalizeHandle(handle: string): string {
+export function normalizeHandle(handle: string): string {
 	const trimmed = handle.trim().toLowerCase();
 	return trimmed.includes("@") ? trimmed : trimmed.replace(/[^\d+]/g, "");
 }
@@ -121,16 +123,17 @@ async function collect(content: Content, into: Collected): Promise<void> {
 
 type ParsedIMessage = { readonly kind: "message"; readonly message: OwnerInbound } | { readonly kind: "ignored"; readonly reason: "outbound" | "not-owner" | "empty" };
 
-export async function toInbound(message: IMessageMessage, owner: string): Promise<ParsedIMessage> {
+export async function toInbound(message: IMessageMessage, owner: string, guests: readonly string[] = []): Promise<ParsedIMessage> {
 	if (message.direction === "outbound") return { kind: "ignored", reason: "outbound" };
-	const sender = message.sender?.id;
-	if (!sender || normalizeHandle(sender) !== owner) return { kind: "ignored", reason: "not-owner" };
+	const sender = message.sender?.id === undefined ? "" : normalizeHandle(message.sender.id);
+	const isGuest = sender !== "" && sender !== owner && guests.includes(sender);
+	if (sender === "" || (sender !== owner && !isGuest)) return { kind: "ignored", reason: "not-owner" };
 	const collected: Collected = { text: [], attachments: [] };
 	await collect(message.content, collected);
 	if (collected.text.length === 0 && collected.attachments.length === 0) return { kind: "ignored", reason: "empty" };
 	return {
 		kind: "message",
-		message: { kind: "message", channel: "imessage", messageId: message.id, text: collected.text.join("\n"), at: message.timestamp, attachments: collected.attachments, ...(message.sequence === undefined ? {} : { sequence: message.sequence }) },
+		message: { kind: "message", channel: "imessage", messageId: message.id, text: collected.text.join("\n"), at: message.timestamp, attachments: collected.attachments, ...(message.sequence === undefined ? {} : { sequence: message.sequence }), ...(isGuest ? { person: sender } : {}) },
 	};
 }
 
@@ -191,8 +194,9 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 	const connect = deps.connect ?? connectPhoton;
 	const log = deps.log ?? defaultLog;
 	const link = deps.link ?? LINK;
+	const guests = deps.guests ?? [];
 	let app: IMessageApp | undefined;
-	let ownerSpace: IMessageSpace | undefined;
+	const spaces = new Map<string, IMessageSpace>();
 	const recent = new Map<string, IMessageMessage>();
 	const reactions = new Map<string, ReactionHandle>();
 
@@ -201,10 +205,14 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 		if (recent.size > REMEMBERED_MESSAGES) recent.delete(recent.keys().next().value!);
 	}
 
-	async function space(): Promise<IMessageSpace> {
+	async function space(person = owner): Promise<IMessageSpace> {
 		if (!app) throw new ChannelDown("iMessage is not connected");
-		ownerSpace ??= await app.dm(owner);
-		return ownerSpace;
+		let found = spaces.get(person);
+		if (found === undefined) {
+			found = await app.dm(person);
+			spaces.set(person, found);
+		}
+		return found;
 	}
 
 	return {
@@ -213,14 +221,14 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 		async run(sink, signal, cursor = async () => null) {
 			const handle = async (from: IMessageSpace, message: IMessageMessage) => {
 				try {
-					const parsed = await toInbound(message, owner);
+					const parsed = await toInbound(message, owner, guests);
 					if (parsed.kind === "ignored") {
 						// Read receipts and typing arrive as messages with no content; only a real drop is worth a log line.
 						const quiet = parsed.reason === "outbound" || message.content.type === "read" || message.content.type === "typing";
 						if (!quiet) log("channel.message_dropped", { channel: "imessage", reason: parsed.reason, content: message.content.type });
 						return;
 					}
-					ownerSpace = from;
+					spaces.set(parsed.message.kind === "message" ? (parsed.message.person ?? owner) : owner, from);
 					remember(message);
 					await sink(parsed.message);
 				} catch (error) {
@@ -270,7 +278,8 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 				const reason =
 					connected &&
 					(await supervise(connected).finally(() => {
-						app = ownerSpace = undefined;
+						app = undefined;
+						spaces.clear();
 						return connected.stop();
 					}));
 				if (reason && !signal.aborted) log("imessage.rebuilt", { reason });
@@ -278,9 +287,9 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 			}
 		},
 
-		async send(bubble) {
+		async send(bubble, person) {
 			try {
-				const target = await space();
+				const target = await space(person);
 				if (bubble.kind === "text") for (const text of chunkText(bubble.text, TEXT_LIMIT)) await target.send(text);
 				else if (bubble.kind === "link") await target.sendLink(bubble.url);
 				else await target.sendFile(bubble);
@@ -289,8 +298,8 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 			}
 		},
 
-		async typing(on) {
-			const target = await space();
+		async typing(on, person) {
+			const target = await space(person);
 			await (on ? target.startTyping() : target.stopTyping());
 		},
 

@@ -55,7 +55,8 @@ The TUI follows pi's experimental durable TUI. It renders the shown conversation
 - Every inbound message becomes `root.submit({ type: "input", content, requestId, whenBusy: "steer" })`.
 - `requestId` is `<channel>:<channel message id>`. A redelivered message is submitted once.
 - The content is prefixed with a one-line channel tag: `[whatsapp 2026-10-05 14:02 IST id=wamid.HBg...]`. The model sees where each message came from and the id it can react to.
-- Each adapter is built for the owner's address from its variables and drops every other sender before `ingest` sees a message, so nothing downstream carries a sender or an address.
+- Each adapter is built for the owner's address from its variables and drops every other sender before `ingest` sees a message. The one exception is iMessage guests (see below).
+- **Guests.** `data/config.json` can list `guests: [{ handle, name?, persona? }]`. Only the iMessage adapter reads it. A message from a guest handle carries `person` (the normalized handle). `ingest` sends it to the guest's own conversation, which `ensureGuest` creates on the first message and records in the `mochi.guest` doc family. The guest conversation has seat `guest`, root's model, and instructions built from the guest entry. A guest message does not change `mochi.last-inbound`, so `notify` and `react` stay with the owner. `/new`, `/stop` and `/status` from a guest act on the guest's conversation. A guest's replies use their own channel chain (`imessage:<handle>`), so they never wait behind the owner's replies. Dreaming skips guest conversations.
 - Every owner message from a chat channel goes through `ingest` (`src/turn/turn.ts`). In one commit it checks `tx.submissionByRequest(root, requestId)` (set: a redelivery, nothing happens), opens a **Turn**, and records `mochi.last-inbound` and the channel's `mochi.inbound-cursor`; then it submits. Attachments are saved under `work/inbox/<messageId>/` and named in the input by path.
 - A Turn (`mochi.turn` task) is one thing owed to the owner: `run` (submit the same input under the same requestId, wait for the answer), `claim`, `send`, and for a `notify`, `record`. Every Turn is a background task of the **line**, an ownerless conversation recorded in `mochi.line`, so neither Esc nor `/stop` on root reaches it. `/stop` withdraws a reply still being generated (the Turn ends silent); a reply mid-send and every notify finish.
 - The claim commit takes `mochi.claim` `<answer entry>:<channel>` (the first claimer sends; a duplicate Turn ends `merged`) and appends the Turn to `mochi.channel-tail` for its channel; the Turn waits for the previous tail before its first bubble, so messages never interleave on a channel and a restart replays the same order.
@@ -145,8 +146,8 @@ export interface ChannelProfile {                // the one source for present()
 export const REACTIONS = ["love", "like", "dislike", "laugh", "emphasize", "question"] as const;
 export type Reaction = (typeof REACTIONS)[number];
 
-export type OwnerInbound =                       // always the owner: the adapter dropped everyone else
-  | { kind: "message"; channel: ChatChannelId; messageId: string; text: string; at: Date; attachments: readonly Attachment[]; sequence?: number }
+export type OwnerInbound =                       // the owner or a configured guest: the adapter dropped everyone else
+  | { kind: "message"; channel: ChatChannelId; messageId: string; text: string; at: Date; attachments: readonly Attachment[]; sequence?: number; person?: string }  // person: a guest's handle
   | { kind: "tapback"; channel: ChatChannelId; messageId: string; on: string; reaction: Reaction | "none"; at: Date };
 
 export type Bubble =
@@ -162,8 +163,8 @@ export class SendRejected extends DeliveryError {}  // refused for good (an atta
 export interface Channel {
   readonly profile: ChannelProfile;
   run(sink: (inbound: OwnerInbound) => Promise<void>, signal: AbortSignal, cursor?: () => Promise<number | null>): Promise<void>;  // until signal aborts; cursor reads mochi.inbound-cursor
-  send(bubble: Bubble): Promise<void>;          // throws only DeliveryError subclasses for platform failures
-  typing(on: boolean): Promise<void>;
+  send(bubble: Bubble, person?: string): Promise<void>;  // throws only DeliveryError subclasses; person absent: the owner
+  typing(on: boolean, person?: string): Promise<void>;
   react?(messageId: string, reaction: Reaction | "none"): Promise<void>;
 }
 ```
@@ -194,7 +195,7 @@ The pre-2026-10-05 `data/notes/<slug>.md` files are no longer read. A store that
 
 ## Tools the model sees
 
-Each conversation has a seat, written by `createSeatConversation` (the only caller of `createConversation`) or, for root, by the `root-seat` boot step: `owner` (root), `run` (a trigger run or a background agent), `worker` (a foreground agent). `SURFACE` in `src/seats.ts` lists each tool's seats and `LIBRARY` each script function's, and opening mochi fails when either disagrees with the definitions. Root has no `notify`; only root has `react` and, inside `code`, the agent functions and `trigger_add`; `worker` also has no `note`, `notify` or trigger tools. A conversation without a seat gets the `worker` selection. `node eval/surface.ts` prints each seat's list.
+Each conversation has a seat, written by `createSeatConversation` (the only caller of `createConversation`) or, for root, by the `root-seat` boot step: `owner` (root), `run` (a trigger run or a background agent), `worker` (a foreground agent), `guest` (a guest's iMessage thread). `SURFACE` in `src/seats.ts` lists each tool's seats and `LIBRARY` each script function's, and opening mochi fails when either disagrees with the definitions. Root has no `notify`; only root has `react` and, inside `code`, the agent functions and `trigger_add`; `worker` also has no `note`, `notify` or trigger tools. `guest` has `handoff` but no `note`, `react`, `notify`, agent or trigger tools, and its selection leaves out the `notes` extension, so the owner's notes are not in a guest's prompt. A conversation without a seat gets the `worker` selection. `node eval/surface.ts` prints each seat's list.
 
 | Tool | Extension | Behavior |
 |---|---|---|

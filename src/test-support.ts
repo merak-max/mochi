@@ -20,6 +20,7 @@ import type { Log } from "./log.ts";
 import { allPages } from "./pages.ts";
 import { AgentCatalog, type AgentType } from "./agents/catalog.ts";
 import type { Retry } from "./turn/turn.ts";
+import type { Guest } from "./config.ts";
 
 
 export const FAUX = { provider: "faux", modelId: "faux-1" } as const;
@@ -62,6 +63,7 @@ export async function openTestMochi(
 		readonly apps?: Apps;
 		readonly scriptDeadlineMs?: number;
 		readonly triggerDeadlineMs?: number;
+		readonly guests?: readonly Guest[];
 	} = {},
 ): Promise<TestMochi> {
 	const { skillsDir, agents, scheduling, log, ...options } = overrides;
@@ -117,17 +119,20 @@ export function newFaux(): FauxProviderHandle {
 
 export const PROFILES: Readonly<Record<ChatChannelId, ChannelProfile>> = { imessage: IMESSAGE_PROFILE, telegram: TELEGRAM_PROFILE, whatsapp: WHATSAPP_PROFILE };
 
-/** A channel that records each bubble it sends (a link as its URL, a file as its name) and each reaction. */
+/** A channel that records each bubble it sends (a link as its URL, a file as its name), each reaction, and each guest's bubbles by handle. */
 export function recordingChannel(id: ChatChannelId, options: { react: boolean } = { react: true }) {
 	const sent: string[] = [];
+	const sentTo: { person: string | undefined; text: string }[] = [];
 	const reactions: { messageId: string; reaction: Reaction | "none" }[] = [];
 	const channel: Channel = {
 		profile: options.react ? PROFILES[id] : { ...PROFILES[id], reactions: [] },
 		run: async (_sink, signal) => {
 			await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
 		},
-		send: async (bubble) => {
-			sent.push(bubble.kind === "text" ? bubble.text : bubble.kind === "link" ? bubble.url : bubble.name);
+		send: async (bubble, person) => {
+			const text = bubble.kind === "text" ? bubble.text : bubble.kind === "link" ? bubble.url : bubble.name;
+			sent.push(text);
+			sentTo.push({ person, text });
 		},
 		typing: async () => {},
 		...(options.react
@@ -138,7 +143,7 @@ export function recordingChannel(id: ChatChannelId, options: { react: boolean } 
 				}
 			: {}),
 	};
-	return { channel, sent, reactions };
+	return { channel, sent, sentTo, reactions };
 }
 
 /** Every tier and alias resolves to the faux model; `worker` is always there. */

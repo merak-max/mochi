@@ -2,6 +2,7 @@ import type { Context } from "@earendil-works/chord";
 import { type AssistantMessage, Type } from "@earendil-works/pi-ai";
 import {
 	type Conversation,
+	type ConversationId,
 	defineDocFamily,
 	defineTask,
 	type Harness,
@@ -27,8 +28,9 @@ export const commandOf = (text: string): Command | undefined => {
 	}
 };
 
-export type CommandInput = { readonly key: string; readonly command: Command; readonly channel: ChatChannelId };
-export type CommandTurn = { readonly source: "command"; readonly key: string; readonly channel: ChatChannelId; readonly text: string };
+/** `conversation` and `person` are set for a guest's command, which acts on the guest's own conversation. */
+export type CommandInput = { readonly key: string; readonly command: Command; readonly channel: ChatChannelId; readonly conversation?: ConversationId; readonly person?: string };
+export type CommandTurn = { readonly source: "command"; readonly key: string; readonly channel: ChatChannelId; readonly text: string; readonly person?: string };
 export type CommandReply = { readonly submission: SubmissionId; readonly text: string };
 type State =
 	| { readonly phase: "prepare" }
@@ -102,10 +104,10 @@ export async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "n
 	].join("\n");
 }
 
-async function abortTargets(deps: CommandDeps, context: Context) {
+async function abortTargets(deps: CommandDeps, target: Conversation, context: Context) {
 	const graph = await deps.harness.taskGraph(context);
 	try {
-		const owned = new Set([deps.root.id]);
+		const owned = new Set([target.id]);
 		let added = true;
 		while (added) {
 			added = false;
@@ -123,17 +125,24 @@ async function abortTargets(deps: CommandDeps, context: Context) {
 }
 
 export function commandTask(deps: CommandDeps) {
+	const targetOf = async (input: CommandInput, context: Context): Promise<Conversation> => {
+		if (input.conversation === undefined) return deps.root;
+		const conversation = await deps.harness.conversation(input.conversation, context);
+		if (conversation === undefined) throw new Error(`Command conversation ${input.conversation} is missing.`);
+		return conversation;
+	};
 	return defineTask<CommandInput, State, CommandReply>({
 		name: "mochi.command",
 		version: 1,
 		initial: () => ({ phase: "prepare" }),
 		phases: {
 			prepare: async (task, runtime, context) => {
+				const target = await targetOf(task.input, context);
 				if (task.input.command === "status") {
-					const text = await statusText(deps, context);
+					const text = await statusText({ ...deps, root: target }, context);
 					return runtime.commit(() => ({ status: "running", checkpoint: { phase: "reply", text, submission: null } }), context);
 				}
-				const targets = await abortTargets(deps, context);
+				const targets = await abortTargets(deps, target, context);
 				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "abort", ...targets } }), context);
 			},
 			abort: async (task, runtime, context) => {
@@ -146,12 +155,12 @@ export function commandTask(deps: CommandDeps) {
 					const text = targets.running ? "stopped." : "nothing was running.";
 					return runtime.commit(() => ({ status: "running", checkpoint: { phase: "reply", text, submission: null } }), context);
 				}
-				const handoff = await threadHandoff(deps.root, deps.fast, context);
+				const handoff = await threadHandoff(await targetOf(task.input, context), deps.fast, context);
 				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "reset", handoff: handoff ?? null } }), context);
 			},
 			reset: async (task, runtime, context) => {
 				const { handoff } = task.state.checkpoint;
-				const submission = await keyedReset(deps.root, `command-reset:${task.input.key}`, handoff ?? undefined, deps.now(), context);
+				const submission = await keyedReset(await targetOf(task.input, context), `command-reset:${task.input.key}`, handoff ?? undefined, deps.now(), context);
 				const kept = handoff === null ? "" : plain(handoff.split("\n")[0] ?? "").slice(0, 120);
 				const text = kept === "" ? "fresh thread." : `fresh thread. kept: ${kept}`;
 				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "reply", text, submission } }), context);
@@ -164,7 +173,8 @@ export function commandTask(deps: CommandDeps) {
 					type: "write", requestId: `command-receipt:${task.input.key}`, entry: { kind: "mochi.command.receipt", data: { key: task.input.key } },
 				}, context)).id;
 				await runtime.commit(async (tx) => {
-					await deps.openReply(tx, { source: "command", key: task.input.key, channel: task.input.channel, text });
+					const person = task.input.person;
+					await deps.openReply(tx, { source: "command", key: task.input.key, channel: task.input.channel, text, ...(person === undefined ? {} : { person }) });
 					return { status: "terminal", outcome: { status: "completed", result: { submission, text } } };
 				}, context);
 			},

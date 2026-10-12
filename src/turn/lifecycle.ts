@@ -158,27 +158,28 @@ export async function keyedReset(root: Conversation, key: string, handoff: strin
 }
 
 export async function idleResetIfStale(
-	deps: { readonly harness: Harness; readonly root: Conversation; readonly fast: FastCompletion; readonly idleResetMinutes: number; readonly now: () => number },
+	deps: { readonly harness: Harness; readonly fast: FastCompletion; readonly idleResetMinutes: number; readonly now: () => number },
+	conversation: Conversation,
 	key: string,
 	context: Context,
 ): Promise<boolean> {
 	const resetKey = `idle-reset:${key}`;
-	const existing = await deps.harness.commit((tx) => tx.submissionByRequest(deps.root.id, resetKey), context);
+	const existing = await deps.harness.commit((tx) => tx.submissionByRequest(conversation.id, resetKey), context);
 	if (existing !== undefined) {
 		await (await deps.harness.submission(existing.id, context))?.wait(context);
 		return true;
 	}
 	if (deps.idleResetMinutes <= 0) return false;
-	const live = await deps.harness.snapshot(LiveDoc, deps.root.id, context);
+	const live = await deps.harness.snapshot(LiveDoc, conversation.id, context);
 	if (live?.run !== undefined) return false;
-	const view = await deps.root.context(context);
+	const view = await conversation.context(context);
 	const at = newestEntryTime(view.entries);
 	if (at === undefined || deps.now() - at <= deps.idleResetMinutes * 60_000) return false;
-	const handoff = await threadHandoff(deps.root, deps.fast, context);
-	const current = await deps.root.context(context);
-	const busy = await deps.harness.snapshot(LiveDoc, deps.root.id, context);
+	const handoff = await threadHandoff(conversation, deps.fast, context);
+	const current = await conversation.context(context);
+	const busy = await deps.harness.snapshot(LiveDoc, conversation.id, context);
 	if (busy?.run !== undefined || current.entries.at(-1)?.id !== view.entries.at(-1)?.id) return false;
-	await keyedReset(deps.root, resetKey, handoff, deps.now(), context);
+	await keyedReset(conversation, resetKey, handoff, deps.now(), context);
 	return true;
 }
 

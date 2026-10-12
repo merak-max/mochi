@@ -37,6 +37,7 @@ import {
 	SendRejected,
 	SendUnknown,
 } from "../channels/types.ts";
+import type { Guest } from "../config.ts";
 import type { Log } from "../log.ts";
 import { formatStamp, messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
@@ -74,6 +75,10 @@ export type OwnerTurn = {
 	readonly files: readonly SavedFile[];
 	/** Images and transcripts prepared once at ingest, so a rerun of `run` never transcribes again. */
 	readonly preparedMedia?: Awaited<ReturnType<typeof prepareInbound>>;
+	/** A guest's own conversation. Absent: root. */
+	readonly conversation?: ConversationId;
+	/** The guest's normalized handle, where the reply goes. Absent: the owner. */
+	readonly person?: string;
 };
 export type RunTurn = { readonly source: "run"; readonly channel: ChannelId; readonly text: string; readonly from: Origin };
 export type TurnInput = OwnerTurn | RunTurn | CommandTurn;
@@ -154,6 +159,33 @@ export const LineDoc = defineDoc<{ conversation: ConversationId | null }>({
 	initial: () => ({ conversation: null }),
 });
 
+/** Each guest's own conversation, keyed by normalized handle. One writer: `ensureGuest`. */
+export const GuestDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
+	kind: "mochi.guest",
+	version: 1,
+	scope: "session",
+	family: true,
+	initial: () => ({ conversation: null }),
+});
+
+export function guestInstructions(guest: Guest): string {
+	const who = guest.name ?? "a guest";
+	const lines = [
+		`This conversation is with ${who} (iMessage ${guest.handle}), a friend of the owner, Shaurya. They are not the owner. ` +
+			"In this conversation their messages instruct you, and 'the owner' in other sections still means Shaurya. " +
+			"Help them fully, in plain chat style. Shaurya's apps and accounts are his: do not send messages, email or make changes in them for a guest.",
+	];
+	if (guest.persona !== undefined) lines.push(guest.persona);
+	return lines.join("\n\n");
+}
+
+/** Inside ingest's commit: the guest's conversation, created on their first message with root's model and thinking. */
+export async function ensureGuest(tx: Tx, guest: Guest): Promise<ConversationId> {
+	const doc = await tx.doc(GuestDoc, guest.handle, null);
+	if (doc.conversation === null) doc.conversation = await createSeatConversation(tx, "guest", { kind: "ownerless" }, { instructions: guestInstructions(guest) });
+	return doc.conversation;
+}
+
 export async function ensureLine(harness: Harness, context: Context): Promise<ConversationId> {
 	return harness.commit(async (tx) => {
 		const line = await tx.doc(LineDoc);
@@ -172,10 +204,12 @@ export interface Line {
 	readonly timeZone: string;
 	readonly workDir: string;
 	readonly media: Omit<MediaDeps, "workDir">;
-	/** Runs an owner command (`/new`, `/stop`, `/status`) instead of a model turn. */
+	/** Guests who may write on iMessage, each in a conversation of their own. */
+	readonly guests: readonly Guest[];
+	/** Runs a command (`/new`, `/stop`, `/status`) instead of a model turn. */
 	readonly command?: (input: CommandInput, context: Context) => Promise<CommandReply>;
-	/** Resets a stale root before an owner message; true when it reset. */
-	readonly idleReset?: (key: string, context: Context) => Promise<boolean>;
+	/** Resets a stale conversation before a message to it; true when it reset. */
+	readonly idleReset?: (conversation: Conversation, key: string, context: Context) => Promise<boolean>;
 }
 
 /** What the Turn task needs from the host, captured once. */
@@ -232,9 +266,9 @@ export async function answerText(tx: Tx, entry: EntryId): Promise<string> {
 const TYPING_REFRESH_MS = 5_000;
 
 /** Typing on, refreshed until the profile's cap; errors are swallowed. Returns the stop. */
-function keepTyping(channel: Channel | undefined): () => Promise<void> {
+function keepTyping(channel: Channel | undefined, person: string | undefined): () => Promise<void> {
 	if (channel === undefined) return async () => {};
-	const typing = (on: boolean) => channel.typing(on).catch(() => {});
+	const typing = (on: boolean) => channel.typing(on, person).catch(() => {});
 	const until = Date.now() + channel.profile.typingMaxMs;
 	void typing(true);
 	const timer = setInterval(() => {
@@ -247,6 +281,12 @@ function keepTyping(channel: Channel | undefined): () => Promise<void> {
 		await typing(false);
 	};
 }
+
+/** Who a Turn's bubbles go to. Absent: the owner. */
+const personOf = (input: TurnInput): string | undefined => (input.source === "run" ? undefined : input.person);
+
+/** A guest's replies chain apart from the owner's, so one never waits behind the other. */
+const tailKey = (channel: ChatChannelId, person: string | undefined): string => (person === undefined ? channel : `${channel}:${person}`);
 
 const running = (checkpoint: TurnState): NextTaskState<TurnState, TurnResult> => ({ status: "running", checkpoint });
 const completed = (result: TurnResult): NextTaskState<TurnState, TurnResult> => ({ status: "terminal", outcome: { status: "completed", result } });
@@ -275,10 +315,10 @@ export function defineTurn(host: TurnHost): TurnTask {
 			run: async (task, runtime, context) => {
 				const input = task.input;
 				if (input.source !== "owner") throw new Error("Only an owner Turn runs root.");
-				const stopTyping = keepTyping(channels.get(input.channel));
+				const stopTyping = keepTyping(channels.get(input.channel), input.person);
 				let settled;
 				try {
-					const conversation = (await runtime.conversation(ROOT_CONVERSATION_ID, context))!;
+					const conversation = (await runtime.conversation(input.conversation ?? ROOT_CONVERSATION_ID, context))!;
 					const content = await inputOf(workDir, input, media, context.abortSignal);
 					settled = await (await conversation.submit({ type: "input", content, requestId: input.key, whenBusy: "steer" }, context)).wait(context);
 				} finally {
@@ -297,7 +337,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 					const claim = await tx.doc(ClaimDoc, claimKey(answer, task.id, channel), null);
 					if (claim.task !== null && claim.task !== task.id) return completed("merged");
 					claim.task = task.id;
-					const tail = await tx.doc(ChannelTailDoc, channel, null);
+					const tail = await tx.doc(ChannelTailDoc, tailKey(channel, personOf(task.input)), null);
 					const previous = tail.task;
 					tail.task = task.id;
 					const live = previous !== null && previous !== task.id && (await tx.task(previous))?.state.status !== "terminal";
@@ -307,6 +347,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 			send: async (task, runtime, context) => {
 				const state = task.state.checkpoint;
 				const { channel: id, answer } = state;
+				const person = personOf(task.input);
 				let { sent, outage } = state;
 				if (state.after !== null) await runtime.waitForTask(state.after, context);
 				let text = "";
@@ -330,7 +371,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 					if (bubbles !== undefined && sent >= bubbles.length) return runtime.commit(() => finished, context);
 					const bubble = bubbles?.[sent];
 					if (channel !== undefined && bubble !== undefined && sent > 0) {
-						void channel.typing(true).catch(() => {});
+						void channel.typing(true, person).catch(() => {});
 						await runtime.sleep(runtime.now() + pace(bubble), context);
 					}
 					try {
@@ -343,7 +384,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 								throw new SendRejected(`The attachment ${bubble.name} could not be read inside the work directory.`);
 							}
 						}
-						await channel.send(outgoingBubble);
+						await channel.send(outgoingBubble, person);
 					} catch (error) {
 						if (!(error instanceof DeliveryError)) {
 							log("turn.faulted", { task: task.id, answer, error: String(error) });
@@ -414,41 +455,64 @@ export async function ingest(line: Line, inbound: OwnerInbound | CliInbound, con
 		}
 		case "message": {
 			const key = requestKey(inbound.channel, inbound.messageId);
-			const command = inbound.attachments.length === 0 ? commandOf(inbound.text) : undefined;
-			if (command !== undefined && line.command !== undefined) {
-				await harness.commit(async (tx) => {
-					(await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
-					if (inbound.sequence !== undefined) {
-						const cursor = await tx.doc(InboundCursorDoc, inbound.channel, null);
-						cursor.sequence = Math.max(cursor.sequence ?? inbound.sequence, inbound.sequence);
-					}
-				}, context);
-				return (await line.command({ key, command, channel: inbound.channel }, context)).submission;
-			}
-			const prior = await harness.commit((tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, key), context);
-			if (prior !== undefined) return prior.id;
-			// Before the Turn opens: its run phase can submit at once, and a stale thread must not be resent.
-			await line.idleReset?.(key, context);
-			const tag = tagOf(inbound.channel, inbound.messageId, inbound.at, line.timeZone);
-			const files = await saveFiles(line.workDir, inbound);
-			const preparedMedia = files.length === 0 ? undefined : await prepareInbound(files, line.workDir, line.media, context.abortSignal);
-			const turn: OwnerTurn = { source: "owner", channel: inbound.channel, key, tag, text: inbound.text, files, ...(preparedMedia === undefined ? {} : { preparedMedia }) };
-			const existing = await harness.commit(async (tx) => {
-				const submission = await tx.submissionByRequest(ROOT_CONVERSATION_ID, key);
-				if (submission !== undefined) return submission.id;
-				await openTurn(tx, line, turn);
-				(await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
+			const guest = inbound.person === undefined ? undefined : guestOf(line, inbound.person);
+			// Only the owner's messages move notify's default channel and react's default target.
+			const recordInbound = async (tx: Tx) => {
+				if (guest === undefined) (await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
 				if (inbound.sequence !== undefined) {
 					const cursor = await tx.doc(InboundCursorDoc, inbound.channel, null);
 					cursor.sequence = Math.max(cursor.sequence ?? inbound.sequence, inbound.sequence);
 				}
-				return undefined;
+			};
+			const command = inbound.attachments.length === 0 ? commandOf(inbound.text) : undefined;
+			if (command !== undefined && line.command !== undefined) {
+				const conversation = await harness.commit(async (tx) => {
+					await recordInbound(tx);
+					return guest === undefined ? undefined : ensureGuest(tx, guest);
+				}, context);
+				const forGuest = guest === undefined || conversation === undefined ? {} : { conversation, person: guest.handle };
+				return (await line.command({ key, command, channel: inbound.channel, ...forGuest }, context)).submission;
+			}
+			const known = guest === undefined ? ROOT_CONVERSATION_ID : ((await harness.snapshot(GuestDoc, guest.handle, context))?.conversation ?? null);
+			if (known !== null) {
+				const prior = await harness.commit((tx) => tx.submissionByRequest(known, key), context);
+				if (prior !== undefined) return prior.id;
+				// Before the Turn opens: its run phase can submit at once, and a stale thread must not be resent.
+				if (line.idleReset !== undefined) await line.idleReset(await conversationOf(line, known, context), key, context);
+			}
+			const tag = tagOf(inbound.channel, inbound.messageId, inbound.at, line.timeZone);
+			const files = await saveFiles(line.workDir, inbound);
+			const preparedMedia = files.length === 0 ? undefined : await prepareInbound(files, line.workDir, line.media, context.abortSignal);
+			const turn: OwnerTurn = { source: "owner", channel: inbound.channel, key, tag, text: inbound.text, files, ...(preparedMedia === undefined ? {} : { preparedMedia }) };
+			const opened = await harness.commit(async (tx) => {
+				const known = guest === undefined ? ROOT_CONVERSATION_ID : (await tx.doc(GuestDoc, guest.handle, null)).conversation;
+				if (known !== null) {
+					const submission = await tx.submissionByRequest(known, key);
+					if (submission !== undefined) return { kind: "existing" as const, submission: submission.id };
+				}
+				const conversation = known ?? (await ensureGuest(tx, guest!));
+				await openTurn(tx, line, guest === undefined ? turn : { ...turn, conversation, person: guest.handle });
+				await recordInbound(tx);
+				return { kind: "opened" as const, conversation };
 			}, context);
-			if (existing !== undefined) return existing;
+			if (opened.kind === "existing") return opened.submission;
+			const target = await conversationOf(line, opened.conversation, context);
 			const content = await inputOf(line.workDir, turn, line.media, context.abortSignal);
-			return (await root.submit({ type: "input", content, requestId: key, whenBusy: "steer" }, context)).id;
+			return (await target.submit({ type: "input", content, requestId: key, whenBusy: "steer" }, context)).id;
 		}
 	}
+}
+
+function guestOf(line: Line, person: string): Guest {
+	for (const guest of line.guests) if (guest.handle === person) return guest;
+	throw new Error(`No guest ${person} is configured.`);
+}
+
+async function conversationOf(line: Line, id: ConversationId, context: Context): Promise<Conversation> {
+	if (id === ROOT_CONVERSATION_ID) return line.root;
+	const conversation = await line.harness.conversation(id, context);
+	if (conversation === undefined) throw new Error(`Conversation ${id} is missing.`);
+	return conversation;
 }
 
 /** `react` on the owner's chat messages. Lives in the `channels` extension, which trigger conversations leave out. */

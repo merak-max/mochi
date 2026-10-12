@@ -7,7 +7,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import { AgentDoc, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import { loadConfig } from "../config.ts";
-import { createMemoryConversation } from "../seats.ts";
+import { createMemoryConversation, createSeatConversation } from "../seats.ts";
 import { writeFile } from "node:fs/promises";
 import { newFaux, openTestMochi, tempDir, type TestMochi } from "../test-support.ts";
 import { applyDreamBatch, type Batch, DreamDoc, dreamConfig } from "./dream.ts";
@@ -92,6 +92,32 @@ test("Dreaming rejects a changed revision even when memory bytes return to the p
 	await assert.rejects(mochi.harness.commit((tx) => applyDreamBatch(tx, pin, [], "2026-10-05"), context), /Stale/);
 	await mochi.close();
 });
+test("Dreaming never reads a guest's conversation as evidence", async () => {
+	const dir = await tempDir();
+	const faux = newFaux();
+	let supplied: { text: string }[] = [];
+	faux.setResponses([(transcript) => {
+		const message = transcript.messages.findLast((message) => message.role === "user");
+		const text = message === undefined ? "" : typeof message.content === "string" ? message.content : message.content.filter((part) => part.type === "text").map((part) => part.text).join("");
+		supplied = JSON.parse(text).evidence;
+		return fauxAssistantMessage("[]");
+	}]);
+	const skew = Date.parse("2026-10-05T03:29:58Z") - Date.now();
+	const now = () => new Date(Date.now() + skew);
+	const memory = { repo: join(dir, "memory"), dreaming: { enabled: true, cron: "30 3 * * *", tz: "UTC" } };
+	const mochi = await openTestMochi(dir, faux, undefined, undefined, undefined, { memory, now });
+	await mochi.harness.commit(async (tx) => {
+		await tx.appendEntry(ROOT_CONVERSATION_ID, { kind: "test.source", model: [{ role: "user", content: "My sister is Asha.", timestamp: now().getTime() }] });
+		const guest = await createSeatConversation(tx, "guest", { kind: "ownerless" }, { instructions: "A guest." });
+		await tx.appendEntry(guest, { kind: "test.source", model: [{ role: "user", content: "My dog is Bruno.", timestamp: now().getTime() }] });
+	}, context);
+	mochi.harness.resume();
+	try {
+		await until(mochi, (owner) => owner.last?.result === "empty");
+		assert.deepEqual(supplied.map((entry) => entry.text), ["My sister is Asha."]);
+	} finally { await mochi.close(); }
+});
+
 test("Dreaming keeps owner evidence after more than 64 earlier Dreaming conversations", async () => {
 	const dir = await tempDir();
 	const faux = newFaux();

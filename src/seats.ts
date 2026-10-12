@@ -18,8 +18,9 @@ import { codeTool, type CodeDeps, type ScriptFn } from "./code/code.ts";
  *   owner   root. Its only voice is its reply. The only seat that starts agents or adds triggers.
  *   run     a trigger run or a background agent. Reaches the owner only with notify; may end a trigger.
  *   worker  a foreground agent. Its answer returns to the call that started it.
+ *   guest   a guest's iMessage thread. Its reply goes to the guest; it has no owner notes and reaches no owner channel.
  */
-export const SEATS = ["owner", "run", "worker"] as const;
+export const SEATS = ["owner", "run", "worker", "guest"] as const;
 export type Seat = (typeof SEATS)[number];
 
 const ALL = SEATS;
@@ -37,12 +38,12 @@ export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 	recall: ALL,
 	react: OWNER,
 	notify: ["run"],
-	handoff: OWNER,
+	handoff: ["owner", "guest"],
 };
 
 /** Caps, in characters, on each seat's tool schemas and each prompt section. A description that grows past one fails the build. */
 export const BUDGET: { readonly tools: Readonly<Record<Seat, number>>; readonly sections: Readonly<Record<string, number>> } = {
-	tools: { owner: 8560, run: 7000, worker: 5200 },
+	tools: { owner: 8560, run: 7000, worker: 5200, guest: 5500 },
 	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000 },
 };
 
@@ -76,7 +77,12 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 export const FORBIDDEN_TOOL_NAME = /^(memory|session_search)$|^mcp_(?!_)/;
 
 const SHARED = ["identity", "notes", "skills", "fast-compaction"];
-const selection = (seat: Seat): string[] => [...SHARED, `seat-${seat}`];
+
+/** The extensions a seat's agent names. Owner notes describe the owner, so a guest's thread leaves them out. */
+export function selection(seat: Seat): string[] {
+	const shared = seat === "guest" ? SHARED.filter((name) => name !== "notes") : SHARED;
+	return [...shared, `seat-${seat}`];
+}
 
 const drift = (names: readonly string[], table: object): string[] => [...names.filter((name) => !Object.hasOwn(table, name)), ...Object.keys(table).filter((name) => !names.includes(name))];
 

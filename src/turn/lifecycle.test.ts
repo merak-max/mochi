@@ -68,11 +68,11 @@ test("idle reset fires once across reopen, keeps notes in the prompt, and never 
 	}, context);
 	await first.root.submit({ type: "write", entry: { kind: "old", model: [{ role: "user", content: "old cold thread", timestamp: now - 61 * 60_000 }] } }, context);
 	first.faux.setResponses([fauxAssistantMessage("pending promise")]);
-	assert.equal(await idleResetIfStale({ ...first, idleResetMinutes: 60 }, "w:1", context), true);
+	assert.equal(await idleResetIfStale({ ...first, idleResetMinutes: 60 }, first.root, "w:1", context), true);
 	await first.harness.close(context);
 	const second = await open(dir, () => now);
 	try {
-		assert.equal(await idleResetIfStale({ ...second, idleResetMinutes: 60 }, "w:1", context), true);
+		assert.equal(await idleResetIfStale({ ...second, idleResetMinutes: 60 }, second.root, "w:1", context), true);
 		assert.equal(second.faux.state.callCount, 0);
 		second.faux.setResponses([(request) => {
 			const text = JSON.stringify(request.messages);
@@ -82,9 +82,9 @@ test("idle reset fires once across reopen, keeps notes in the prompt, and never 
 			return fauxAssistantMessage("ok", { timestamp: now });
 		}]);
 		await (await second.root.submit({ type: "input", content: "hi" }, context)).wait(context);
-		assert.equal(await idleResetIfStale({ ...second, idleResetMinutes: 60 }, "w:2", context), false);
+		assert.equal(await idleResetIfStale({ ...second, idleResetMinutes: 60 }, second.root, "w:2", context), false);
 		now += 3_600_001;
-		assert.equal(await idleResetIfStale({ ...second, idleResetMinutes: 0 }, "w:3", context), false);
+		assert.equal(await idleResetIfStale({ ...second, idleResetMinutes: 0 }, second.root, "w:3", context), false);
 		assert.equal((await second.root.entries({}, 100, undefined, context)).items.filter((entry) => entry.kind === ResetEntry.kind).length, 1);
 	} finally { await second.harness.close(context); }
 });
@@ -102,7 +102,7 @@ test("busy root is never idle-reset", async () => {
 		await mochi.root.submit({ type: "write", entry: { kind: "old", model: [{ role: "user", content: "old", timestamp: Date.now() - 7_200_000 }] } }, context);
 		await mochi.root.submit({ type: "input", content: "work" }, context);
 		await seen;
-		assert.equal(await idleResetIfStale({ ...mochi, idleResetMinutes: 60 }, "w:busy", context), false);
+		assert.equal(await idleResetIfStale({ ...mochi, idleResetMinutes: 60 }, mochi.root, "w:busy", context), false);
 	} finally { await mochi.harness.close(context); }
 });
 

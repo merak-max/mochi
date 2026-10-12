@@ -34,7 +34,7 @@ export interface Attachment {
 	readonly bytes: Uint8Array;
 }
 
-/** What an adapter hands the sink. Always the owner: the adapter has already dropped everyone else. */
+/** What an adapter hands the sink. The owner or a configured guest: the adapter has already dropped everyone else. */
 export type OwnerInbound =
 	| {
 			readonly kind: "message";
@@ -45,6 +45,8 @@ export type OwnerInbound =
 			readonly attachments: readonly Attachment[];
 			/** The platform's durable event sequence, where it has one (iMessage). */
 			readonly sequence?: number;
+			/** A configured guest's normalized handle. Absent: the owner wrote it. */
+			readonly person?: string;
 	  }
 	/** The owner reacted to a message. It becomes a passive transcript write, never a model turn. */
 	| {
@@ -83,9 +85,9 @@ export interface Channel {
 	readonly profile: ChannelProfile;
 	/** Runs until `signal` aborts, never messaging the owner about itself. `cursor` reads the sequence `ingest` stored, for replay. */
 	run(sink: InboundSink, signal: AbortSignal, cursor?: () => Promise<number | null>): Promise<void>;
-	/** Throws only DeliveryError subclasses for platform failures. */
-	send(bubble: Bubble): Promise<void>;
-	typing(on: boolean): Promise<void>;
+	/** Throws only DeliveryError subclasses for platform failures. `person` absent: the owner. */
+	send(bubble: Bubble, person?: string): Promise<void>;
+	typing(on: boolean, person?: string): Promise<void>;
 	/** Present only when `profile.reactions` is non-empty. `none` removes the reaction. */
 	react?(messageId: string, reaction: Reaction | "none"): Promise<void>;
 }

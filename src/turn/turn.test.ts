@@ -3,11 +3,11 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { defineDoc, defineDocFamily, ROOT_CONVERSATION_ID, type SubmissionId, ToolResultEntry, UserEntry } from "@earendil-works/pi-durable";
+import { AgentDoc, defineDoc, defineDocFamily, ResetEntry, ROOT_CONVERSATION_ID, type SubmissionId, ToolResultEntry, UserEntry } from "@earendil-works/pi-durable";
 import { type Bubble, type Channel, ChannelDown, type ChatChannelId, type OwnerInbound, SendRejected, SendUnknown } from "../channels/types.ts";
 import { createSeatConversation } from "../seats.ts";
 import { newFaux, openTestMochi, recordingChannel, type TestMochi, tempDir, turnsSettled } from "../test-support.ts";
-import { deliveredRecord, ingest, LastInboundDoc, NOTIFY_ENTRY, nextOutage, openTurn, RETRY, type RunTurn } from "./turn.ts";
+import { deliveredRecord, GuestDoc, ingest, InboundCursorDoc, LastInboundDoc, NOTIFY_ENTRY, nextOutage, openTurn, RETRY, type RunTurn } from "./turn.ts";
 
 const context = BACKGROUND_CONTEXT;
 const FAST_RETRY = { firstMs: 20, maxMs: 40, giveUpMs: 5_000 };
@@ -59,6 +59,66 @@ test("inbound becomes one tagged submission per channel message id, answered onc
 	assert.deepEqual(users.map((entry) => entry.model?.[0]?.role === "user" && entry.model[0].content), ["[whatsapp 2026-10-05 14:02 IST id=wamid.1]\nhi"]);
 	assert.deepEqual(await turnResults(mochi), ["sent"]);
 	assert.deepEqual((await mochi.harness.snapshot(LastInboundDoc, context))?.last, { channel: "whatsapp", messageId: "wamid.1" });
+	await mochi.close();
+});
+
+const GUEST = { handle: "+918423152032", name: "Riya" };
+
+function guestMessage(messageId: string, text: string, sequence?: number): OwnerInbound {
+	return { kind: "message", channel: "imessage", messageId, text, at: new Date("2026-10-05T08:32:00Z"), attachments: [], person: GUEST.handle, ...(sequence === undefined ? {} : { sequence }) };
+}
+
+test("a guest message runs in the guest's own conversation, once per redelivery, and the reply goes to the guest", async () => {
+	const faux = newFaux();
+	faux.setResponses([fauxAssistantMessage("Hi Riya!"), fauxAssistantMessage("Hi owner!")]);
+	const imessage = recordingChannel("imessage");
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { guests: [GUEST] });
+	const fromGuest = guestMessage("g1", "hey", 7);
+	const first = await ingest(mochi.line, fromGuest, context);
+	const again = await ingest(mochi.line, fromGuest, context);
+	await turnsSettled(mochi.harness);
+	assert.equal(again, first);
+	assert.equal(faux.state.callCount, 1);
+
+	const guestConversation = (await mochi.harness.snapshot(GuestDoc, GUEST.handle, context))?.conversation ?? null;
+	assert.notEqual(guestConversation, null);
+	assert.notEqual(guestConversation, ROOT_CONVERSATION_ID);
+	const submission = await mochi.harness.commit((tx) => tx.submissionByRequest(guestConversation!, "imessage:g1"), context);
+	assert.equal(submission?.id, first);
+	assert.equal(await mochi.harness.commit((tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, "imessage:g1"), context), undefined);
+	assert.deepEqual((await mochi.root.entries({}, 50, undefined, context)).items.filter((entry) => UserEntry.is(entry)), []);
+	const agent = await mochi.harness.snapshot(AgentDoc, guestConversation!, context);
+	assert.deepEqual(agent?.extensions, ["identity", "skills", "fast-compaction", "seat-guest"]);
+	assert.match(agent?.instructions ?? "", /^This conversation is with Riya \(iMessage \+918423152032\), a friend of the owner, Shaurya\./);
+	assert.deepEqual(imessage.sentTo, [{ person: GUEST.handle, text: "Hi Riya!" }]);
+	assert.equal((await mochi.harness.snapshot(LastInboundDoc, context))?.last ?? null, null, "a guest never becomes notify's or react's target");
+	assert.equal((await mochi.harness.snapshot(InboundCursorDoc, "imessage", context))?.sequence, 7);
+
+	await ingest(mochi.line, message("imessage", "o1", "and me"), context);
+	await turnsSettled(mochi.harness);
+	assert.deepEqual(imessage.sentTo.at(-1), { person: undefined, text: "Hi owner!" });
+	assert.equal((await mochi.harness.snapshot(GuestDoc, GUEST.handle, context))?.conversation, guestConversation, "one conversation per guest");
+	await mochi.close();
+});
+
+test("a guest's /new resets only the guest's conversation and replies to the guest", async () => {
+	const faux = newFaux();
+	faux.setResponses([fauxAssistantMessage("Guest answer."), fauxAssistantMessage("Owner answer.")]);
+	const imessage = recordingChannel("imessage");
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { guests: [GUEST] });
+	await ingest(mochi.line, guestMessage("g1", "hey"), context);
+	await ingest(mochi.line, message("imessage", "o1", "hello"), context);
+	await turnsSettled(mochi.harness);
+	faux.setResponses([fauxAssistantMessage("")]);
+	await ingest(mochi.line, guestMessage("g2", "/new"), context);
+	await turnsSettled(mochi.harness);
+
+	const guestConversation = (await mochi.harness.snapshot(GuestDoc, GUEST.handle, context))!.conversation!;
+	const resets = async (id: typeof guestConversation) => (await mochi.harness.commit((tx) => tx.scanEntries({ conversationId: id }, 100), context)).items.filter((entry) => entry.kind === ResetEntry.kind).length;
+	assert.equal(await resets(guestConversation), 1);
+	assert.equal(await resets(ROOT_CONVERSATION_ID), 0);
+	assert.match(JSON.stringify((await mochi.root.context(context)).messages), /Owner answer\./, "root keeps its thread");
+	assert.deepEqual(imessage.sentTo.at(-1), { person: GUEST.handle, text: "fresh thread." });
 	await mochi.close();
 });
 
