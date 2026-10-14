@@ -22,9 +22,11 @@ export const DreamConfigSchema = Type.Object({
 	tz: Type.Optional(Type.String({ minLength: 1 })),
 	model: Type.Optional(Type.Union([Type.Literal("brain"), Type.Literal("fast")])),
 	deadlineMinutes: Type.Optional(Type.Number({ minimum: 0.01, maximum: 120 })),
+	/** Read again from after this entry id: 0 rereads all history. Applied once per value, at the next start. */
+	rereadFrom: Type.Optional(Type.Integer({ minimum: 0 })),
 }, { additionalProperties: false });
 export type DreamConfigInput = Static<typeof DreamConfigSchema>;
-export type DreamConfig = { enabled: boolean; cron: string; tz: string; model: "brain" | "fast"; deadlineMinutes: number };
+export type DreamConfig = { enabled: boolean; cron: string; tz: string; model: "brain" | "fast"; deadlineMinutes: number; rereadFrom?: number };
 export function dreamConfig(input: DreamConfigInput = {}, tz = "Asia/Kolkata"): DreamConfig {
 	const valid = parseWith(DreamConfigSchema, input, "memory.dreaming");
 	const config = { enabled: false, cron: "30 4 * * *", tz, model: "fast" as const, deadlineMinutes: 20, ...valid };
@@ -54,7 +56,7 @@ type DreamState =
 	| { phase: "run"; slot: number; deadline: number; pin: Pin }
 	| { phase: "apply"; slot: number; deadline: number; pin: Pin; batch: Batch };
 /** `since`: the newest entry an applied dream read. The next dream reads only what came after it, across config changes. */
-type DreamOwner = { task: TaskId | null; config: DreamConfig | null; last: { slot: number; result: string } | null; since?: number };
+type DreamOwner = { task: TaskId | null; config: DreamConfig | null; last: { slot: number; result: string } | null; since?: number; reread?: number };
 export const DreamDoc = defineDoc<DreamOwner>({ kind: "mochi.dream", version: 1, scope: "session", initial: () => ({ task: null, config: null, last: null }) });
 
 export const INSTRUCTIONS =
@@ -274,6 +276,15 @@ export function defineDream(deps: { models: { brain: ModelRef; fast: ModelRef };
 }
 
 export async function reconcileDream(harness: Harness, task: ReturnType<typeof defineDream>, config: DreamConfig, scheduling: "daemon" | "local", context: Context): Promise<void> {
+	const from = config.rereadFrom;
+	if (from !== undefined) {
+		await harness.commit(async (tx) => {
+			const doc = await tx.doc(DreamDoc);
+			if (doc.reread === from) return;
+			doc.since = from;
+			doc.reread = from;
+		}, context);
+	}
 	const owner = await harness.snapshot(DreamDoc, context);
 	const desired = scheduling === "daemon" && config.enabled;
 	if (owner?.task != null) {
