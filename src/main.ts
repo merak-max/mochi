@@ -12,6 +12,8 @@ import { createTelegramChannel } from "./channels/telegram.ts";
 import { createWhatsAppChannel } from "./channels/whatsapp.ts";
 import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./channels/types.ts";
 import { type Config, type ChatUser, loadConfig } from "./config.ts";
+import { resolveHome } from "./home.ts";
+import { migrate } from "./migrate.ts";
 import { SearchIndex } from "./index/fts.ts";
 import { acquireLock } from "./lock.ts";
 import { log, setLogFile } from "./log.ts";
@@ -61,6 +63,14 @@ export function parseMode(all: readonly string[], interactive: boolean): Mode {
 }
 
 async function main(args: readonly string[]): Promise<void> {
+	if (args[0] === "migrate") {
+		// mochi migrate <old data dir> [old env file]: once, with the daemon stopped.
+		const [from, envFile] = args.slice(1);
+		if (from === undefined) throw new Error("Usage: mochi migrate <old data dir> [old env file]");
+		const home = resolveHome(process.env);
+		for (const line of migrate({ from: resolve(from), ...(envFile === undefined ? {} : { envFile: resolve(envFile) }), home })) process.stdout.write(`${line}\n`);
+		return;
+	}
 	if (args[0] === "auth") {
 		if (args[1] !== "executor") throw new Error(`Unknown auth target ${args[1] ?? "(none)"}. Usage: ${AUTH_COMMAND}`);
 		const config = await loadConfig(process.env);

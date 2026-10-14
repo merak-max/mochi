@@ -178,3 +178,21 @@ test("passive memory anchor supports date rewind without a root model call", asy
 	assert.equal((await mochi.root.entries({}, 100, undefined, context)).items.filter((entry) => entry.model !== undefined).length, 0);
 	await mochi.close();
 });
+
+test("a home moved behind a symlink keeps its memory repository; a different directory is still refused", async () => {
+	const { dir, repo, mochi } = await setup();
+	await mochi.harness.commit((tx) => writeNote(tx, draft("before the move"), undefined, "2026-10-05", "move-1"), context);
+	while (await publishNext(mochi.harness, context) !== "empty") {}
+	await mochi.close();
+	const moved = join(dir, "..", `${dir.split("/").at(-1)}-home`);
+	const { renameSync, symlinkSync } = await import("node:fs");
+	renameSync(dir, moved);
+	symlinkSync(moved, dir);
+	const reopened = await openTestMochi(moved, newFaux(), undefined, undefined, undefined, { memory: { repo: join(moved, "memory") } });
+	await reopened.harness.commit((tx) => writeNote(tx, draft("after the move"), undefined, "2026-10-05", "move-2"), context);
+	while (await publishNext(reopened.harness, context) !== "empty") {}
+	assert.equal(await new MemoryGit(join(moved, "memory")).git(["rev-list", "--count", "HEAD"]), "3");
+	await reopened.close();
+	await assert.rejects(openTestMochi(moved, newFaux(), undefined, undefined, undefined, { memory: { repo: join(moved, "elsewhere") } }), /Changing an initialized memory repo path/);
+	assert.equal(repo, join(dir, "memory"));
+});

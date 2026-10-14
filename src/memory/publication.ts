@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { defineDoc, defineTask, type Harness, type ConversationId, ROOT_CONVERSATION_ID, type TaskId, type Tx } from "@earendil-works/pi-durable";
@@ -120,11 +121,22 @@ export async function publishNext(owner: Publisher, context: Context, crash?: (w
 	});
 }
 
+/** The directory a path names, through symlinks; the path itself when it does not exist yet. */
+const realDir = (path: string): string => {
+	try {
+		return realpathSync(path);
+	} catch {
+		return path;
+	}
+};
+
 export async function bindRepo(harness: Harness, repo: string | undefined, context: Context): Promise<void> {
 	if (repo !== undefined) repo = resolve(repo);
 	await harness.commit(async (tx) => {
 		const doc = await tx.doc(RepoDoc);
-		if (doc.repo !== null && repo !== undefined && doc.repo !== repo) throw new Error("Changing an initialized memory repo path is not supported");
+		// A home move leaves the old path a symlink to the new one: the same repository under a new name.
+		const moved = doc.repo !== null && repo !== undefined && doc.repo !== repo && realDir(doc.repo) === realDir(repo);
+		if (doc.repo !== null && repo !== undefined && doc.repo !== repo && !moved) throw new Error("Changing an initialized memory repo path is not supported");
 		if (repo === undefined) return;
 		doc.repo = repo;
 		if (doc.next === 0) await memoryChanged(tx, await tx.doc(MemoryDoc, ROOT_CONVERSATION_ID), undefined);
