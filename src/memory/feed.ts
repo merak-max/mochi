@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import { AssistantEntry, type ConversationId, type EntryRecord, type Harness, UserEntry } from "@earendil-works/pi-durable";
+import { AssistantEntry, type ConversationId, type EntryRecord, type Harness, LiveDoc, UserEntry } from "@earendil-works/pi-durable";
 import type { IndexDoc, SearchIndex } from "../index/fts.ts";
 import { allPages } from "../pages.ts";
 import { pause } from "../pause.ts";
@@ -22,7 +22,12 @@ export async function runFeed(harness: Harness, index: SearchIndex, fast: FastCo
 	const dirty = new Set<ConversationId>();
 	let wake = (): void => {};
 	const unsubscribe = harness.subscribeCommits(({ changes }) => {
-		for (const change of changes) if (change.type === "entry") dirty.add(change.value.conversationId);
+		for (const change of changes) {
+			if (change.type === "entry") dirty.add(change.value.conversationId);
+			// A run that just ended: its last turn was skipped while it ran, and no new entry will come to fold it.
+			const runEnded = change.type === "document" && change.record.kind === LiveDoc.definition.kind && change.conversationId !== undefined && change.value !== null && change.value.run === undefined;
+			if (runEnded) dirty.add(change.conversationId!);
+		}
 		if (dirty.size > 0) wake();
 	});
 	const stop = (): void => wake();
