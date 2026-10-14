@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import Type from "typebox";
 import { Value } from "typebox/value";
 import { readBody, safeEqual, validSha256Signature } from "../http.ts";
-import { type Log, log as defaultLog } from "../log.ts";
+import { log } from "../log.ts";
 import type { Setup } from "../setup.ts";
 import {
 	type Attachment,
@@ -36,12 +36,6 @@ const WHATSAPP_PROFILE: ChannelProfile = {
 
 const MAX_BODY_BYTES = 1_000_000;
 const DEFAULT_PORT = 8787;
-
-interface WhatsAppDeps {
-	readonly fetch?: typeof fetch;
-	readonly log?: Log;
-	readonly sendTimeoutMs?: number;
-}
 
 interface WhatsAppConfig {
 	readonly token: string;
@@ -159,41 +153,36 @@ function parseWhatsAppMessage(raw: unknown, owner: string): ParsedMessage {
 	return { kind: "message", message: { ...base, text: found.media.caption ?? "", media: [ref] } };
 }
 
-export function createWhatsAppChannel(env: Env, deps: WhatsAppDeps = {}): Setup<Channel> {
+export function createWhatsAppChannel(env: Env): Setup<Channel> {
 	return channelSetup(env, ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_OWNER"], (values) => {
 		const owner = values.WHATSAPP_OWNER.replace(/\D/g, "");
 		if (owner === "") throw new Error("WHATSAPP_OWNER must be a phone number");
 		const port = env.WHATSAPP_PORT ? Number(env.WHATSAPP_PORT) : DEFAULT_PORT;
 		if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("WHATSAPP_PORT must be a port number");
-		return whatsAppChannel(
-			{
-				token: values.WHATSAPP_TOKEN,
-				phoneNumberId: values.WHATSAPP_PHONE_NUMBER_ID,
-				verifyToken: values.WHATSAPP_VERIFY_TOKEN,
-				appSecret: values.WHATSAPP_APP_SECRET,
-				owner,
-				host: env.MOCHI_BIND_HOST ?? "127.0.0.1",
-				port,
-			},
-			deps,
-		);
+		return whatsAppChannel({
+			token: values.WHATSAPP_TOKEN,
+			phoneNumberId: values.WHATSAPP_PHONE_NUMBER_ID,
+			verifyToken: values.WHATSAPP_VERIFY_TOKEN,
+			appSecret: values.WHATSAPP_APP_SECRET,
+			owner,
+			host: env.MOCHI_BIND_HOST ?? "127.0.0.1",
+			port,
+		});
 	});
 }
 
-function whatsAppChannel(config: WhatsAppConfig, deps: WhatsAppDeps): Channel {
-	const fetchImpl = deps.fetch ?? fetch;
-	const log = deps.log ?? defaultLog;
+function whatsAppChannel(config: WhatsAppConfig): Channel {
 	const auth = { authorization: `Bearer ${config.token}` };
 	let lastInbound: string | undefined;
 
 	async function graph(path: string, body: FormData | Record<string, unknown>): Promise<unknown> {
 		let res: Response;
 		try {
-			res = await fetchImpl(`${GRAPH_API}/${config.phoneNumberId}/${path}`, {
+			res = await fetch(`${GRAPH_API}/${config.phoneNumberId}/${path}`, {
 				method: "POST",
 				headers: body instanceof FormData ? auth : { ...auth, "content-type": "application/json" },
 				body: body instanceof FormData ? body : JSON.stringify({ messaging_product: "whatsapp", ...body }),
-				signal: AbortSignal.timeout(deps.sendTimeoutMs ?? SEND_TIMEOUT_MS),
+				signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
 			});
 		} catch (error) {
 			throw classifyWhatsAppError(error);
@@ -217,11 +206,11 @@ function whatsAppChannel(config: WhatsAppConfig, deps: WhatsAppDeps): Channel {
 	}
 
 	async function download(ref: MediaRef): Promise<Attachment> {
-		const metaRes = await fetchImpl(`${GRAPH_API}/${ref.mediaId}?phone_number_id=${config.phoneNumberId}`, { headers: auth });
+		const metaRes = await fetch(`${GRAPH_API}/${ref.mediaId}?phone_number_id=${config.phoneNumberId}`, { headers: auth });
 		if (!metaRes.ok) throw new Error(`WhatsApp media lookup failed with ${metaRes.status}`);
 		const meta: unknown = await metaRes.json();
 		if (!Value.Check(MediaUrl, meta)) throw new Error("WhatsApp media lookup returned an unexpected body");
-		const bytesRes = await fetchImpl(meta.url, { headers: auth });
+		const bytesRes = await fetch(meta.url, { headers: auth });
 		if (!bytesRes.ok) throw new Error(`WhatsApp media download failed with ${bytesRes.status}`);
 		return { kind: ref.kind, mimeType: ref.mimeType, bytes: new Uint8Array(await bytesRes.arrayBuffer()) };
 	}

@@ -25,13 +25,13 @@ import { triggersComponent } from "./triggers/webhooks.ts";
 import { a2aComponent, a2aServerSetup } from "./a2a/server.ts";
 import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
 import { connectApps } from "./apps/apps.ts";
-import { InboundCursorDoc, ingest } from "./turn/turn.ts";
+import { ingest } from "./turn/turn.ts";
 import { runFeed } from "./memory/feed.ts";
 import { fastCompletion } from "./turn/lifecycle.ts";
 
 /** Only iMessage serves users; the other adapters stay owner-only. */
 const ADAPTERS: Readonly<Record<ChatChannelId, (env: Env, users: readonly ChatUser[]) => Setup<Channel>>> = {
-	imessage: (env, users) => createIMessageChannel(env, { users: users.map((user) => user.handle) }),
+	imessage: (env, users) => createIMessageChannel(env, users.map((user) => user.handle)),
 	whatsapp: (env) => createWhatsAppChannel(env),
 };
 
@@ -188,7 +188,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const channelsRunning = new AbortController();
 	const sink: InboundSink = async (message) => void (await ingest(mochi.line, message, running));
 	const inbound = [...channels.values()].map((channel) =>
-		channel.run(sink, channelsRunning.signal, async () => (await mochi.harness.snapshot(InboundCursorDoc, channel.profile.id, running))?.sequence ?? null).catch((error: unknown) => {
+		channel.run(sink, channelsRunning.signal).catch((error: unknown) => {
 			log("channel.failed", { channel: channel.profile.id, error: String(error) });
 		}),
 	);

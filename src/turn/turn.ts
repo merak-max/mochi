@@ -122,14 +122,6 @@ const taskFamily = (kind: string) => defineDocFamily<{ task: TaskId | null }, nu
 const ClaimDoc = taskFamily("mochi.claim");
 const ChannelTailDoc = taskFamily("mochi.channel-tail");
 
-export const InboundCursorDoc = defineDocFamily<{ sequence: number | null }, null>({
-	kind: "mochi.inbound-cursor",
-	version: 1,
-	scope: "session",
-	family: true,
-	initial: () => ({ sequence: null }),
-});
-
 export const LastInboundDoc = defineDoc<{ last: { channel: ChatChannelId; messageId: string } | null }>({
 	kind: "mochi.last-inbound",
 	version: 2,
@@ -443,10 +435,6 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 			const user = userOf(line.users, inbound.person);
 			const recordInbound = async (tx: Tx) => {
 				if (user === undefined) (await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
-				if (inbound.sequence !== undefined) {
-					const cursor = await tx.doc(InboundCursorDoc, inbound.channel, null);
-					cursor.sequence = Math.max(cursor.sequence ?? inbound.sequence, inbound.sequence);
-				}
 			};
 			const command = inbound.attachments.length === 0 ? commandOf(inbound.text) : undefined;
 			if (command !== undefined) {
