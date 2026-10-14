@@ -191,7 +191,7 @@ export async function sendToProfile(host: Host, profiles: Profiles, name: string
 	const conversation = await host.commit((tx) => ensureConversation(tx, profile, profiles), context);
 	const target = await host.conversation(conversation, context);
 	if (target === undefined) throw new Error(`Profile ${name} has no conversation.`);
-	const busy = (await host.commit((tx) => tx.doc(LiveDoc, conversation), context)).run !== undefined;
+	const busy = await host.commit(async (tx) => (await tx.doc(LiveDoc, conversation)).run !== undefined, context);
 	return { submission: await target.submit({ type: "input", content: message, requestId, whenBusy: "followUp" }, context), busy };
 }
 
