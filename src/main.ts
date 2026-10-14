@@ -159,7 +159,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			classify: createClassify(models),
 			firecrawlKey: config.firecrawlKey,
 			...(config.env.FIRECRAWL_PROFILE?.trim() ? { firecrawlProfile: config.env.FIRECRAWL_PROFILE.trim() } : {}),
-			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env } }),
+			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env, ...(config.file.providers === undefined ? {} : { providers: config.file.providers }) } }),
 			...(apps === undefined ? {} : { apps }),
 			index,
 			skillsDir: join(REPO, "skills"),

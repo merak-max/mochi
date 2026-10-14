@@ -19,7 +19,10 @@
       "model": "sora-2"
     },
     "speech": {
-      "deepgramKeyEnv": "DEEPGRAM_API_KEY"
+      "provider": "gateway",
+      "tts": "gpt-4o-mini-tts",
+      "stt": "gpt-4o-transcribe",
+      "voice": "coral"
     }
   }
 }

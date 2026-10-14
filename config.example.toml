@@ -32,6 +32,19 @@ fast = "anthropic/claude-haiku-5-5"
 [models.aliases]
 sonnet = "anthropic/claude-sonnet-5-5"
 
+# Voice notes in and speech out, through any provider that serves the OpenAI audio API
+# (/audio/speech and /audio/transcriptions). provider names a [providers] entry.
+# [providers.gateway]
+# api = "responses"
+# url = "https://gateway.example.com/openai/v1"
+# keyEnv = "GATEWAY_API_KEY"
+#
+# [media.speech]
+# provider = "gateway"
+# tts = "gpt-4o-mini-tts"
+# stt = "gpt-4o-transcribe"
+# voice = "coral"
+
 # Routines. Each runs in its own conversation and reaches you only by notify.
 # role names an agent file (agents/*.md, or ~/.mochi/agents/*.md) whose model and
 # instructions the run uses.

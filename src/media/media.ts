@@ -39,7 +39,7 @@ export function mediaFns(deps: MediaDeps): ToolRegistration[] {
 		}),
 		defineTool({
 			name: "speak",
-			description: "Speak English text with Deepgram Aura-2, default cordelia, a polite young female voice. Save AAC in M4A. Return a work-relative path; send it with a standalone attach: <path> line.",
+			description: "Speak text with the configured voice model. voice overrides the configured voice name. Save AAC in M4A. Return a work-relative path; send it with a standalone attach: <path> line.",
 			parameters: Type.Object({ text: Type.String({ minLength: 1, maxLength: 2000 }), voice: Type.Optional(Type.String({ pattern: "^[a-z]+$" })) }),
 			structuredOutputSchema: PathResult,
 			replay: "unsafe",
@@ -47,7 +47,7 @@ export function mediaFns(deps: MediaDeps): ToolRegistration[] {
 		}),
 		defineTool({
 			name: "transcribe",
-			description: "Transcribe an audio or video file inside the work directory with Deepgram Nova-3. Return text.",
+			description: "Transcribe an audio or video file inside the work directory with the configured speech model. Return text.",
 			parameters: Type.Object({ path: Type.String({ minLength: 1 }) }),
 			structuredOutputSchema: Type.Object({ text: Type.String() }),
 			replay: "safe",

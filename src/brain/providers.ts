@@ -27,7 +27,7 @@ export const ProviderSchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-type ProviderConfig = Static<typeof ProviderSchema>;
+export type ProviderConfig = Static<typeof ProviderSchema>;
 
 const ModelOverrideSchema = Type.Object(
 	{
@@ -62,6 +62,13 @@ const DEFAULTS = {
 	responses: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
 	chat: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
 } as const;
+
+/** The url and key variable of a `[providers]` entry, with the protocol's defaults filled in. */
+export function providerEndpoint(name: string, providers: Readonly<Record<string, ProviderConfig>> = {}): { baseUrl: string; keyEnv: string } {
+	const config = providers[name];
+	if (config === undefined) throw new Error(`Provider "${name}" is not in [providers]. Configured: ${Object.keys(providers).join(", ") || "none"}.`);
+	return { baseUrl: (config.url ?? DEFAULTS[config.api].url).replace(/\/$/, ""), keyEnv: config.keyEnv ?? DEFAULTS[config.api].keyEnv };
+}
 
 /** The models mochi talks to, resolved once from config. `ref` turns a tier, alias or `provider/id` into a model. */
 export interface ModelSetup {
