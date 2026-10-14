@@ -122,7 +122,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		handoffTool(),
 	];
 	const now = options.now ?? (() => new Date());
-	const dream = defineDream({ models: { brain: options.brain, fast: options.fast }, today: options.today, log });
+	const dream = defineDream({ models: { brain: options.brain, fast: options.fast }, pick: fast, today: options.today, log });
 	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });

@@ -224,3 +224,43 @@ test("scheduled read-only Dreaming applies sourced proposals, has no root turn, 
 	assert.equal((await mochi.harness.snapshot(DreamDoc, context))?.task, null);
 	await mochi.close();
 });
+
+test("Dreaming over more than one review of chat maps the fast model over chunks and reviews only the entries it picked", async () => {
+	const dir = await tempDir();
+	const faux = newFaux();
+	let reviewed: { text: string }[] = [];
+	let maps = 0;
+	const lastUser = (transcript: { messages: { role: string; content: unknown }[] }) => {
+		const message = transcript.messages.findLast((message) => message.role === "user") as { content: string | { type: string; text?: string }[] } | undefined;
+		return message === undefined ? "" : typeof message.content === "string" ? message.content : message.content.filter((part) => part.type === "text").map((part) => part.text).join("");
+	};
+	const respond = (transcript: { messages: { role: string; content: unknown }[] }) => {
+		const text = lastUser(transcript);
+		if (text.startsWith("{")) {
+			reviewed = JSON.parse(text).evidence;
+			return fauxAssistantMessage("[]");
+		}
+		maps++;
+		const facts = [...text.matchAll(/\[(\d+)\] Fact /g)].map((match) => Number(match[1]));
+		return fauxAssistantMessage(JSON.stringify(facts));
+	};
+	faux.setResponses(Array.from({ length: 12 }, () => respond));
+	const skew = Date.parse("2026-10-05T03:29:58Z") - Date.now();
+	const now = () => new Date(Date.now() + skew);
+	const memory = { repo: join(dir, "memory"), dreaming: { enabled: true, cron: "30 3 * * *", tz: "UTC" } };
+	const mochi = await openTestMochi(dir, faux, undefined, undefined, undefined, { memory, now });
+	await mochi.harness.commit(async (tx) => {
+		for (let i = 0; i < 30; i++) {
+			const content = i % 10 === 0 ? `Fact ${i}: the owner's sister is Asha.` : `chatter ${i} ${"x".repeat(4000)}`;
+			await tx.appendEntry(ROOT_CONVERSATION_ID, { kind: "test.source", model: [{ role: "user", content, timestamp: now().getTime() }] });
+		}
+	}, context);
+	mochi.harness.resume();
+	try {
+		await until(mochi, (owner) => owner.last?.result === "empty");
+		assert.ok(maps >= 3, `mapped ${maps} chunks`);
+		assert.deepEqual(reviewed.map((entry) => entry.text), ["Fact 0: the owner's sister is Asha.", "Fact 10: the owner's sister is Asha.", "Fact 20: the owner's sister is Asha."]);
+		const task = await mochi.harness.getTask((await mochi.harness.snapshot(DreamDoc, context))!.task!, context);
+		assert.ok(((task!.state as { checkpoint?: { since?: number } }).checkpoint?.since ?? 0) > 0, "the next dream starts after what this one read");
+	} finally { await mochi.close(); }
+});
