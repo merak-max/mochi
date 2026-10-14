@@ -1,6 +1,6 @@
 export const SNAPSHOT = String.raw`(() => {
   if (!document.body) return null;
-  const cache = window.__jevFast ||= {ids:new WeakMap(), nodes:new Map(), next:1};
+  const cache = window.__mochiFast ||= {ids:new WeakMap(), nodes:new Map(), next:1};
   const identity = e => {
     if (!cache.ids.has(e)) cache.ids.set(e,cache.next++);
     const id=cache.ids.get(e); cache.nodes.set(id,e); return id;

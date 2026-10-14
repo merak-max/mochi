@@ -3,9 +3,8 @@ import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
-import { type ModelThinkingLevel, type Static, Type } from "@earendil-works/pi-ai";
-import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, configure, defineTask, defineTool, type Harness, type ModelRef, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
-import { admits, checkGate, type Classify } from "../brain/classifier.ts";
+import { type Static, Type } from "@earendil-works/pi-ai";
+import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, defineTask, defineTool, type Harness, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import type { ChannelId } from "../channels/types.ts";
 import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
@@ -16,16 +15,17 @@ import { type ChatUser, OWNER_ID } from "../config.ts";
 import { formatStamp, messageText } from "../text.ts";
 import { keyedReset } from "../turn/lifecycle.ts";
 import { answerText, LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
-import type { AgentCatalog } from "../agents/catalog.ts";
+import { agentOf, applyAgent, type Profiles, type RunAgent } from "../profiles/profiles.ts";
 import { assertTimeZone, nextCronSlot, parseCron } from "./cron.ts";
-import { GateSchema, Id, type Trigger, TriggerSchema } from "./types.ts";
+import { classifyYes, type Classify, type ClassifyStep } from "../brain/classifier.ts";
+import { Id, type Step, StepSchema, stepsOf, type Trigger, TriggerSchema } from "./types.ts";
 
 const LATE_MS = 15 * 60_000;
 export const RUN_DEADLINE_MS = 30 * 60_000;
 const DAY_MS = 86_400_000;
 const CHECK_TIMEOUT_MS = 5 * 60_000;
 
-export type LastSlot = { readonly at: number; readonly result: "done" | "unanswered" | "skipped-busy" | "missed" | "timed-out" | "quiet" | "check-failed" };
+type LastSlot = { readonly at: number; readonly result: "done" | "unanswered" | "skipped-busy" | "missed" | "timed-out" | "quiet" | "check-failed" | "stopped" };
 
 const run = promisify(execFile);
 
@@ -35,13 +35,12 @@ async function runCheck(argv: readonly string[]): Promise<string | null> {
 	return stdout.trim() === "" ? null : stdout.trim();
 }
 
-export type Plan = { readonly kind: "fire" | "miss"; readonly slot: number } | { readonly kind: "listen" | "done" };
+type Plan = { readonly kind: "fire" | "miss"; readonly slot: number } | { readonly kind: "listen" | "done" };
 
 const late = (trigger: Trigger, slot: number, now: number): boolean => trigger.kind === "cron" && now - slot > LATE_MS;
 
 export function plan(trigger: Trigger, last: LastSlot | null, now: number): Plan {
 	if (trigger.kind === "webhook") return { kind: "listen" };
-	if (trigger.kind === "once") return last === null ? { kind: "fire", slot: Date.parse(trigger.at) } : { kind: "done" };
 	const cron = parseCron(trigger.cron);
 	let due: number | undefined;
 	let next = nextCronSlot(cron, trigger.tz, new Date(last?.at ?? now));
@@ -57,11 +56,11 @@ type TriggerState =
 
 type TriggerInput = { readonly trigger: Trigger; readonly origin: "model" | "config" };
 export type TriggerTask = Task<TriggerInput, TriggerState, null, object>;
-export type TriggerRecord = TaskRecord<TriggerInput, TriggerState, null>;
+type TriggerRecord = TaskRecord<TriggerInput, TriggerState, null>;
 
 const iso = (at: number): string => new Date(at).toISOString();
 
-export function defineTrigger({ timeZone, deadlineMs, log, harness }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit"> }): TriggerTask {
+export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, classify }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit">; readonly catalog: Profiles; readonly classify: Classify }): TriggerTask {
 	const wait = (last: LastSlot): NextTaskState<TriggerState, null> => ({ status: "running", checkpoint: { phase: "wait", last } });
 	const missed = (trigger: Trigger, slot: number): NextTaskState<TriggerState, null> => {
 		log("trigger.missed", { id: trigger.id, slot: iso(slot) });
@@ -111,8 +110,12 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness }: { readonly
 					if (found.out === null) return runtime.commit(() => wait({ at: slot, result: "quiet" }), context);
 					payload = `\n<check_output source="${trigger.id}">\n${found.out}\n</check_output>`;
 				}
+				const memo = (key: string, value?: number) => (value === undefined ? runtime.memo<number>(`${key}:${iso(slot)}`, context) : runtime.memo(`${key}:${iso(slot)}`, value, context));
+				if (!(await inputPasses(trigger, payload === "" ? trigger.prompt : payload, classify, memo, log, context))) return runtime.commit(() => wait({ at: slot, result: "stopped" }), context);
 				const conversation = (await runtime.conversation(runtime.conversationId, context))!;
 				const requestId = `${trigger.kind}:${trigger.id}:${iso(slot)}`;
+				const run = await runAgent(trigger, catalog);
+				await harness().commit((tx) => applyAgent(tx, conversation.id, run), context);
 				await freshRun(harness(), conversation, requestId, runtime.now(), context);
 				const content = `[${trigger.kind} ${trigger.id}] Current time: ${formatStamp(new Date(slot), timeZone)}\n${trigger.prompt}${payload}`;
 				const submission = await conversation.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context);
@@ -168,33 +171,57 @@ async function freshRun(harness: Pick<Harness, "commit">, conversation: Pick<Con
 }
 
 /** `existing` is `scanTriggers`, read before the commit's first write. A replaced live trigger is for the caller to abort after the commit. */
-export async function addTrigger(
+async function addTrigger(
 	tx: Tx,
 	task: TriggerTask,
 	input: TriggerInput,
 	existing: readonly TriggerRecord[],
-	catalog: AgentCatalog,
+	catalog: Profiles,
 	conversation?: ConversationId,
 ): Promise<{ readonly id: TaskId; readonly replaced: TaskId | undefined }> {
 	const previous = existing.findLast((record) => record.input.trigger.id === input.trigger.id);
-	const { agent, instructions } = runAgent(input.trigger, catalog);
-	const reused = conversation ?? previous?.conversationId;
-	if (reused !== undefined) await configure(tx, reused, { ...agent, instructions });
-	const conversationId = reused ?? (await createSeatConversation(tx, "trigger", { kind: "ownerless" }, { instructions, ...agent }));
+	const run = await runAgent(input.trigger, catalog);
+	const conversationId = conversation ?? previous?.conversationId ?? (await createSeatConversation(tx, "trigger", { kind: "ownerless" }));
+	await applyAgent(tx, conversationId, run);
 	const id = await tx.createTask(task, input, { ownership: { kind: "conversation" }, conversationId, background: true });
 	return { id, replaced: previous !== undefined && live(previous) ? previous.id : undefined };
 }
 
-export function runAgent(trigger: Trigger, catalog: AgentCatalog): { readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly instructions: string } {
-	const role = trigger.role === undefined ? undefined : catalog.types.get(trigger.role);
-	if (trigger.role !== undefined && role === undefined) throw new Error(`Unknown role "${trigger.role}". Use ${[...catalog.types.keys()].join(", ")}.`);
-	const model = catalog.model(trigger.model ?? role?.model ?? "fast");
-	const thinking = trigger.thinking ?? role?.thinking;
-	const header = `${INSTRUCTIONS}\nTrigger: ${trigger.id}.`;
-	return {
-		agent: { model, ...(thinking === undefined ? {} : { thinkingLevel: thinking }) },
-		instructions: role === undefined || role.instructions === "" ? header : `${header}\n\n${role.instructions}`,
-	};
+/**
+ * Runs the classify steps before the model step on `input`, in order, each verdict memoized under `classify:<index>` so a replay
+ * decides the same way. False when one judges no: the chain stops and the model never runs.
+ */
+export async function inputPasses(
+	trigger: Trigger,
+	input: string,
+	classify: Classify,
+	memo: (key: string, value?: number) => Promise<number | undefined>,
+	log: Log,
+	context: Context,
+): Promise<boolean> {
+	for (const [index, step] of stepsOf(trigger).entries()) {
+		if ("model" in step) return true;
+		if (step.classify.on === "output") continue;
+		const yes = (await memo(`classify:${index}`)) ?? (await memo(`classify:${index}`, await classifyYes(classify, step.classify, { trigger: trigger.id, input }, log, context)))!;
+		if (yes < (step.classify.threshold ?? 0.5)) {
+			log("trigger.stopped", { id: trigger.id, step: index, yes });
+			return false;
+		}
+	}
+	return true;
+}
+
+/** The classify steps that judge a trigger's notify text, in order. */
+const outputSteps = (trigger: Trigger): readonly ClassifyStep[] =>
+	stepsOf(trigger).flatMap((step: Step) => ("classify" in step && step.classify.on === "output" ? [step.classify] : []));
+
+async function runAgent(trigger: Trigger, catalog: Profiles): Promise<RunAgent> {
+	const header = `${INSTRUCTIONS}
+Trigger: ${trigger.id}.`;
+	const name = trigger.profile ?? trigger.role;
+	const run: RunAgent = name === undefined ? { profile: undefined, agent: { model: catalog.model("fast") }, tools: undefined, instructions: header } : agentOf(await catalog.get(name), catalog, header);
+	const thinking = trigger.thinking ?? run.agent.thinkingLevel;
+	return { ...run, agent: { model: trigger.model === undefined ? run.agent.model : catalog.model(trigger.model), ...(thinking === undefined ? {} : { thinkingLevel: thinking }) } };
 }
 
 function validateTrigger(trigger: Trigger): Trigger {
@@ -202,7 +229,6 @@ function validateTrigger(trigger: Trigger): Trigger {
 		parseCron(trigger.cron);
 		assertTimeZone(trigger.tz);
 	}
-	if (trigger.kind === "once" && Number.isNaN(Date.parse(trigger.at))) throw new Error(`Invalid time "${trigger.at}"; use ISO 8601 with an offset.`);
 	return trigger;
 }
 
@@ -214,14 +240,14 @@ function checkRecipients(notify: readonly string[], users: readonly ChatUser[]):
 }
 
 export function parseSeeds(file: Readonly<Record<string, unknown>>, users: readonly ChatUser[]): Trigger[] {
-	const seeds = parseWith(Type.Array(TriggerSchema), file.triggers ?? [], "triggers in data/config.json").map(validateTrigger);
+	const seeds = parseWith(Type.Array(TriggerSchema), file.triggers ?? [], "triggers in config.toml").map(validateTrigger);
 	for (const seed of seeds) {
 		if (seed.notify !== undefined) checkRecipients(seed.notify, users);
 	}
 	return seeds;
 }
 
-export async function reconcileSeeds(harness: Harness, task: TriggerTask, seeds: readonly Trigger[], catalog: AgentCatalog, context: Context): Promise<void> {
+export async function reconcileSeeds(harness: Harness, task: TriggerTask, seeds: readonly Trigger[], catalog: Profiles, context: Context): Promise<void> {
 	const stale = await harness.commit(async (tx) => {
 		const existing = await scanTriggers(tx);
 		const current = new Map<string, TriggerRecord>();
@@ -250,24 +276,20 @@ const AddParams = Type.Object({
 	when: Type.String({ minLength: 1 }),
 	tz: Type.Optional(Type.String()),
 	auth: Type.Optional(Type.Union([Type.Literal("hmac"), Type.Literal("bearer")])),
-	admitWhen: Type.Optional(GateSchema),
-	notifyWhen: Type.Optional(GateSchema),
 	notify: Type.Optional(Type.Array(Type.String())),
-	role: Type.Optional(Id),
+	steps: Type.Optional(Type.Array(StepSchema, { minItems: 1 })),
+	profile: Type.Optional(Id),
 	model: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 function parseWhen(args: Static<typeof AddParams>, timeZone: string, users: readonly ChatUser[]): Trigger {
-	const { id, prompt, when, admitWhen, notifyWhen, notify, role, model } = args;
-	if (admitWhen !== undefined && when !== "webhook") throw new Error("admitWhen applies only to webhook triggers.");
+	const { id, prompt, when, notify, steps, profile, model } = args;
 	if (notify !== undefined) checkRecipients(notify, users);
 	const secret = randomBytes(32).toString("hex");
 	const draft =
 		when === "webhook"
-			? { kind: "webhook", id, prompt, admitWhen, notifyWhen, notify, role, model, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
-			: when.trim().split(/\s+/).length === 5
-				? { kind: "cron", id, prompt, notifyWhen, notify, role, model, cron: when.trim(), tz: args.tz ?? timeZone }
-				: { kind: "once", id, prompt, notifyWhen, notify, role, model, at: when };
+			? { kind: "webhook", id, prompt, notify, steps, profile, model, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
+			: { kind: "cron", id, prompt, notify, steps, profile, model, cron: when.trim(), tz: args.tz ?? timeZone };
 	return validateTrigger(parseWith(TriggerSchema, JSON.parse(JSON.stringify(draft)), "trigger"));
 }
 
@@ -279,14 +301,14 @@ const nextSlot = (trigger: Trigger, last: LastSlot | null, now: number): string 
 function listed({ input: { trigger, origin }, state }: TriggerRecord, now: number): JsonValue {
 	const { checkpoint } = state;
 	const next = checkpoint !== undefined && checkpoint.phase !== "wait" ? iso(checkpoint.slot) : nextSlot(trigger, checkpoint?.last ?? null, now);
-	const when = trigger.kind === "cron" ? `${trigger.cron} ${trigger.tz}` : trigger.kind === "once" ? trigger.at : `webhook (${trigger.auth.kind})`;
+	const when = trigger.kind === "cron" ? `${trigger.cron} ${trigger.tz}` : `webhook (${trigger.auth.kind})`;
 	const last = checkpoint?.last == null ? undefined : `${checkpoint.last.result} at ${iso(checkpoint.last.at)}`;
 	return JSON.parse(JSON.stringify({ id: trigger.id, when, origin, next, last }));
 }
 
 interface TriggerFnDeps {
 	readonly task: TriggerTask;
-	readonly catalog: AgentCatalog;
+	readonly catalog: Profiles;
 	readonly triggers: (context: Context) => Promise<TriggerRecord[]>;
 	readonly abortTask: (id: TaskId, context: Context) => Promise<unknown>;
 	readonly publicUrl: string | undefined;
@@ -301,9 +323,10 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 			name: "trigger_add",
 			description:
 				"Run a prompt on a schedule or a webhook, each run fresh from the last run's note; a one-off reminder or follow-up is board_add. Silent unless it calls notify (to notify ids, default user1). " +
-				"when: cron 'm h dom mon dow' in the owner's zone, ISO time+offset, or 'webhook' (returns URL and secret; hmac checks " +
-				"X-Hub-Signature-256, bearer the Authorization header). admitWhen/notifyWhen: yes/no classifier gates on each payload/notify text. " +
-				"role: agent type giving the run its instructions and model; model overrides; default fast. Same id replaces.",
+				"when: cron 'm h dom mon dow' in the owner's zone, or 'webhook' (returns URL and secret; hmac checks X-Hub-Signature-256, bearer the Authorization header). " +
+				"steps: an ordered chain; {model:{}} is the run of prompt, a classify step is a fast yes/no classifier that stops the chain on no, so the model never runs for junk. " +
+				"Gate example: steps [{classify:{question:'Does this payload need the owner?',yes:'a person waits or money is due',no:'newsletter, receipt, noise',threshold:0.6}},{model:{}}]; " +
+				"add on:'output' to judge the notify text instead. Without steps it is one model step. profile: whose instructions, model and memory the run uses; model overrides; default fast. Same id replaces.",
 			parameters: AddParams,
 			structuredOutputSchema: Type.Object({ id: Type.String(), next: Type.Optional(Type.String()), url: Type.Optional(Type.String()), secret: Type.Optional(Type.String()) }),
 			replay: "safe",
@@ -352,8 +375,6 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 	];
 }
 
-const GATE_MEMO = "notify.gate";
-
 interface NotifyDeps {
 	readonly line: () => Pick<Line, "id" | "turn">;
 	readonly channels: readonly ChannelId[];
@@ -370,24 +391,19 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 			"Send a message now to the owner, or in a trigger run to the trigger's recipients. In a trigger run this is the only way to reach " +
 			"them, so call it only when something needs their attention. channel applies to the owner and defaults to where the owner last wrote. Users always get iMessage.",
 		parameters: Type.Object({
-			text: Type.String({ minLength: 1, maxLength: 4000 }),
+			text: Type.String({ minLength: 1 }),
 			channel: Type.Optional(Type.Union(channelNames.map((id) => Type.Literal(id)))),
 		}),
 		replay: "safe",
 		execute: async (args, api, context) => {
 			if (api.conversationId === ROOT_CONVERSATION_ID) throw new Error("This is the owner's own thread: your reply reaches them. notify is for agents working out of their sight.");
 			const trigger = await api.commit(async (tx) => (await scanTriggers(tx, api.conversationId)).at(-1)?.input.trigger, context);
-			if (trigger?.notifyWhen !== undefined) {
-				let held = await api.memo<number | null>(GATE_MEMO, context);
-				if (held === undefined) {
-					const verdict = await checkGate(deps.classify, trigger.notifyWhen, { trigger: trigger.id, purpose: trigger.prompt, message: args.text }, context);
-					if (verdict.kind === "failed-open") deps.log("notify.gate_failed_open", { trigger: trigger.id, error: verdict.error });
-					held = await api.memo<number | null>(GATE_MEMO, admits(verdict) ? null : verdict.probability, context);
-				}
-				if (held !== null) {
-					deps.log("notify.filtered", { trigger: trigger.id, probability: held });
-					const text = `Not sent: this trigger's notifyWhen gate judged it does not meet "${trigger.notifyWhen.question}" (p=${held.toFixed(2)}). Finish without notifying.`;
-					return { output: [{ type: "text", text }] };
+			for (const [index, step] of (trigger === undefined ? [] : outputSteps(trigger)).entries()) {
+				const key = `classify:${index}`;
+				const yes = (await api.memo<number>(key, context)) ?? (await api.memo(key, await classifyYes(deps.classify, step, { trigger: trigger!.id, purpose: trigger!.prompt, message: args.text }, deps.log, context), context));
+				if (yes < (step.threshold ?? 0.5)) {
+					deps.log("notify.stopped", { trigger: trigger!.id, step: index, yes });
+					return { output: [{ type: "text", text: `Not sent: the trigger's classify step judged no to "${step.question}" (p=${yes.toFixed(2)}). Finish without notifying.` }] };
 				}
 			}
 			const last = (await api.snapshot(LastInboundDoc, context))?.last?.channel;

@@ -4,13 +4,11 @@ import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-work
 import { type AlexandriaCall, FirecrawlClient, type SearchHit as WebHit, type SearchRequest } from "./client.ts";
 import { cleanFirecrawlHtml, extractFirecrawlContent } from "./content.ts";
 
-const EXTRACT_CHARS = 12_000;
 const RECENCY = ["hour", "day", "week", "month", "year"] as const;
 const literals = <T extends string>(values: readonly T[]) => Type.Union(values.map((value) => Type.Literal(value)));
 const SearchHit = Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() });
 type SearchHit = Static<typeof SearchHit>;
 
-/** Web hits deduped by URL. */
 function searchHits(web: WebHit[]): SearchHit[] {
 	const hits: SearchHit[] = [];
 	const seen = new Set<string>();
@@ -24,19 +22,20 @@ function searchHits(web: WebHit[]): SearchHit[] {
 }
 const FIND_TOOLS = { provider: "firecrawl", capability: "find-tools" } as const;
 
-export interface WebDeps {
-	/** `FIRECRAWL_API_KEY`; absent, every web function fails with a clear error. Bash never gets it. */
+interface WebDeps {
+	/** The web service key; absent, every web function fails with a clear error naming `keyEnv`. Bash never gets it. */
 	readonly apiKey: string | undefined;
+	readonly keyEnv: string;
 	readonly models: Models;
 	/** Runs web_fetch's `instruction`. */
 	readonly fast: ModelRef;
 	readonly baseUrl?: string;
 }
 
-/** Firecrawl v2 search, fetch, map and Alexandria on mochi's own key, as script functions. */
+/** Web search, fetch, map and data providers on mochi's own key, as script functions. The client speaks Firecrawl's v2 API. */
 export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 	const client = (): FirecrawlClient => {
-		if (deps.apiKey === undefined) throw new Error("Firecrawl is not configured: FIRECRAWL_API_KEY is unset.");
+		if (deps.apiKey === undefined) throw new Error(`Web is not configured: ${deps.keyEnv} is unset.`);
 		return new FirecrawlClient(deps.apiKey, deps.baseUrl);
 	};
 	return [
@@ -86,9 +85,9 @@ export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 				const markdown = (page.html === undefined ? undefined : await cleanFirecrawlHtml(page.html, url)) ?? page.markdown ?? "";
 				if (ask === "") return { structuredOutput: markdown };
 				if (markdown === "") throw new Error(`Firecrawl returned no page content for ${url}, so the instruction has nothing to answer from.`);
-				const extracted = await extractFirecrawlContent({ models: deps.models, model: deps.fast, url, markdown, instruction: ask, schema, maxOutput: EXTRACT_CHARS, signal });
-				const notice = extracted.inputTruncated ? "[The model saw only the first and last parts of this long page. Fetch without instruction for all of it.]\n\n" : "";
-				return { structuredOutput: notice + extracted.text, usage: extracted.usage };
+				const extracted = await extractFirecrawlContent({ models: deps.models, model: deps.fast, url, markdown, instruction: ask, schema, signal });
+				const notice = extracted.cut ? "[The page was longer than the extraction model reads; this answer comes from its start and end. Call without instruction for the whole page.]\n" : "";
+				return { structuredOutput: `${notice}${extracted.text}`, usage: extracted.usage };
 			},
 		}),
 		defineTool({

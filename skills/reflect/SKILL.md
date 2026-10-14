@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: "Turn a finished conversation or run into concrete fixes: a note, rule, trigger or skill edit. For \"reflect\" or repeats."
+description: "Turn a finished conversation or run into concrete fixes: a memory line, trigger or skill edit. For \"reflect\" or repeats."
 ---
 
 # Reflect
@@ -11,11 +11,11 @@ Skip it when the conversation was trivial or went as the skills already say. A o
 
 ## 1. Gather the transcript
 
-Pin the conversation or run under review: the root conversation's recent turns, a trigger's run history, or a subagent's work. Pull it with `recall`, then read around each hit with its `entry`. When it is long, have a `fast` subagent write a digest of the turns, tool calls, corrections and outcomes, with entry ids.
+Pin the conversation or run under review: the root conversation's recent turns, a trigger's run history, or a fork's or profile's work. Pull it with `recall`, then read around each hit with its `entry`. When it is long, have a fork write a digest of the turns, tool calls, corrections and outcomes, with entry ids.
 
 ## 2. Review from three angles
 
-Start three reviewers in one script with `agent`, `type: "worker"`, model `default`, each with the digest or the entry range and its prompt:
+Start three reviewers in one `fork({ briefs: [...] })` call, each brief with the digest or the entry range and its prompt:
 
 | Lens | Prompt |
 |---|---|
@@ -27,16 +27,16 @@ Reviewers only read. They return findings.
 
 ## 3. Synthesize
 
-Weigh the three outputs per [references/synthesizer.md](references/synthesizer.md), yourself or in one `default` subagent. The result is an Accepted, Rejected and Backlog list.
+Weigh the three outputs per [references/synthesizer.md](references/synthesizer.md), yourself or in one fork. The result is an Accepted, Rejected and Backlog list.
 
 ## 4. Prefer mechanisms
 
-Move each Accepted item that a mechanism could enforce better than prose to that mechanism: a `notifyWhen` gate instead of "don't over-notify", a trigger instead of "remember to check", a `rule` note instead of a repeated correction.
+Move each Accepted item that a mechanism could enforce better than prose to that mechanism: a classify step in the trigger's `steps` instead of "don't over-notify", a trigger instead of "remember to check", a memory line from `note` instead of a repeated correction.
 
 ## 5. Apply
 
-- Notes, rules, trigger fixes and gates are reversible. Apply them and report them.
+- Memory lines, trigger fixes and classify steps are reversible. Apply them and report them.
 - Edits to skills change every future run. Show the proposed edits and apply the ones the owner approves.
 - Changes to mochi's code or config are the owner's. Put them in the reply as proposals.
 
-**Reply:** what was applied (one line each, with the note slug, trigger id or skill), what awaits approval, and what was dropped and why.
+**Reply:** what was applied (one line each, with the memory line, trigger id or skill), what awaits approval, and what was dropped and why.

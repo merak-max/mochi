@@ -4,24 +4,22 @@ import type { AddressInfo } from "node:net";
 import { ConversationBusy, type Harness } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
-import { admits, checkGate, type Classify } from "../brain/classifier.ts";
 import { readBody, safeEqual, validSha256Signature } from "../http.ts";
 import type { Config } from "../config.ts";
 import { type Log, log } from "../log.ts";
 import type { Mochi } from "../mochi.ts";
 import { pause } from "../pause.ts";
-import { liveTrigger, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds } from "./trigger.ts";
+import type { Classify } from "../brain/classifier.ts";
+import { inputPasses, liveTrigger, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds } from "./trigger.ts";
 import type { WebhookAuth } from "./types.ts";
 
 const BODY_LIMIT = 1024 * 1024;
-export const PAYLOAD_CHARS = 20_000;
 const DELIVERY_HEADERS = ["x-github-delivery", "x-request-id", "webhook-id"];
 
 interface WebhookDeps {
 	readonly harness: Pick<Harness, "commit" | "conversation">;
-	readonly classify: Classify;
 	readonly log: Log;
-	readonly deadlineMs?: number;
+	readonly classify: Classify;
 }
 
 type Headers = IncomingMessage["headers"];
@@ -42,18 +40,13 @@ function deliveryId(headers: Headers, body: Buffer): string {
 	return createHash("sha256").update(body).digest("hex");
 }
 
-function payloadText(body: Buffer): string {
-	const text = body.toString("utf8");
-	return text.length > PAYLOAD_CHARS ? `${text.slice(0, PAYLOAD_CHARS)}\n[truncated, ${text.length} characters in total]` : text;
-}
-
-export function webhookContent(id: string, prompt: string, body: Buffer): string {
-	return `${prompt}\n<webhook_payload source="${id}">\n${payloadText(body)}\n</webhook_payload>`;
+function webhookContent(id: string, prompt: string, body: Buffer): string {
+	return `${prompt}\n<webhook_payload source="${id}">\n${body.toString("utf8")}\n</webhook_payload>`;
 }
 
 const single = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
 
-export async function startWebhookServer(
+async function startWebhookServer(
 	deps: WebhookDeps,
 	listen: { readonly host: string; readonly port: number },
 	context: Context,
@@ -89,21 +82,16 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	}
 	const delivery = deliveryId(request.headers, body);
 	const requestId = `webhook:${id}:${delivery}`;
-	if (trigger.admitWhen !== undefined) {
-		const verdict = await checkGate(deps.classify, trigger.admitWhen, { webhook: id, purpose: trigger.prompt, payload: payloadText(body) }, context);
-		if (!admits(verdict)) {
-			deps.log("webhook.filtered", { id, delivery, probability: verdict.probability });
-			return reply(response, 202, "accepted");
-		}
-		if (verdict.kind === "failed-open") deps.log("webhook.gate_failed_open", { id, delivery, error: verdict.error });
-	}
+	const memo = new Map<string, number>();
+	const remember = async (key: string, value?: number) => (value === undefined ? memo.get(key) : (memo.set(key, value), value));
+	if (!(await inputPasses(trigger, body.toString("utf8"), deps.classify, remember, deps.log, context))) return reply(response, 202, "accepted");
 	const conversation = await deps.harness.conversation(found.conversationId, context);
 	try {
 		const submission = await conversation!.submit({ type: "input", content: webhookContent(id, trigger.prompt, body), requestId, whenBusy: "reject" }, context);
 		deps.log("webhook.admitted", { id, delivery, submissionId: submission.id });
 		reply(response, 202, "accepted");
 		const race = withCancel(context);
-		const settled = await Promise.race([submission.wait(race.context), pause(deps.deadlineMs ?? RUN_DEADLINE_MS, race.context.abortSignal).then(() => undefined)]).finally(() => race.cancel());
+		const settled = await Promise.race([submission.wait(race.context), pause(RUN_DEADLINE_MS, race.context.abortSignal).then(() => undefined)]).finally(() => race.cancel());
 		if (settled === undefined && !context.abortSignal?.aborted) {
 			await conversation!.abort(context);
 			deps.log("webhook.timed_out", { id, delivery });
@@ -119,10 +107,10 @@ function reply(response: ServerResponse, status: number, text: string): void {
 	response.end(`${text}\n`);
 }
 
-export async function triggersComponent({ harness, trigger, classify, catalog }: Mochi, config: Config, context: Context): Promise<void> {
+export async function triggersComponent({ harness, trigger, catalog, classify }: Mochi, config: Config, context: Context): Promise<void> {
 	const seeds = parseSeeds(config.file, config.users);
 	await reconcileSeeds(harness, trigger, seeds, catalog, context);
 	const listen = { host: config.env.MOCHI_BIND_HOST || "127.0.0.1", port: Number(config.env.MOCHI_HOOKS_PORT || 8788) };
-	const { address } = await startWebhookServer({ harness, classify, log }, listen, context);
+	const { address } = await startWebhookServer({ harness, log, classify }, listen, context);
 	log("triggers.started", { seeds: seeds.map((seed) => seed.id), hooks: `${address.address}:${address.port}` });
 }

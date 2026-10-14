@@ -19,9 +19,10 @@ const Session = Type.Object({
 
 export interface BrowserDeps {
 	readonly apiKey: string | undefined;
-	readonly profile: string | undefined;
+	/** The env variable the key comes from, for the error that names it. */
+	readonly keyEnv: string;
+	readonly profile?: string;
 	readonly baseUrl?: string;
-	readonly fetch?: typeof fetch;
 }
 
 export class BrowserClient {
@@ -31,8 +32,8 @@ export class BrowserClient {
 	readonly #deps: BrowserDeps;
 
 	constructor(deps: BrowserDeps) {
-		if (!deps.apiKey?.trim()) throw new Error("Browser is not configured: FIRECRAWL_API_KEY is unset.");
-		if (!deps.profile?.trim()) throw new Error("Browser is not configured: FIRECRAWL_PROFILE is unset.");
+		if (!deps.apiKey?.trim()) throw new Error(`Browser is not configured: ${deps.keyEnv} is unset.`);
+		if (!deps.profile?.trim()) throw new Error("Browser is not configured: set [web] browserProfile in config.toml.");
 		this.#deps = deps;
 		this.#profile = deps.profile.trim();
 		this.#baseUrl = (deps.baseUrl ?? "https://api.firecrawl.dev/v2").replace(/\/+$/, "");
@@ -64,7 +65,7 @@ export class BrowserClient {
 
 	async #request<S extends TSchema>(path: string, method: string, body: object | undefined, schema: S, signal?: AbortSignal): Promise<Static<S>> {
 		const timeout = AbortSignal.timeout(method === "DELETE" ? 30_000 : 240_000);
-		const response = await (this.#deps.fetch ?? fetch)(`${this.#baseUrl}/${path}`, {
+		const response = await fetch(`${this.#baseUrl}/${path}`, {
 			method,
 			headers: { Authorization: `Bearer ${this.#deps.apiKey}`, "Content-Type": "application/json" },
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),

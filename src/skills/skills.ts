@@ -8,9 +8,6 @@ interface SkillLine {
 	readonly description: string;
 }
 
-const DESCRIPTION_CHARS = 120;
-
-/** `<dir>/<name>/SKILL.md` frontmatter, sorted by name. */
 async function readSkills(dir: string): Promise<readonly SkillLine[]> {
 	const names = (await readdir(dir).catch(() => [])).sort();
 	const skills: SkillLine[] = [];
@@ -43,6 +40,6 @@ export function skillsExtension(dir: string): Extension {
 
 function indexText(dir: string, skills: readonly SkillLine[]): string | undefined {
 	if (skills.length === 0) return undefined;
-	const lines = skills.map(({ name, description }) => `${name}: ${description.length > DESCRIPTION_CHARS ? `${description.slice(0, DESCRIPTION_CHARS - 1)}…` : description}`);
+	const lines = skills.map(({ name, description }) => `${name}: ${description}`);
 	return [`Skills, each at ${dir}/<name>/SKILL.md; read one before following it.`, ...lines].join("\n");
 }

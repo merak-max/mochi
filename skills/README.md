@@ -4,16 +4,16 @@ On-demand instructions for mochi. The prompt's skills index shows each skill's `
 
 | Skill | Use it for |
 | --- | --- |
-| `mochi-mode` | Any task beyond a one-line answer. Routes to a playbook and holds the rules for asking, verifying, subagents and replies. |
+| `mochi-mode` | Any task beyond a one-line answer. Routes to a playbook and holds the rules for asking, verifying, forks, profiles and replies. |
 | `how`, `why`, `teach` | Explaining how something works, why it happened, or teaching it. |
 | `recall` | Catching up on earlier work before resuming it. |
 | `apps` | The owner's apps through Executor, from `codemode`. |
 | `swarm`, `arena`, `interrogate` | Parallel fan-out, a multi-model bakeoff, and multi-model challenge. |
 | `show-me-your-work` | The decision log for long or unattended work. |
-| `reflect`, `automate-me` | Learning from a run, and learning the owner's style into notes. |
+| `reflect`, `automate-me` | Learning from a run, and learning the owner's style into memory. |
 | `unslop`, `technical-writing`, `bro` | Writing rules, document structure, and plain restatement. |
 
-Subagent types live in `../agents/`: `mochi` for delegated work that needs judgment and `worker` for an exact brief. `../agents/models.json` maps the tiers `fast`, `default`, `strongest` and `panel` to Bifrost model ids.
+Bundled profiles live in `../agents/`. The `worker` profile follows an exact brief on the model its front matter names. Tiers and aliases come from `[models]` in the owner's `config.toml`.
 
 ## Adding or editing a skill
 

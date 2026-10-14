@@ -1,6 +1,6 @@
 # Synthesizer prompt
 
-Use this to weigh the investigators' findings, yourself or in one subagent.
+Use this to weigh the investigators' findings, yourself or in one fork.
 
 ---
 

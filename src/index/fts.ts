@@ -1,13 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
-import type { Note } from "../notes/schema.ts";
 
-type DocKind = "user" | "assistant" | "note";
+type DocKind = "user" | "assistant" | "memory";
 
 export interface IndexDoc {
 	readonly text: string;
 	readonly kind: DocKind;
-	/** Entry id for chat text, `note:<slug>` for notes. */
+	/** Entry id for chat text, `#<position>` for a memory line. */
 	readonly ref: string;
 	readonly at: string;
 }
@@ -21,7 +20,7 @@ interface SearchQuery {
 	readonly hidden?: { readonly conversation: number; readonly fromEntry: number };
 }
 
-export interface SearchHit {
+interface SearchHit {
 	readonly kind: DocKind;
 	readonly ref: string;
 	readonly conversation: number | null;
@@ -36,7 +35,7 @@ interface ScrollRow {
 	readonly text: string;
 }
 
-/** FTS5 over notes and chat text. Disposable: deleting the file and reindexing reproduces it. */
+/** FTS5 over memory lines and chat text. Disposable: deleting the file and reindexing reproduces it. */
 export class SearchIndex {
 	readonly #db: DatabaseSync;
 
@@ -67,11 +66,16 @@ export class SearchIndex {
 		return typeof row?.entry === "number" ? row.entry : 0;
 	}
 
-	replaceNotes(notes: readonly Note[]): void {
+	addMemory(position: number, at: string, text: string): void {
+		this.#db.prepare("DELETE FROM docs WHERE kind = 'memory' AND ref = ?").run(`#${position}`);
+		this.#db.prepare("INSERT INTO docs (text, kind, ref, conversation, at) VALUES (?, 'memory', ?, NULL, ?)").run(text, `#${position}`, at);
+	}
+
+	replaceMemory(lines: readonly { readonly at: string; readonly text: string }[]): void {
 		this.#transaction(() => {
-			this.#db.exec("DELETE FROM docs WHERE kind = 'note'");
-			const insert = this.#db.prepare("INSERT INTO docs (text, kind, ref, conversation, at) VALUES (?, 'note', ?, NULL, ?)");
-			for (const note of notes) insert.run(`${note.subject} (${note.kind})\n${note.body}`, `note:${note.slug}`, note.updated);
+			this.#db.exec("DELETE FROM docs WHERE kind = 'memory' OR kind = 'note'");
+			const insert = this.#db.prepare("INSERT INTO docs (text, kind, ref, conversation, at) VALUES (?, 'memory', ?, NULL, ?)");
+			lines.forEach((line, position) => insert.run(line.text, `#${position}`, line.at));
 		});
 	}
 
@@ -83,8 +87,8 @@ export class SearchIndex {
 				SELECT kind, ref, conversation, at, snippet(docs, 0, '[', ']', '…', 16) AS snippet
 				FROM docs
 				WHERE docs MATCH ? AND at >= ? AND at <= ?
-					AND NOT (kind != 'note' AND conversation = ? AND CAST(ref AS INTEGER) >= ?)
-				ORDER BY (kind != 'note' AND conversation != ${ROOT_CONVERSATION_ID}), bm25(docs)
+					AND NOT (kind != 'memory' AND conversation = ? AND CAST(ref AS INTEGER) >= ?)
+				ORDER BY (kind != 'memory' AND conversation != ${ROOT_CONVERSATION_ID}), bm25(docs)
 				LIMIT ?
 			`)
 			.all(
@@ -109,7 +113,7 @@ export class SearchIndex {
 		const rows = this.#db
 			.prepare(`
 				SELECT kind, ref, at, text, conversation FROM docs
-				WHERE kind != 'note' AND at >= ? AND at <= ? AND (? OR conversation = ${ROOT_CONVERSATION_ID})
+				WHERE kind != 'memory' AND at >= ? AND at <= ? AND (? OR conversation = ${ROOT_CONVERSATION_ID})
 				ORDER BY at, CAST(ref AS INTEGER) LIMIT ?
 			`)
 			.all(query.after ?? "", query.before ?? "\uffff", query.everywhere ? 1 : 0, query.limit);
@@ -118,13 +122,13 @@ export class SearchIndex {
 
 	/** Indexed chat rows of the entry's conversation, `n` before and after it, oldest first. */
 	scroll(entryId: number, n: number): ScrollRow[] | undefined {
-		const anchor = this.#db.prepare("SELECT conversation FROM docs WHERE ref = ? AND kind != 'note'").get(String(entryId));
+		const anchor = this.#db.prepare("SELECT conversation FROM docs WHERE ref = ? AND kind != 'memory'").get(String(entryId));
 		if (anchor === undefined) return undefined;
 		const window = (comparison: string, order: string) =>
 			this.#db
 				.prepare(`
 					SELECT kind, ref, at, text FROM docs
-					WHERE kind != 'note' AND conversation = ? AND CAST(ref AS INTEGER) ${comparison} ?
+					WHERE kind != 'memory' AND conversation = ? AND CAST(ref AS INTEGER) ${comparison} ?
 					ORDER BY CAST(ref AS INTEGER) ${order} LIMIT ?
 				`)
 				.all(anchor.conversation ?? null, entryId, n + (comparison === ">=" ? 1 : 0));
@@ -149,12 +153,12 @@ export class SearchIndex {
 }
 
 function docKind(value: unknown): DocKind {
-	if (value === "user" || value === "assistant" || value === "note") return value;
+	if (value === "user" || value === "assistant" || value === "memory") return value;
 	throw new Error(`Unexpected index kind ${String(value)}`);
 }
 
 /** Free text to an FTS5 expression: every word quoted, any word may match, BM25 ranks. */
-export function toMatchExpression(text: string): string | undefined {
+function toMatchExpression(text: string): string | undefined {
 	const words = text.match(/[\p{L}\p{N}_]+/gu);
 	if (words === null) return undefined;
 	return words.map((word) => `"${word}"`).join(" OR ");

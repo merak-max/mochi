@@ -13,16 +13,16 @@ Every candidate gets the same brief, so the brief is the contract.
 
 1. State the artifact each candidate produces.
 2. Write a rubric of 3 to 6 concrete criteria for what good means here. Only you and the judge see it.
-3. Pick the runners. By default use one each of the `panel` tier (Opus, Fable, Sonnet). Use more runners when the task has several distinct directions.
+3. Pick the runners. By default use three. Forks all run on your model, so for model diversity use profiles on different models (`profile_list` shows each one's model). Use more runners when the task has several distinct directions.
 4. Give each candidate its own output path, such as `data/work/<slug>/arena/<n>.md`.
 
 ## Fan out
 
-Start every candidate with `fork` in one script with `Promise.all`. A fork already holds the shared background, so each brief names only its output path and asks for a short rationale naming the options it considered and rejected. For candidates on different models, use `agent` with `type: "worker"` and the shared background in the brief. If one fails, continue with N-1 and note it.
+Start the forked candidates in one `fork({ briefs: [...] })` call. A fork already holds the shared background, so each brief names only its output path and asks for a short rationale naming the options it considered and rejected. For candidates on different models, send the brief with the shared background to each profile with `profile_send`, in one script with `Promise.all`. If one fails, continue with N-1 and note it.
 
 ## Judge and pick
 
-After all candidates finish, start one judge on a model different from yours. It sees the rubric and the candidates by label only, never by model name, scores each criterion, and recommends a base.
+After all candidates finish, send the judging brief to a profile on a model different from yours. It sees the rubric and the candidates by label only, never by model name, scores each criterion, and recommends a base.
 
 Read every candidate yourself and score it against the rubric. If you and the judge agree, that confirms the pick. If you disagree, read both rationales before deciding. When two are close, pick the simpler one.
 

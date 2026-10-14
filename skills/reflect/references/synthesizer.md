@@ -23,7 +23,7 @@ Output exactly this, one sentence per cell, no preamble:
 
 | Problem | Proposal | Routing |
 |---|---|---|
-| <what went wrong> | <the concrete change> | <note slug and kind, trigger id, or skill and section> |
+| <what went wrong> | <the concrete change> | <memory line, trigger id, or skill and section> |
 
 ## Rejected
 

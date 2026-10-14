@@ -1,33 +1,33 @@
 import type { Context } from "@earendil-works/chord";
-import { AssistantEntry, type ConversationId, type EntryRecord, type Harness, UserEntry } from "@earendil-works/pi-durable";
+import { AssistantEntry, type ConversationId, type EntryRecord, type Harness, LiveDoc, UserEntry } from "@earendil-works/pi-durable";
 import type { IndexDoc, SearchIndex } from "../index/fts.ts";
 import { allPages } from "../pages.ts";
 import { pause } from "../pause.ts";
 import { messageText } from "../text.ts";
-import { readMemory, sortedNotes } from "./memory.ts";
+import type { FastCompletion } from "../turn/lifecycle.ts";
+import type { Profiles } from "../profiles/profiles.ts";
+import { maintain, MemoryLog, type Owner } from "./memory.ts";
 
 const PAGE = 200;
 const RETRY_MS = 5000;
 
-/** Catch-up: every conversation's committed user and assistant text past its stored entry cursor. */
-export async function indexOnce(harness: Harness, index: SearchIndex, context: Context): Promise<number> {
-	let added = 0;
-	for (const conversation of await allConversations(harness, context)) added += await indexConversation(harness, index, conversation, context);
-	index.replaceNotes(sortedNotes(await readMemory(harness, context)));
-	return added;
-}
-
 /**
- * Subscribes to commits, then catches up, then indexes each conversation a commit appended entries to, until `context`
- * aborts. Subscribing first means no commit falls between the catch-up and the live feed.
+ * Subscribes to commits, then catches up, then for each conversation a commit appended entries to: indexes its chat text
+ * and folds its turns into memory, until `context` aborts. Subscribing first means no commit falls between the catch-up
+ * and the live feed.
  */
-export async function runFeed(harness: Harness, index: SearchIndex, context: Context, onError: (error: unknown) => void): Promise<void> {
+export async function runFeed(harness: Harness, index: SearchIndex, fast: FastCompletion, profiles: Profiles, context: Context, onError: (error: unknown) => void): Promise<void> {
 	const signal = context.abortSignal;
 	const aborted = (): boolean => signal?.aborted === true;
 	const dirty = new Set<ConversationId>();
 	let wake = (): void => {};
 	const unsubscribe = harness.subscribeCommits(({ changes }) => {
-		for (const change of changes) if (change.type === "entry") dirty.add(change.value.conversationId);
+		for (const change of changes) {
+			if (change.type === "entry") dirty.add(change.value.conversationId);
+			// A run that just ended: its last turn was skipped while it ran, and no new entry will come to fold it.
+			const runEnded = change.type === "document" && change.record.kind === LiveDoc.definition.kind && change.conversationId !== undefined && change.value !== null && change.value.run === undefined;
+			if (runEnded) dirty.add(change.conversationId!);
+		}
 		if (dirty.size > 0) wake();
 	});
 	const stop = (): void => wake();
@@ -38,8 +38,11 @@ export async function runFeed(harness: Harness, index: SearchIndex, context: Con
 			const marked = [...dirty];
 			dirty.clear();
 			try {
-				for (const conversation of all ? await allConversations(harness, context) : marked) await indexConversation(harness, index, conversation, context);
-				index.replaceNotes(sortedNotes(await readMemory(harness, context)));
+				const conversations = all ? await allConversations(harness, context) : marked;
+				for (const conversation of conversations) await indexConversation(harness, index, conversation, context);
+				const owners: Owner[] = ["root", ...(await profiles.all()).map((profile) => ({ profile: profile.name }))];
+				await maintain(harness, fast, owners, conversations, context);
+				index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
 				all = false;
 			} catch (error) {
 				if (aborted()) return;
@@ -68,7 +71,6 @@ async function allConversations(harness: Harness, context: Context): Promise<Con
 	return (await allPages((cursor) => harness.commit((tx) => tx.scanConversations({}, PAGE, cursor), context))).map((record) => record.id);
 }
 
-/** Oldest first. */
 async function entriesAfter(harness: Harness, conversationId: ConversationId, after: number, context: Context): Promise<EntryRecord[]> {
 	const query = { conversationId, minEntryId: (after + 1) as EntryRecord["id"] };
 	const entries = await allPages((cursor) => harness.commit((tx) => tx.scanEntries(query, PAGE, cursor), context));

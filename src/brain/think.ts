@@ -4,7 +4,6 @@ import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-work
 import { messageText } from "../text.ts";
 import type { Classify } from "./classifier.ts";
 
-const LLM_MAX_TOKENS = 16_000;
 /** `llm` calls in flight at once across every script; a Promise.all over hundreds of slices waits its turn. */
 const LLM_CONCURRENCY = 8;
 
@@ -35,7 +34,7 @@ const Answer = Type.Union([
 	Type.Object({ type: Type.Literal("score"), score: Type.Number(), confidence: Type.Number() }),
 ]);
 
-/** Fast-model calls from scripts: `llm` on the fast model with no tools, and `classify` on Jev, the gates' classifier. */
+/** Fast-model calls from scripts: `llm` on the fast model with no tools, and `classify` on the classifier model. */
 export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRef; readonly classify: Classify }): readonly ToolRegistration[] {
 	const slot = limiter(LLM_CONCURRENCY);
 	return [
@@ -53,7 +52,7 @@ export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRe
 					deps.models.completeSimple(
 						model,
 						{ ...(system === undefined ? {} : { systemPrompt: system }), messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
-						{ ...(signal === undefined ? {} : { signal }), reasoning: "low", maxTokens: Math.min(model.maxTokens, LLM_MAX_TOKENS) },
+						{ ...(signal === undefined ? {} : { signal }), reasoning: "low", maxTokens: model.maxTokens },
 					),
 				);
 				if (response.stopReason === "error" || response.stopReason === "aborted") throw new Error(`llm failed: ${response.errorMessage ?? response.stopReason}`);
@@ -62,7 +61,7 @@ export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRe
 		}),
 		defineTool({
 			name: "classify",
-			description: "Typed bool, choice or score questions about a JSON object, answered by Jev with probabilities. Try a trigger gate on samples with it.",
+			description: "Typed bool, choice or score questions about a JSON object, answered by the classifier model with probabilities. Gate pattern: classify({state:{payload}, questions:{need:{type:'bool', instructions:'Does this need the owner?', criteria:{true:'...', false:'...'}}}}), then act only when answers.need.probability is above your threshold. A trigger can do the same before its model with a classify step.",
 			parameters: Type.Object({
 				state: Type.Record(Type.String(), Type.Unknown()),
 				questions: Type.Record(Type.String({ pattern: "^[a-z0-9_]+$" }), Question, { minProperties: 1, maxProperties: 8 }),

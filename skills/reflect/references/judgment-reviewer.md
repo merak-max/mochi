@@ -10,7 +10,7 @@ Look for:
 - Facts about the owner's world worth keeping (people, accounts, places, recurring needs)
 - Tool or site quirks discovered
 - Decisions and their reasons
-- Friction in following a skill or playbook, or in delegating to subagents
+- Friction in following a skill or playbook, or in delegating to forks or profiles
 - Manual steps repeated that a trigger, gate or script could do
 
 Only route to skills, tools or notes this conversation actually used. Two shapes are valid. The run used a skill and you found a gap in it, so route to that skill's section. Or a skill would have helped but didn't trigger, so route as `tune description: <skill>`.
