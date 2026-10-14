@@ -247,13 +247,13 @@ export function noteTool(index: SearchIndex, ownerOf: OwnerOf) {
 export function zoomTool(ownerOf: OwnerOf) {
 	return defineTool({
 		name: "zoom",
-		description: "Open one block of memory, or of this conversation's earlier turns, into its two halves, down to the raw lines. Pass the id as the view prints it, like 0-7.",
-		parameters: Type.Object({ block: Type.String(), turns: Type.Optional(Type.Boolean()) }),
+		description: "Open one block of memory, or of this conversation's earlier turns, into its two halves, down to the raw lines. Pass the id as the view prints it, like 0-7. In a profile, own: true opens a block of the profile's own memory.",
+		parameters: Type.Object({ block: Type.String(), turns: Type.Optional(Type.Boolean()), own: Type.Optional(Type.Boolean()) }),
 		replay: "safe",
 		execute: async (args, api, context) => {
 			const block = parseBlock(args.block);
 			const owner = await api.commit((tx) => ownerOf(tx, api.conversationId), context);
-			const tree = args.turns === true ? await api.snapshot(TurnLog, api.conversationId, context) : await readTree(api, owner, context);
+			const tree = args.turns === true ? await api.snapshot(TurnLog, api.conversationId, context) : await readTree(api, args.own === true ? owner : "root", context);
 			if (tree === undefined || block[0] >= tree.lines.length) throw new Error(`#${args.block} is past the end of the log.`);
 			return text(zoom(tree, block));
 		},
@@ -317,13 +317,24 @@ export function historyTool(index: SearchIndex) {
 }
 
 /**
+ * Root's memory holds the owner's rules and facts, so every conversation sees it. A profile sees its own log after it;
+ * its `note` calls write there.
+ */
+async function renderMemory(read: MemoryReader, owner: Owner, context: Context): Promise<string> {
+	const root = wake(await readTree(read, "root", context)) || "Nothing kept yet. Keep the first line with tools.note.";
+	if (owner === "root") return root;
+	const own = wake(await readTree(read, owner, context)) || "Nothing kept yet.";
+	return `${root}\n\n## ${owner.profile}'s own memory\n${own}`;
+}
+
+/**
  * The memory section: the wake view of the memory log. It always renders, so the section set never changes. The
  * extension keeps the name the stored conversations already select.
  */
 export function memoryExtension(ownerOf: (read: DocumentReader, conversation: ConversationId, context: Context) => Promise<Owner>): Extension {
 	return defineExtension({
 		name: "notes",
-		sections: [section("memory", async (input, context) => wake(await readTree(input.read, await ownerOf(input.read, input.conversationId, context), context)) || "Nothing kept yet. Keep the first line with tools.note.")],
+		sections: [section("memory", async (input, context) => renderMemory(input.read, await ownerOf(input.read, input.conversationId, context), context))],
 	});
 }
 

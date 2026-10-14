@@ -101,7 +101,7 @@ Memory follows OptMem's merge tree (`src/memory/tree.ts`). A log is an append-on
 
 There are two kinds of log:
 
-- **Memory logs.** `note({ line })` appends one line. Root's log is `mochi.memory-log`; each profile's is `mochi.profile-memory` keyed by name. The `memory` section shows `cover(log, 96)`.
+- **Memory logs.** `note({ line })` appends one line. Root's log is `mochi.memory-log`; each profile's is `mochi.profile-memory` keyed by name. The `memory` section shows `cover(root's log, 96)`, so every conversation sees the owner's rules and facts. A profile's conversations also see `cover(its own log, 96)` after it, and their `note` calls write there. `zoom({ own: true })` opens a block of the profile's own log.
 - **Turn logs.** `mochi.turn-log` holds one line per turn of a conversation: the owner's text and mochi's answer, digested by the fast model when long.
 
 The feed (`src/memory/feed.ts`) subscribes to commits. After each commit it indexes new chat text into FTS5, folds finished turns into turn logs, and builds every block that is due, one commit per block, so a crash resumes at the next missing block. pi-durable's threshold compaction is the one context policy. Its `beforeCompact` hook returns the cover of the conversation's turn log as the summary, so compaction never waits on a model. `zoom({ block, turns? })` opens one block into its two halves, down to the raw lines.
