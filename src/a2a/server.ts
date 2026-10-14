@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import type { Context } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
-import { type ConversationId, defineDocFamily, type Harness, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
+import { AgentDoc, type ConversationId, defineDocFamily, type Harness, ROOT_CONVERSATION_ID, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
 import { Value } from "typebox/value";
 import type { Config } from "../config.ts";
 import { readBody, safeEqual } from "../http.ts";
@@ -109,7 +109,12 @@ export function contextInstructions(peer: string): string {
 /** Inside a commit: the conversation of one peer's context, created on its first message. */
 export async function ensureContext(tx: Tx, peer: string, contextId: string): Promise<ConversationId> {
 	const doc = await tx.doc(A2AContextDoc, `${peer}:${contextId}`, null);
-	if (doc.conversation === null) doc.conversation = await createSeatConversation(tx, "worker", { kind: "ownerless" }, { instructions: contextInstructions(peer) });
+	if (doc.conversation === null) {
+		// The persona is root's instructions; a profile answers its peers in its own voice.
+		const persona = (await tx.doc(AgentDoc, ROOT_CONVERSATION_ID)).instructions;
+		const instructions = persona === undefined || persona === "" ? contextInstructions(peer) : `${persona}\n\n${contextInstructions(peer)}`;
+		doc.conversation = await createSeatConversation(tx, "worker", { kind: "ownerless" }, { instructions });
+	}
 	return doc.conversation;
 }
 
