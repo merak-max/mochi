@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import type { Models } from "@earendil-works/pi-ai";
 import {
@@ -43,6 +43,8 @@ import { identityExtension } from "./brain/identity.ts";
 import { bindRepo, PublisherTask } from "./memory/publication.ts";
 import { type A2APeers, a2aFns } from "./a2a/tools.ts";
 import { defineSettle, ensureSettle, LOOK_EVERY_MS, SETTLE_MIN_TOKENS } from "./turn/settle.ts";
+import { profileFns } from "./profiles/profiles.ts";
+import { type Home, homeAt } from "./home.ts";
 import { defineDream, dreamConfig, type DreamConfigInput, reconcileDream } from "./memory/dream.ts";
 
 export interface MochiOptions {
@@ -94,6 +96,8 @@ export interface MochiOptions {
 	readonly users?: readonly ChatUser[];
 	/** The owner's other agents that root and runs may call over A2A. */
 	readonly a2aPeers?: A2APeers;
+	/** This mochi's home, whose profiles/ the profile tools manage. Absent in tests: a home in the work directory. */
+	readonly home?: Home;
 }
 
 export interface Mochi {
@@ -148,6 +152,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...triggerFns({ task: trigger, catalog: options.agents, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users }),
 		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 		...a2aFns(a2aPeers),
+		...profileFns({ home: options.home ?? homeAt(options.workDir), repo: resolve(import.meta.dirname, "..") }),
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),

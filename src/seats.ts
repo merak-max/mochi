@@ -85,6 +85,10 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	a2a_ask: { seats: OWNER_AND_RUN, inline: false },
 	a2a_send: { seats: OWNER_AND_RUN, inline: false },
 	a2a_status: { seats: OWNER_AND_RUN, inline: false },
+	profile_list: { seats: OWNER, inline: false },
+	profile_create: { seats: OWNER, inline: false },
+	profile_update: { seats: OWNER, inline: false },
+	profile_remove: { seats: OWNER, inline: false },
 };
 
 /** Anthropic's billing classifier flags these names. */
