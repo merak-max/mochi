@@ -16,28 +16,21 @@ export const GateSchema = Type.Object({
 });
 export type Gate = Static<typeof GateSchema>;
 
-const Prompt = Type.String({ minLength: 1 });
-const NotifyWhen = Type.Optional(GateSchema);
-const Notify = Type.Optional(Type.Array(Type.String({ pattern: "^user[0-9]+$" }), { minItems: 1 }));
-const Model = Type.Optional(Type.String({ minLength: 1 }));
-const Role = Type.Optional(Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" }));
-const Check = Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }));
-const Thinking = Type.Optional(Type.Union(["off", "low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level))));
+const Thinking = Type.Union(["off", "low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level)));
+
+const RUN_FIELDS = {
+	id: Id,
+	prompt: Type.String({ minLength: 1 }),
+	notifyWhen: Type.Optional(GateSchema),
+	notify: Type.Optional(Type.Array(Type.String({ pattern: "^user[0-9]+$" }), { minItems: 1 })),
+	model: Type.Optional(Type.String({ minLength: 1 })),
+	role: Type.Optional(Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" })),
+	thinking: Type.Optional(Thinking),
+};
 
 export const TriggerSchema = Type.Union([
-	Type.Object({ kind: Type.Literal("cron"), id: Id, cron: Type.String(), tz: Type.String(), prompt: Prompt, notifyWhen: NotifyWhen, notify: Notify, model: Model, role: Role, thinking: Thinking, check: Check }),
-	Type.Object({ kind: Type.Literal("once"), id: Id, at: Type.String({ format: "date-time" }), prompt: Prompt, notifyWhen: NotifyWhen, notify: Notify, model: Model, role: Role, thinking: Thinking }),
-	Type.Object({
-		kind: Type.Literal("webhook"),
-		id: Id,
-		auth: WebhookAuthSchema,
-		prompt: Prompt,
-		admitWhen: Type.Optional(GateSchema),
-		notifyWhen: NotifyWhen,
-		notify: Notify,
-		model: Model,
-		role: Role,
-		thinking: Thinking,
-	}),
+	Type.Object({ kind: Type.Literal("cron"), ...RUN_FIELDS, cron: Type.String(), tz: Type.String(), check: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })) }),
+	Type.Object({ kind: Type.Literal("once"), ...RUN_FIELDS, at: Type.String({ format: "date-time" }) }),
+	Type.Object({ kind: Type.Literal("webhook"), ...RUN_FIELDS, auth: WebhookAuthSchema, admitWhen: Type.Optional(GateSchema) }),
 ]);
 export type Trigger = Static<typeof TriggerSchema>;

@@ -15,11 +15,11 @@ export interface AgentType {
 
 export class AgentCatalog {
 	readonly types: ReadonlyMap<string, AgentType>;
-	readonly #ref: (name: string) => ModelRef;
+	readonly model: (name: string) => ModelRef;
 
-	constructor(types: readonly AgentType[], ref: (name: string) => ModelRef) {
+	constructor(types: readonly AgentType[], model: (name: string) => ModelRef) {
 		this.types = new Map(types.map((type) => [type.name, type]));
-		this.#ref = ref;
+		this.model = model;
 	}
 
 	/** Each `<own>/<name>.md` adds a type or replaces the bundled one of that name. */
@@ -30,10 +30,6 @@ export class AgentCatalog {
 			for (const file of files) types.set(basename(file, ".md"), parseAgentFile(basename(file, ".md"), await readFile(join(from, file), "utf8")));
 		}
 		return new AgentCatalog([...types.values()], ref);
-	}
-
-	model(name: string): ModelRef {
-		return this.#ref(name);
 	}
 }
 

@@ -12,6 +12,9 @@ import { NOTIFY_ENTRY, UserDoc } from "../turn/turn.ts";
 import { messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import { TriggersDoc } from "../upgrade.ts";
+import type { Classify } from "../brain/classifier.ts";
+import type { ChatUser } from "../config.ts";
+import type { Log } from "../log.ts";
 import { fixedClassify, newFaux, openTestMochi, recordingChannel, type TestMochi, tempDir, turnsSettled } from "../test-support.ts";
 import { addTrigger, type LastSlot, parseSeeds, type Plan, plan, reconcileSeeds, runAgent, scanTriggers, type TriggerRecord } from "./trigger.ts";
 import type { Trigger } from "./types.ts";
@@ -34,6 +37,36 @@ async function until(mochi: TestMochi, check: (task: TriggerRecord) => boolean):
 		if (found !== undefined) return found;
 		await sleep(20);
 	}
+}
+
+/** Runs `script` through codemode on root and returns its parsed output and the system prompt the model saw. */
+async function runScript(script: string, users: readonly ChatUser[] = []) {
+	const faux = newFaux();
+	let system = "";
+	faux.setResponses([
+		(request) => {
+			system = JSON.stringify(request.messages.find((message) => message.role === "system"));
+			return call("codemode", { code: script });
+		},
+		fauxAssistantMessage("done"),
+	]);
+	const mochi = await openTestMochi(await tempDir(), faux, undefined, undefined, [], { now: clockAt(Date.parse("2026-10-05T03:00:00Z")), users });
+	await (await mochi.root.submit({ type: "input", content: "set things up" }, context)).wait(context);
+	const result = (await mochi.root.entries({}, 50, undefined, context)).items.find((entry) => entry.kind === "pi.tool-result");
+	return { mochi, system, out: JSON.parse(scriptOutput(messageText(result!.model![0]!))) };
+}
+
+/** Adds `trigger`, lets its slot S call notify with `text`, and returns once every Turn it opened has settled. */
+async function notifyRun(trigger: Trigger, text: string, channel: ReturnType<typeof recordingChannel>, classify?: Classify, overrides: { users?: readonly ChatUser[]; log?: Log } = {}) {
+	const faux = newFaux();
+	faux.setResponses([call("notify", { text }), fauxAssistantMessage("ok")]);
+	const now = clockAt(S);
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([[channel.channel.profile.id, channel.channel]]), classify, [], { now, ...overrides });
+	now.set(S - 200);
+	await add(mochi, trigger);
+	await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
+	await turnsSettled(mochi.harness);
+	return mochi;
 }
 
 test("plan fires a cron slot on time or inside the grace window, misses it past the window, and always fires a once", () => {
@@ -85,12 +118,7 @@ const listed = await tools.trigger_list({});
 await tools.trigger_add({ id: "standup", prompt: "Plan the week.", when: "0 9 * * 1" });
 await tools.trigger_remove({ id: "ci" });
 return { bad, gated, standup, ci, listed, after: await tools.trigger_list({}) };`;
-	const faux = newFaux();
-	faux.setResponses([call("codemode", { code: script }), fauxAssistantMessage("done")]);
-	const mochi = await openTestMochi(await tempDir(), faux, undefined, undefined, [], { now: clockAt(Date.parse("2026-10-05T03:00:00Z")) });
-	await (await mochi.root.submit({ type: "input", content: "set things up" }, context)).wait(context);
-	const result = (await mochi.root.entries({}, 50, undefined, context)).items.find((entry) => entry.kind === "pi.tool-result");
-	const out = JSON.parse(scriptOutput(messageText(result!.model![0]!)));
+	const { mochi, out } = await runScript(script);
 
 	assert.match(out.bad, /minute "61"/);
 	assert.match(out.gated, /admitWhen applies only to webhook triggers/);
@@ -154,17 +182,11 @@ test("a hung run hits its deadline, is recorded timed-out, and the next slot fir
 
 test("notifyWhen holds back a notify the classifier answers no, and passes a yes or a classifier error", async () => {
 	for (const [outcome, sent] of [[0.2, []], [0.9, ["build broke"]], ["provider down", ["build broke"]]] as const) {
-		const faux = newFaux();
-		faux.setResponses([call("notify", { text: "build broke" }), fauxAssistantMessage("ok")]);
 		const whatsapp = recordingChannel("whatsapp");
 		const classify = fixedClassify(outcome);
 		const logs: string[] = [];
-		const now = clockAt(S);
-		const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]), classify, [], { now, log: (event) => logs.push(event) });
-		now.set(S - 200);
-		await add(mochi, { ...DAILY, notifyWhen: { question: "Is the build broken?", yes: "Broken", no: "Fine", threshold: 0.6 } });
-		await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
-		await turnsSettled(mochi.harness);
+		const notifyWhen = { question: "Is the build broken?", yes: "Broken", no: "Fine", threshold: 0.6 };
+		const mochi = await notifyRun({ ...DAILY, notifyWhen }, "build broke", whatsapp, classify, { log: (event) => logs.push(event) });
 		assert.deepEqual(whatsapp.sent, sent);
 		assert.deepEqual(classify.calls, [{ trigger: "daily", purpose: "Summarize.", message: "build broke" }]);
 		assert.equal(logs.includes("notify.filtered"), outcome === 0.2);
@@ -175,15 +197,8 @@ test("notifyWhen holds back a notify the classifier answers no, and passes a yes
 
 test("a trigger notifies each recipient once, on its own line, and records it in each recipient's conversation", async () => {
 	const USER = { id: "user2", handle: "+15550100002", name: "Alex Kim" };
-	const faux = newFaux();
-	faux.setResponses([call("notify", { text: "Rain at 6." }), fauxAssistantMessage("ok")]);
 	const imessage = recordingChannel("imessage");
-	const now = clockAt(S);
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { now, users: [USER] });
-	now.set(S - 200);
-	await add(mochi, { ...DAILY, notify: ["user1", "user2"] });
-	await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
-	await turnsSettled(mochi.harness);
+	const mochi = await notifyRun({ ...DAILY, notify: ["user1", "user2"] }, "Rain at 6.", imessage, undefined, { users: [USER] });
 	assert.deepEqual(imessage.sentTo, [
 		{ person: undefined, text: "Rain at 6." },
 		{ person: USER.handle, text: "Rain at 6." },
@@ -201,20 +216,7 @@ const unknown = await failed(tools.trigger_add({ id: "a", prompt: "x", when: "0 
 const both = await tools.trigger_add({ id: "b", prompt: "x", when: "0 9 * * *", notify: ["user1", "user2"] });
 const plain = await tools.trigger_add({ id: "c", prompt: "x", when: "0 9 * * *" });
 return { unknown, both, plain };`;
-	const faux = newFaux();
-	let system = "";
-	faux.setResponses([
-		(request) => {
-			system = JSON.stringify(request.messages.find((message) => message.role === "system"));
-			return call("codemode", { code: script });
-		},
-		fauxAssistantMessage("done"),
-	]);
-	const users = [{ id: "user2", handle: "+15550100002", name: "Alex Kim" }];
-	const mochi = await openTestMochi(await tempDir(), faux, undefined, undefined, [], { now: clockAt(Date.parse("2026-10-05T03:00:00Z")), users });
-	await (await mochi.root.submit({ type: "input", content: "set things up" }, context)).wait(context);
-	const result = (await mochi.root.entries({}, 50, undefined, context)).items.find((entry) => entry.kind === "pi.tool-result");
-	const out = JSON.parse(scriptOutput(messageText(result!.model![0]!)));
+	const { mochi, system, out } = await runScript(script, [{ id: "user2", handle: "+15550100002", name: "Alex Kim" }]);
 	assert.equal(out.unknown, 'Unknown notify recipient "Alex Kim". Valid ids: user1, user2.');
 	assert.match(system, /People by id: user1: the owner; user2: Alex Kim \(iMessage\)\./);
 	const tasks = await mochi.harness.commit((tx) => scanTriggers(tx), context);
@@ -223,15 +225,8 @@ return { unknown, both, plain };`;
 });
 
 test("a trigger without notify sends only to the owner", async () => {
-	const faux = newFaux();
-	faux.setResponses([call("notify", { text: "Rain at 6." }), fauxAssistantMessage("ok")]);
 	const imessage = recordingChannel("imessage");
-	const now = clockAt(S);
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { now, users: [{ id: "user2", handle: "+15550100002" }] });
-	now.set(S - 200);
-	await add(mochi, DAILY);
-	await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
-	await turnsSettled(mochi.harness);
+	const mochi = await notifyRun(DAILY, "Rain at 6.", imessage, undefined, { users: [{ id: "user2", handle: "+15550100002" }] });
 	assert.deepEqual(imessage.sentTo, [{ person: undefined, text: "Rain at 6." }]);
 	await mochi.close();
 });

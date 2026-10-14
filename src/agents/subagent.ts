@@ -14,8 +14,14 @@ type AgentRecord = TaskRecord<AgentInput, { readonly phase: "run" }, AgentResult
 const KIND = "mochi.agent";
 
 /** Call inside the commit that read `forkPoint`. */
-export async function startFork(tx: Tx, parent: ConversationId, at: EntryId, input: AgentInput): Promise<TaskId<AgentResult>> {
-	const id = await tx.createTask(AgentTask, input, { ownership: { kind: "conversation" }, conversationId: parent, background: true });
+export async function startFork(
+	tx: Tx,
+	parent: ConversationId,
+	at: EntryId,
+	input: AgentInput,
+	options: TaskOptions = { ownership: { kind: "conversation" }, conversationId: parent, background: true },
+): Promise<TaskId<AgentResult>> {
+	const id = await tx.createTask(AgentTask, input, options);
 	await forkSeatConversation(tx, parent, at, { kind: "task", taskId: id });
 	return id;
 }
@@ -75,9 +81,7 @@ export function agentFns({ catalog, read, abortTask }: AgentFnDeps): ToolRegistr
 			return journaled(tx, api.taskId, "fork", async () => {
 				const reply = background ? "You run in the background: nothing reads your answer, so call notify if the owner needs the result." : "Your answer goes back to that script, not to the owner.";
 				const brief = `You are ${args.name}, a fork of this conversation made by the script above. ${reply}\n\n${args.brief}`;
-				const id = await tx.createTask(AgentTask, { name: args.name, brief }, taskOptions(background, api));
-				await forkSeatConversation(tx, api.conversationId, at, { kind: "task", taskId: id });
-				return id;
+				return startFork(tx, api.conversationId, at, { name: args.name, brief }, taskOptions(background, api));
 			});
 		}, context);
 		return settle(background, args.name, id, api, context);

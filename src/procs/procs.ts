@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
@@ -82,22 +82,6 @@ async function readMeta(files: ProcFiles): Promise<Meta | undefined> {
 	return parseWith(MetaSchema, JSON.parse(text), files.meta);
 }
 
-async function tailLines(path: string, count: number): Promise<string[]> {
-	const file = await open(path, "r").catch(() => undefined);
-	if (file === undefined) return [];
-	try {
-		const { size } = await file.stat();
-		const length = Math.min(size, TAIL_BYTES);
-		const buffer = Buffer.alloc(length);
-		await file.read(buffer, 0, length, size - length);
-		const lines = buffer.toString("utf8").split("\n");
-		if (lines.at(-1) === "") lines.pop();
-		return lines.slice(-count);
-	} finally {
-		await file.close();
-	}
-}
-
 async function readFrom(path: string, offset: number): Promise<Buffer> {
 	const file = await open(path, "r").catch(() => undefined);
 	if (file === undefined) return Buffer.alloc(0);
@@ -110,6 +94,13 @@ async function readFrom(path: string, offset: number): Promise<Buffer> {
 	} finally {
 		await file.close();
 	}
+}
+
+async function tailLines(path: string, count: number): Promise<string[]> {
+	const size = (await stat(path).catch(() => undefined))?.size ?? 0;
+	const lines = (await readFrom(path, Math.max(0, size - TAIL_BYTES))).toString("utf8").split("\n");
+	if (lines.at(-1) === "") lines.pop();
+	return lines.slice(-count);
 }
 
 async function stopGroup(pid: number, files: ProcFiles): Promise<void> {

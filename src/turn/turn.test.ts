@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { type FauxResponseStep, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { AgentDoc, defineDoc, defineDocFamily, ResetEntry, ROOT_CONVERSATION_ID, type SubmissionId, ToolResultEntry, UserEntry } from "@earendil-works/pi-durable";
-import { type Bubble, type Channel, ChannelDown, type ChatChannelId, type Inbound, SendRejected, SendUnknown } from "../channels/types.ts";
+import { type Bubble, type Channel, ChannelDown, type Channels, type ChatChannelId, type Inbound, SendRejected, SendUnknown } from "../channels/types.ts";
 import { createSeatConversation } from "../seats.ts";
 import { newFaux, openTestMochi, recordingChannel, type TestMochi, tempDir, turnsSettled } from "../test-support.ts";
 import { deliveredRecord, UserDoc, ingest, InboundCursorDoc, LastInboundDoc, NOTIFY_ENTRY, nextOutage, openTurn, RETRY, type RunTurn } from "./turn.ts";
@@ -42,13 +42,17 @@ async function turnResults(mochi: TestMochi): Promise<string[]> {
 	return tasks.map((task) => (task.state.status === "terminal" ? (task.state.outcome.status === "completed" ? String(task.state.outcome.result) : task.state.outcome.status) : task.state.status));
 }
 
+async function open(responses: FauxResponseStep[], channels: Channels = new Map(), overrides: Parameters<typeof openTestMochi>[5] = {}) {
+	const faux = newFaux();
+	faux.setResponses(responses);
+	return { faux, mochi: await openTestMochi(await tempDir(), faux, channels, undefined, [], overrides) };
+}
+
 const notifyRecords = async (mochi: TestMochi) => (await mochi.root.entries({}, 100, undefined, context)).items.filter((entry) => entry.kind === NOTIFY_ENTRY);
 
 test("inbound becomes one tagged submission per channel message id, answered once", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Hello!")]);
 	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
+	const { faux, mochi } = await open([fauxAssistantMessage("Hello!")], new Map([["whatsapp", whatsapp.channel]]));
 	await ingest(mochi.line, message("whatsapp", "wamid.1"), context);
 	await ingest(mochi.line, message("whatsapp", "wamid.1"), context);
 	await turnsSettled(mochi.harness);
@@ -69,10 +73,8 @@ function userMessage(messageId: string, text: string, sequence?: number): Inboun
 }
 
 test("a user message runs in the user's own conversation, once per redelivery, and the reply goes to the user", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Hi Alex!"), fauxAssistantMessage("Hi owner!")]);
 	const imessage = recordingChannel("imessage");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { users: [USER] });
+	const { faux, mochi } = await open([fauxAssistantMessage("Hi Alex!"), fauxAssistantMessage("Hi owner!")], new Map([["imessage", imessage.channel]]), { users: [USER] });
 	const fromUser = userMessage("g1", "hey", 7);
 	const first = await ingest(mochi.line, fromUser, context);
 	const again = await ingest(mochi.line, fromUser, context);
@@ -102,10 +104,8 @@ test("a user message runs in the user's own conversation, once per redelivery, a
 });
 
 test("a user's /new resets only the user's conversation and replies to the user", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("User answer."), fauxAssistantMessage("Owner answer.")]);
 	const imessage = recordingChannel("imessage");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { users: [USER] });
+	const { faux, mochi } = await open([fauxAssistantMessage("User answer."), fauxAssistantMessage("Owner answer.")], new Map([["imessage", imessage.channel]]), { users: [USER] });
 	await ingest(mochi.line, userMessage("g1", "hey"), context);
 	await ingest(mochi.line, message("imessage", "o1", "hello"), context);
 	await turnsSettled(mochi.harness);
@@ -123,10 +123,8 @@ test("a user's /new resets only the user's conversation and replies to the user"
 });
 
 test("a redelivery racing the first submit opens a second Turn that ends merged", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Only once.")]);
 	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
+	const { mochi } = await open([fauxAssistantMessage("Only once.")], new Map([["whatsapp", whatsapp.channel]]));
 	const [a, b] = await Promise.all([ingest(mochi.line, message("whatsapp", "w1"), context), ingest(mochi.line, message("whatsapp", "w1"), context)]);
 	await turnsSettled(mochi.harness);
 	assert.equal(a, b);
@@ -137,11 +135,9 @@ test("a redelivery racing the first submit opens a second Turn that ends merged"
 
 test("steers into one run on two channels send the answer once per channel", async () => {
 	const answer = gated(fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.recall({ query: "thing" });` }), { stopReason: "toolUse" }));
-	const faux = newFaux();
-	faux.setResponses([answer.respond, fauxAssistantMessage("Both done.")]);
 	const imessageChannel = recordingChannel("imessage");
 	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map<ChatChannelId, Channel>([["imessage", imessageChannel.channel], ["whatsapp", whatsapp.channel]]));
+	const { mochi } = await open([answer.respond, fauxAssistantMessage("Both done.")], new Map<ChatChannelId, Channel>([["imessage", imessageChannel.channel], ["whatsapp", whatsapp.channel]]));
 	await ingest(mochi.line, message("imessage", "t1", "do the thing"), context);
 	await answer.entered;
 	await ingest(mochi.line, message("whatsapp", "w1", "and this"), context);
@@ -158,10 +154,8 @@ test("steers into one run on two channels send the answer once per channel", asy
 
 test("a steer that arrives after the answer starts the next run and gets its own reply", async () => {
 	const answer = gated(fauxAssistantMessage("First answer here."));
-	const faux = newFaux();
-	faux.setResponses([answer.respond, fauxAssistantMessage("Second answer here.")]);
 	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
+	const { mochi } = await open([answer.respond, fauxAssistantMessage("Second answer here.")], new Map([["whatsapp", whatsapp.channel]]));
 	await ingest(mochi.line, message("whatsapp", "a", "one"), context);
 	await answer.entered;
 	await ingest(mochi.line, message("whatsapp", "b", "two"), context);
@@ -174,13 +168,11 @@ test("a steer that arrives after the answer starts the next run and gets its own
 test("a burst of texts that lands while the answer is being written reaches the model as one turn and gets one reply", async () => {
 	const answer = gated(fauxAssistantMessage("First answer here."));
 	const requests: number[] = [];
-	const faux = newFaux();
-	faux.setResponses([answer.respond, async (request: { messages: { role: string }[] }) => {
+	const whatsapp = recordingChannel("whatsapp");
+	const { faux, mochi } = await open([answer.respond, async (request: { messages: { role: string }[] }) => {
 		requests.push(request.messages.filter((each) => each.role === "user").length);
 		return fauxAssistantMessage("All three, together.");
-	}]);
-	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
+	}], new Map([["whatsapp", whatsapp.channel]]));
 	await ingest(mochi.line, message("whatsapp", "a", "one"), context);
 	await answer.entered;
 	await ingest(mochi.line, message("whatsapp", "b", "two"), context);
@@ -195,10 +187,8 @@ test("a burst of texts that lands while the answer is being written reaches the 
 });
 
 test("a failed run sends one failure notice", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "boom" })]);
 	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
+	const { mochi } = await open([fauxAssistantMessage("", { stopReason: "error", errorMessage: "boom" })], new Map([["whatsapp", whatsapp.channel]]));
 	await ingest(mochi.line, message("whatsapp", "x"), context);
 	await turnsSettled(mochi.harness);
 	assert.equal(whatsapp.sent.length, 1);
@@ -207,8 +197,6 @@ test("a failed run sends one failure notice", async () => {
 });
 
 test("two answers ready together on one channel go out whole, one after the other", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("A first bubble.\n\nA second bubble.\n\nA third bubble."), fauxAssistantMessage("B first bubble.\n\nB second bubble.")]);
 	const sent: string[] = [];
 	const imessage: Channel = {
 		...recordingChannel("imessage").channel,
@@ -217,7 +205,7 @@ test("two answers ready together on one channel go out whole, one after the othe
 			sent.push(bubble.kind === "text" ? bubble.text : "");
 		},
 	};
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage]]));
+	const { mochi } = await open([fauxAssistantMessage("A first bubble.\n\nA second bubble.\n\nA third bubble."), fauxAssistantMessage("B first bubble.\n\nB second bubble.")], new Map([["imessage", imessage]]));
 	const first = await ingest(mochi.line, message("imessage", "g1", "one"), context);
 	await (await mochi.harness.submission(first, context))!.wait(context);
 	await ingest(mochi.line, message("imessage", "g2", "two"), context);
@@ -227,8 +215,6 @@ test("two answers ready together on one channel go out whole, one after the othe
 });
 
 test("an iMessage reply goes out as bubbles; a rejected bubble is skipped and a blank answer sends nothing", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Booked the 7pm table.\n\nhttps://example.com/booking\n\nTell me if you want 8 instead."), fauxAssistantMessage("\u{200B}")]);
 	const sent: Bubble[] = [];
 	const typing: boolean[] = [];
 	let linkAttempts = 0;
@@ -246,7 +232,7 @@ test("an iMessage reply goes out as bubbles; a rejected bubble is skipped and a 
 			sent.push(bubble);
 		},
 	};
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage]]));
+	const { mochi } = await open([fauxAssistantMessage("Booked the 7pm table.\n\nhttps://example.com/booking\n\nTell me if you want 8 instead."), fauxAssistantMessage("\u{200B}")], new Map([["imessage", imessage]]));
 	await ingest(mochi.line, message("imessage", "g1", "book it"), context);
 	await turnsSettled(mochi.harness);
 	await ingest(mochi.line, message("imessage", "g2", "thanks"), context);
@@ -264,8 +250,6 @@ test("an iMessage reply goes out as bubbles; a rejected bubble is skipped and a 
 });
 
 test("an absent channel, then a down one, delivers after it connects with no repeat; SendUnknown retries once", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Back online now.")]);
 	const sent: string[] = [];
 	let downs = 2;
 	let unknowns = 1;
@@ -282,7 +266,7 @@ test("an absent channel, then a down one, delivers after it connects with no rep
 	};
 	const channels = new Map<ChatChannelId, Channel>();
 	const logs: string[] = [];
-	const mochi = await openTestMochi(await tempDir(), faux, channels, undefined, [], { retry: FAST_RETRY, log: (event) => logs.push(event) });
+	const { mochi } = await open([fauxAssistantMessage("Back online now.")], channels, { retry: FAST_RETRY, log: (event) => logs.push(event) });
 	await ingest(mochi.line, message("imessage", "t1"), context);
 	await (await mochi.harness.submission((await mochi.harness.commit((tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, "imessage:t1"), context))!.id, context))!.wait(context);
 	await new Promise((resolve) => setTimeout(resolve, 30));
@@ -295,11 +279,9 @@ test("an absent channel, then a down one, delivers after it connects with no rep
 });
 
 test("a channel down past the outage limit ends failed with one log line", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Never arrives.")]);
 	const logs: string[] = [];
 	const down: Channel = { ...recordingChannel("whatsapp").channel, send: async () => Promise.reject(new ChannelDown("gone")) };
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", down]]), undefined, [], { retry: { firstMs: 10, maxMs: 20, giveUpMs: 100 }, log: (event) => logs.push(event) });
+	const { mochi } = await open([fauxAssistantMessage("Never arrives.")], new Map([["whatsapp", down]]), { retry: { firstMs: 10, maxMs: 20, giveUpMs: 100 }, log: (event) => logs.push(event) });
 	await ingest(mochi.line, message("whatsapp", "w1"), context);
 	await turnsSettled(mochi.harness);
 	assert.deepEqual(await turnResults(mochi), ["failed"]);
@@ -327,8 +309,6 @@ test("nextOutage backs off 5 s doubling to 5 min, counts only back-off, and give
 
 test("/stop withdraws a reply still being generated, but a reply mid-send and a pending notify both finish", async () => {
 	const pending = gated(fauxAssistantMessage("never"));
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Reply first bubble.\n\nReply second bubble."), pending.respond]);
 	const sent: string[] = [];
 	let entered!: () => void;
 	const sending = new Promise<void>((resolve) => {
@@ -346,7 +326,7 @@ test("/stop withdraws a reply still being generated, but a reply mid-send and a 
 			sent.push(bubble.kind === "text" ? bubble.text : "");
 		},
 	};
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage]]));
+	const { mochi } = await open([fauxAssistantMessage("Reply first bubble.\n\nReply second bubble."), pending.respond], new Map([["imessage", imessage]]));
 	await ingest(mochi.line, message("imessage", "g1", "one"), context);
 	await sending;
 	await mochi.harness.commit((tx) => openTurn(tx, mochi.line, { source: "run", channel: "imessage", text: "Fare dropped to 5,400.", from: { kind: "trigger", id: "flight-watch" } }), context);
@@ -363,10 +343,8 @@ test("/stop withdraws a reply still being generated, but a reply mid-send and a 
 });
 
 test("a notify sends verbatim and leaves root with exactly one new entry, framed as context", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage(fauxToolCall("notify", { text: "Build failed on main." }), { stopReason: "toolUse" }), fauxAssistantMessage("done")]);
 	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
+	const { mochi } = await open([fauxAssistantMessage(fauxToolCall("notify", { text: "Build failed on main." }), { stopReason: "toolUse" }), fauxAssistantMessage("done")], new Map([["whatsapp", whatsapp.channel]]));
 	const run = (await mochi.harness.conversation(await mochi.harness.commit((tx) => createSeatConversation(tx, "trigger", { kind: "ownerless" }), context), context))!;
 	const before = (await mochi.root.entries({}, 100, undefined, context)).items.length;
 	await (await run.submit({ type: "input", content: "check the build" }, context)).wait(context);
@@ -408,9 +386,7 @@ test("react defaults to the owner's newest message, takes an explicit id, and fa
 	const imessageChannel = recordingChannel("imessage");
 	const whatsapp = recordingChannel("whatsapp", { react: false });
 	const react = (args: Record<string, string>, id: string) => fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.react(${JSON.stringify(args)});` }, { id }), { stopReason: "toolUse" });
-	const faux = newFaux();
-	faux.setResponses([react({ reaction: "🫡" }, "r1"), fauxAssistantMessage(""), react({ reaction: "none", messageId: "m1" }, "r2"), fauxAssistantMessage(""), react({ reaction: "🫡" }, "r3"), fauxAssistantMessage("ok")]);
-	const mochi = await openTestMochi(await tempDir(), faux, new Map<ChatChannelId, Channel>([["imessage", imessageChannel.channel], ["whatsapp", whatsapp.channel]]));
+	const { mochi } = await open([react({ reaction: "🫡" }, "r1"), fauxAssistantMessage(""), react({ reaction: "none", messageId: "m1" }, "r2"), fauxAssistantMessage(""), react({ reaction: "🫡" }, "r3"), fauxAssistantMessage("ok")], new Map<ChatChannelId, Channel>([["imessage", imessageChannel.channel], ["whatsapp", whatsapp.channel]]));
 	for (const [channel, id] of [["imessage", "m1"], ["imessage", "m2"], ["whatsapp", "c1"]] as const) {
 		await ingest(mochi.line, message(channel, id), context);
 		await turnsSettled(mochi.harness);
@@ -458,15 +434,13 @@ test("a user's tapback is written to the user's conversation, not root", async (
 });
 
 test("a reply shows its target to the model and threads the first text bubble of the answer", async () => {
-	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Yes, still on at 8.\n\nI booked the table for two.")]);
 	const sends: { text: string; replyTo: string | undefined }[] = [];
 	const imessage = recordingChannel("imessage");
 	const channel: Channel = {
 		...imessage.channel,
 		send: async (bubble, _person, options) => void sends.push({ text: bubble.kind === "text" ? bubble.text : bubble.kind, replyTo: options?.replyTo }),
 	};
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", channel]]));
+	const { mochi } = await open([fauxAssistantMessage("Yes, still on at 8.\n\nI booked the table for two.")], new Map([["imessage", channel]]));
 	const replyTo = { messageId: "a7", text: "Dinner at 8?", fromAgent: true };
 	const inbound: Inbound = { kind: "message", channel: "imessage", messageId: "r1", text: "is that still on", at: new Date("2026-10-05T08:32:00Z"), attachments: [], replyTo };
 	await ingest(mochi.line, inbound, context);

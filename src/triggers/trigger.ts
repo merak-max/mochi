@@ -63,6 +63,10 @@ const iso = (at: number): string => new Date(at).toISOString();
 
 export function defineTrigger({ timeZone, deadlineMs, log, harness }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit"> }): TriggerTask {
 	const wait = (last: LastSlot): NextTaskState<TriggerState, null> => ({ status: "running", checkpoint: { phase: "wait", last } });
+	const missed = (trigger: Trigger, slot: number): NextTaskState<TriggerState, null> => {
+		log("trigger.missed", { id: trigger.id, slot: iso(slot) });
+		return wait({ at: slot, result: "missed" });
+	};
 	return defineTask<TriggerInput, TriggerState, null>({
 		name: "mochi.trigger",
 		version: 1,
@@ -77,8 +81,7 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness }: { readonly
 					case "done":
 						return runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
 					case "miss":
-						log("trigger.missed", { id: task.input.trigger.id, slot: iso(next.slot) });
-						return runtime.commit(() => wait({ at: next.slot, result: "missed" }), context);
+						return runtime.commit(() => missed(task.input.trigger, next.slot), context);
 					case "fire":
 						return runtime.commit(() => ({ status: "running", checkpoint: { phase: "fire", slot: next.slot, last } }), context);
 				}
@@ -87,10 +90,7 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness }: { readonly
 				const { slot, last } = task.state.checkpoint;
 				await runtime.sleep(slot, context);
 				const now = runtime.now();
-				if (late(task.input.trigger, slot, now)) {
-					log("trigger.missed", { id: task.input.trigger.id, slot: iso(slot) });
-					return runtime.commit(() => wait({ at: slot, result: "missed" }), context);
-				}
+				if (late(task.input.trigger, slot, now)) return runtime.commit(() => missed(task.input.trigger, slot), context);
 				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "run", slot, deadline: now + deadlineMs, last } }), context);
 			},
 			run: async (task, runtime, context) => {
@@ -309,16 +309,16 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 			replay: "safe",
 			execute: async (args, api, context) => {
 				const draft = parseWhen(args, deps.timeZone, deps.users);
-				let trigger = draft;
-				let replaced: TaskId | undefined;
-				await api.commit(async (tx) => {
+				const { trigger, replaced } = await api.commit(async (tx) => {
 					const existing = await scanTriggers(tx);
+					let replaced: TaskId | undefined;
 					const { id, created } = await journaled(tx, api.taskId, "trigger", async () => {
 						const added = await addTrigger(tx, deps.task, { trigger: draft, origin: "model" }, existing, deps.catalog);
 						replaced = added.replaced;
 						return added.id;
 					});
-					if (!created) trigger = existing.find((record) => record.id === id)!.input.trigger;
+					const trigger = created ? draft : existing.find((record) => record.id === id)!.input.trigger;
+					return { trigger, replaced };
 				}, context);
 				if (replaced !== undefined) await deps.abortTask(replaced, context);
 				if (trigger.kind === "webhook") {

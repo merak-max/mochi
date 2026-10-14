@@ -25,6 +25,7 @@ import {
 import { pace, present } from "../channels/present.ts";
 import {
 	type Attachment,
+	type Bubble,
 	type Channel,
 	ChannelDown,
 	type ChannelId,
@@ -195,17 +196,8 @@ export interface Line {
 	readonly idleReset?: (conversation: Conversation, key: string, context: Context) => Promise<boolean>;
 }
 
-interface TurnHost {
-	// The record is a passive write, which a task's conversation handle cannot submit, so it uses the host's handles.
-	readonly root: Conversation;
-	readonly harness: Harness;
-	readonly users: readonly ChatUser[];
-	readonly channels: Channels;
-	readonly workDir: string;
-	readonly media: Omit<MediaDeps, "workDir">;
-	readonly retry: Retry;
-	readonly log: Log;
-}
+// The record is a passive write, which a task's conversation handle cannot submit, so it uses the host's handles.
+type TurnHost = Pick<Line, "root" | "harness" | "users" | "channels" | "workDir" | "media"> & { readonly retry: Retry; readonly log: Log };
 
 export const NOTIFY_ENTRY = "app.notify";
 const DELIVERED_RECORD_CHARS = 280;
@@ -286,7 +278,7 @@ function claimKey(answer: Answer, task: TaskId, channel: ChatChannelId): string 
 }
 
 export function defineTurn(host: TurnHost): TurnTask {
-	const { root, harness, users, channels, workDir, media, retry, log } = host;
+	const { users, channels, workDir, media, retry, log } = host;
 	return defineTask<TurnInput, TurnState, TurnResult>({
 		name: "mochi.turn",
 		version: 2,
@@ -347,20 +339,20 @@ export function defineTurn(host: TurnHost): TurnTask {
 				let retried = false;
 				for (;;) {
 					const channel = channels.get(id);
-					// Attachment bubbles are placeholders until their turn to send, so a file read never shifts `sent` indexes.
-					const bubbles =
-						channel === undefined
-							? undefined
-							: [
-									...present(outgoing.text, channel.profile),
-									...outgoing.attachments.map((path) => ({ kind: "file" as const, name: path, mimeType: "application/octet-stream", bytes: new Uint8Array() })),
-								];
-					if (bubbles?.length === 0) return runtime.commit(() => completed("silent"), context);
-					if (bubbles !== undefined && sent >= bubbles.length) return runtime.commit(() => finished, context);
-					const bubble = bubbles?.[sent];
-					if (channel !== undefined && bubble !== undefined && sent > 0) {
-						void channel.typing(true, person).catch(() => {});
-						await runtime.sleep(runtime.now() + pace(bubble), context);
+					let bubble: Bubble | undefined;
+					if (channel !== undefined) {
+						// Attachment bubbles are placeholders until their turn to send, so a file read never shifts `sent` indexes.
+						const bubbles: Bubble[] = [
+							...present(outgoing.text, channel.profile),
+							...outgoing.attachments.map((path) => ({ kind: "file" as const, name: path, mimeType: "application/octet-stream", bytes: new Uint8Array() })),
+						];
+						if (bubbles.length === 0) return runtime.commit(() => completed("silent"), context);
+						if (sent >= bubbles.length) return runtime.commit(() => finished, context);
+						bubble = bubbles[sent];
+						if (sent > 0 && bubble !== undefined) {
+							void channel.typing(true, person).catch(() => {});
+							await runtime.sleep(runtime.now() + pace(bubble), context);
+						}
 					}
 					try {
 						if (channel === undefined || bubble === undefined) throw new ChannelDown(`${id} is not running in this process`);
@@ -408,16 +400,9 @@ export function defineTurn(host: TurnHost): TurnTask {
 			record: async (task, runtime, context) => {
 				const input = task.input;
 				if (input.source !== "run") throw new Error("Only a notify Turn records.");
-				let target = root;
-				let recipient = OWNER_ID;
-				if (input.person !== undefined) {
-					const user = userOf(users, input.person);
-					const id = await harness.commit((tx) => ensureUser(tx, user), context);
-					const found = await harness.conversation(id, context);
-					if (found === undefined) throw new Error(`Conversation ${id} is missing.`);
-					target = found;
-					recipient = user.id;
-				}
+				const user = userOf(users, input.person);
+				const target = await threadOf(host, user, context);
+				const recipient = user === undefined ? OWNER_ID : user.id;
 				const model = [{ role: "user" as const, content: deliveredRecord(input, recipient), timestamp: Date.now() }];
 				await target.submit({ type: "write", requestId: `record:${task.id}`, entry: { kind: NOTIFY_ENTRY, data: { channel: input.channel, text: input.text }, model } }, context);
 				await runtime.commit(() => completed("sent"), context);
@@ -446,18 +431,17 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 			return (await root.submit({ type: "input", content, requestId: requestKey("cli", inbound.messageId), whenBusy: "steer" }, context)).id;
 		}
 		case "tapback": {
-			const user = inbound.person === undefined ? undefined : userOf(line.users, inbound.person);
+			const user = userOf(line.users, inbound.person);
 			const who = user === undefined ? OWNER_ID : user.id;
 			const whose = inbound.fromAgent ? "your" : "their";
 			const quoted = inbound.onText === "" ? "" : `: "${inbound.onText}"`;
 			const model = [{ role: "user" as const, content: `[context, no reply needed: ${who} reacted ${inbound.emoji} to ${whose} message id=${inbound.on}${quoted}]`, timestamp: inbound.at.getTime() }];
-			const id = user === undefined ? ROOT_CONVERSATION_ID : await harness.commit((tx) => ensureUser(tx, user), context);
-			const target = await conversationOf(line, id, context);
+			const target = await threadOf(line, user, context);
 			return (await target.submit({ type: "write", requestId: requestKey(inbound.channel, inbound.messageId), entry: { kind: "mochi.tapback", model } }, context)).id;
 		}
 		case "message": {
 			const key = requestKey(inbound.channel, inbound.messageId);
-			const user = inbound.person === undefined ? undefined : userOf(line.users, inbound.person);
+			const user = userOf(line.users, inbound.person);
 			const recordInbound = async (tx: Tx) => {
 				if (user === undefined) (await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
 				if (inbound.sequence !== undefined) {
@@ -505,16 +489,25 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 	}
 }
 
-function userOf(users: readonly ChatUser[], person: string): ChatUser {
+// No person means the owner.
+function userOf(users: readonly ChatUser[], person: string | undefined): ChatUser | undefined {
+	if (person === undefined) return undefined;
 	for (const user of users) if (user.handle === person) return user;
 	throw new Error(`No user ${person} is configured.`);
 }
 
-async function conversationOf(line: Line, id: ConversationId, context: Context): Promise<Conversation> {
-	if (id === ROOT_CONVERSATION_ID) return line.root;
-	const conversation = await line.harness.conversation(id, context);
+async function conversationOf(host: Pick<Line, "root" | "harness">, id: ConversationId, context: Context): Promise<Conversation> {
+	if (id === ROOT_CONVERSATION_ID) return host.root;
+	const conversation = await host.harness.conversation(id, context);
 	if (conversation === undefined) throw new Error(`Conversation ${id} is missing.`);
 	return conversation;
+}
+
+// Root for the owner, else the user's own conversation, made on first use.
+async function threadOf(host: Pick<Line, "root" | "harness">, user: ChatUser | undefined, context: Context): Promise<Conversation> {
+	if (user === undefined) return host.root;
+	const id = await host.harness.commit((tx) => ensureUser(tx, user), context);
+	return conversationOf(host, id, context);
 }
 
 export function reactTool(channels: Channels): ToolRegistration {
