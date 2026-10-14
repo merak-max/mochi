@@ -1,11 +1,27 @@
 import type { JsonValue } from "@earendil-works/chord";
-import { type Models, Type } from "@earendil-works/pi-ai";
+import { type Models, type Static, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
-import { type AlexandriaCall, FirecrawlClient, type SearchRequest } from "./client.ts";
+import { type AlexandriaCall, FirecrawlClient, type SearchHit as WebHit, type SearchRequest } from "./client.ts";
 import { cleanFirecrawlHtml, extractFirecrawlContent } from "./content.ts";
 
 const EXTRACT_CHARS = 12_000;
 const RECENCY = ["hour", "day", "week", "month", "year"] as const;
+const literals = <T extends string>(values: readonly T[]) => Type.Union(values.map((value) => Type.Literal(value)));
+const SearchHit = Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() });
+type SearchHit = Static<typeof SearchHit>;
+
+/** Web hits deduped by URL. */
+function searchHits(web: WebHit[]): SearchHit[] {
+	const hits: SearchHit[] = [];
+	const seen = new Set<string>();
+	for (const hit of web) {
+		const key = hit.url.trim().replace(/\/$/, "");
+		if (key === "" || seen.has(key)) continue;
+		seen.add(key);
+		hits.push({ title: hit.title?.trim() || "Untitled", url: hit.url, snippet: hit.description?.trim() ?? "" });
+	}
+	return hits;
+}
 const FIND_TOOLS = { provider: "firecrawl", capability: "find-tools" } as const;
 
 export interface WebDeps {
@@ -26,55 +42,58 @@ export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 	return [
 		defineTool({
 			name: "web_search",
-			description: "Firecrawl web search: title, URL and snippet per hit.",
+			description:
+				"Web search, 2 credits per 10 hits.",
 			parameters: Type.Object({
 				query: Type.String(),
 				limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-				includeDomains: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })),
-				excludeDomains: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })),
-				recency: Type.Optional(Type.Union(RECENCY.map((key) => Type.Literal(key)))),
+				includeDomains: Type.Optional(Type.Array(Type.String())),
+				excludeDomains: Type.Optional(Type.Array(Type.String())),
+				recency: Type.Optional(literals(RECENCY)),
 			}),
-			structuredOutputSchema: Type.Array(Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() })),
+			structuredOutputSchema: Type.Array(SearchHit),
 			replay: "safe",
-			execute: async ({ query, limit, includeDomains, excludeDomains, recency }, _api, context) => {
-				if (includeDomains && excludeDomains) throw new Error("includeDomains and excludeDomains cannot be used together.");
-				const request: SearchRequest = {
-					query: query.trim(),
-					limit: limit ?? 5,
-					sources: ["web"],
-					...(includeDomains === undefined ? {} : { includeDomains }),
-					...(excludeDomains === undefined ? {} : { excludeDomains }),
-					...(recency === undefined ? {} : { tbs: `qdr:${recency[0]}` }),
-				};
-				const seen = new Set<string>();
-				const hits = (await client().search(request, context.abortSignal)).filter((hit) => {
-					const key = hit.url.trim().replace(/\/$/, "");
-					if (key === "" || seen.has(key)) return false;
-					seen.add(key);
-					return true;
-				});
-				return { structuredOutput: hits.map((hit) => ({ title: hit.title?.trim() || "Untitled", url: hit.url, snippet: hit.description?.trim() ?? "" })) };
+			execute: async (args, _api, context) => {
+				if (args.includeDomains && args.excludeDomains) throw new Error("includeDomains and excludeDomains cannot be used together.");
+				const query = args.query.trim();
+				if (query === "") throw new Error("Search query cannot be blank.");
+				const request: SearchRequest = { query, limit: args.limit ?? 5, sources: ["web"], highlights: false };
+				if (args.includeDomains !== undefined) request.includeDomains = args.includeDomains;
+				if (args.excludeDomains !== undefined) request.excludeDomains = args.excludeDomains;
+				if (args.recency !== undefined) request.tbs = `qdr:${args.recency[0]}`;
+				const result = await client().search(request, context.abortSignal);
+				return { structuredOutput: searchHits(result) };
 			},
 		}),
 		defineTool({
 			name: "web_fetch",
-			description: "Clean page text. With instruction, only what it asks for, extracted on the fast model.",
-			parameters: Type.Object({ url: Type.String(), instruction: Type.Optional(Type.String()) }),
+			description:
+				"Clean page text, 1 credit. instruction: the fast model extracts it; schema: as JSON. maxAge 0: fresh.",
+			parameters: Type.Object({
+				url: Type.String(),
+				instruction: Type.Optional(Type.String()),
+				schema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+				maxAge: Type.Optional(Type.Integer({ minimum: 0 })),
+			}),
 			structuredOutputSchema: Type.String(),
 			replay: "safe",
-			execute: async ({ url, instruction }, _api, context) => {
+			execute: async ({ url, instruction, schema, maxAge }, _api, context) => {
 				const signal = context.abortSignal;
-				const page = await client().scrape(url, signal);
+				const ask = instruction?.trim() ?? "";
+				if (schema !== undefined && ask === "") throw new Error("schema needs an instruction that says what to extract.");
+				const page = await client().scrape({ url, formats: ["markdown", "html"], onlyMainContent: true, ...(maxAge === undefined ? {} : { maxAge }) }, signal);
 				if (page.status >= 400) throw new Error(`Page fetch failed (HTTP ${page.status}): ${page.error ?? "source returned an error"}. URL: ${url}`);
 				const markdown = (page.html === undefined ? undefined : await cleanFirecrawlHtml(page.html, url)) ?? page.markdown ?? "";
-				if (!instruction?.trim() || markdown === "") return { structuredOutput: markdown };
-				const extracted = await extractFirecrawlContent({ models: deps.models, model: deps.fast, url, markdown, instruction, maxOutput: EXTRACT_CHARS, ...(signal === undefined ? {} : { signal }) });
-				return extracted === undefined ? { structuredOutput: markdown } : { structuredOutput: extracted.text, usage: extracted.usage };
+				if (ask === "") return { structuredOutput: markdown };
+				if (markdown === "") throw new Error(`Firecrawl returned no page content for ${url}, so the instruction has nothing to answer from.`);
+				const extracted = await extractFirecrawlContent({ models: deps.models, model: deps.fast, url, markdown, instruction: ask, schema, maxOutput: EXTRACT_CHARS, signal });
+				const notice = extracted.inputTruncated ? "[The model saw only the first and last parts of this long page. Fetch without instruction for all of it.]\n\n" : "";
+				return { structuredOutput: notice + extracted.text, usage: extracted.usage };
 			},
 		}),
 		defineTool({
 			name: "web_map",
-			description: "Discover URLs on a site, optionally ranked by a search term.",
+			description: "Discover URLs on a site, optionally ranked by a search term. 1 credit.",
 			parameters: Type.Object({ url: Type.String(), search: Type.Optional(Type.String()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })) }),
 			structuredOutputSchema: Type.Array(Type.String()),
 			replay: "safe",
