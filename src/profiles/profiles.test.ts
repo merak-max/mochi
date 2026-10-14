@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
@@ -22,10 +22,10 @@ test("profiles nest by path: create links each to its parent, update restarts th
 	const call = async (name: string, args: object) => (await tool(name).execute(args as never, {} as ToolExecutionApi, context)).structuredOutput as Record<string, unknown>;
 	if (process.platform !== "linux") return t.skip("systemd user units need Linux");
 
-	await call("profile_create", { path: "poteto", persona: "You are poteto, chief of staff." });
-	await call("profile_create", { path: "poteto/relay", persona: "You are relay, the mail officer.", models: { brain: "anthropic/claude-haiku-5-5" } });
-	await assert.rejects(call("profile_create", { path: "poteto", persona: "again" }), /exists/);
-	await assert.rejects(call("profile_create", { path: "ghost/child", persona: "x" }), /parent ghost does not exist/);
+	await call("profile_create", { path: "poteto", instructions: "You are poteto, chief of staff." });
+	await call("profile_create", { path: "poteto/relay", instructions: "You are relay, the mail officer.", models: { brain: "anthropic/claude-haiku-5-5" } });
+	await assert.rejects(call("profile_create", { path: "poteto", instructions: "again" }), /exists/);
+	await assert.rejects(call("profile_create", { path: "ghost/child", instructions: "x" }), /parent ghost does not exist/);
 
 	const relay = homeAt(join(root.dir, "profiles", "poteto", "profiles", "relay"));
 	const relayEnv = await readFile(relay.envFile, "utf8");
@@ -41,8 +41,11 @@ test("profiles nest by path: create links each to its parent, update restarts th
 	assert.equal(unitName(root, relay), "mochi-poteto--relay.service");
 	assert.match(await readFile(join(unitDir, "mochi-poteto--relay.service"), "utf8"), new RegExp(`MOCHI_HOME=${relay.dir}`));
 
-	const listed = (await call("profile_list", {})) as unknown as { path: string; state: string; brain: string }[];
-	assert.deepEqual(listed.map((row) => [row.path, row.state, row.brain]), [["poteto", "active", "anthropic/claude-opus-5-5"], ["poteto/relay", "active", "anthropic/claude-haiku-5-5"]]);
+	// A profile made before 2026-10-14 keeps its instructions in persona.md; listing renames it once.
+	await rename(relay.instructionsFile, join(relay.dir, "persona.md"));
+	const listed = (await call("profile_list", {})) as unknown as { path: string; state: string; brain: string; instructions: string }[];
+	assert.deepEqual(listed.map((row) => [row.path, row.state, row.brain, row.instructions]), [["poteto", "active", "anthropic/claude-opus-5-5", "You are poteto, chief of staff."], ["poteto/relay", "active", "anthropic/claude-haiku-5-5", "You are relay, the mail officer."]]);
+	assert.equal(existsSync(join(relay.dir, "persona.md")), false);
 
 	calls.length = 0;
 	const updated = await call("profile_update", { path: "poteto", config: '[models]\nfast = "anthropic/claude-haiku-5-5"' });
@@ -55,5 +58,5 @@ test("profiles nest by path: create links each to its parent, update restarts th
 	assert.deepEqual(await readdir(unitDir), [], "both units are removed");
 	assert.equal((await readdir(join(root.dir, "profiles", ".archive"))).length, 1, "archived, not deleted");
 	assert.doesNotMatch(await readFile(root.envFile, "utf8"), /poteto:/);
-	await assert.rejects(call("profile_update", { path: "../etc", persona: "x" }), /must match|pattern|must be lowercase/i);
+	await assert.rejects(call("profile_update", { path: "../etc", instructions: "x" }), /must match|pattern|must be lowercase/i);
 });

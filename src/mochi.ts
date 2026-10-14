@@ -90,8 +90,8 @@ export interface MochiOptions {
 	readonly today: () => string;
 	readonly now?: () => Date;
 	readonly log: Log;
-	/** Root's own instructions (`data/persona.md`), rendered after every section; absent leaves root's as they are. */
-	readonly persona?: string;
+	/** Root's own instructions (`<home>/instructions.md`), rendered after every section; absent leaves root's as they are. */
+	readonly instructions?: string;
 	/** Users who may write on iMessage, with normalized handles. */
 	readonly users?: readonly ChatUser[];
 	/** The owner's other agents that root and runs may call over A2A. */
@@ -188,7 +188,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	);
 
 	const root = await harness.root(context, { agent: { model: options.brain, thinkingLevel: "medium" } });
-	await root.configure({ model: options.brain, ...(options.persona === undefined ? {} : { instructions: options.persona }) }, context);
+	await root.configure({ model: options.brain, ...(options.instructions === undefined ? {} : { instructions: options.instructions }) }, context);
 	const turn = defineTurn({ root, harness, users, channels: options.channels, workDir: options.workDir, media, retry: options.retry ?? RETRY, log });
 	if (options.scheduling === "daemon") registry.install(defineExtension({ name: "delivery", tasks: [turn] }));
 	const lineId = await ensureLine(harness, context);

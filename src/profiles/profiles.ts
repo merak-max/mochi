@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { parse, stringify } from "smol-toml";
-import { type Home, homeAt } from "../home.ts";
+import { adoptInstructions, type Home, homeAt } from "../home.ts";
 
 // A profile is another mochi with a home of its own under `<home>/profiles/<name>`, so the tree of profiles is the
 // directory tree and a path such as `poteto/relay` addresses one. Each runs as its own service and talks to its parent
@@ -165,17 +165,18 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 	return [
 		defineTool({
 			name: "profile_list",
-			description: "List the mochi profiles below this one (a path such as poteto/relay), each with its service state, brain model and first persona line.",
+			description: "List the mochi profiles below this one (a path such as poteto/relay), each with its service state, brain model and first instructions line.",
 			parameters: Type.Object({}),
-			structuredOutputSchema: Type.Array(Type.Object({ path: Type.String(), state: Type.String(), brain: Type.String(), persona: Type.String() })),
+			structuredOutputSchema: Type.Array(Type.Object({ path: Type.String(), state: Type.String(), brain: Type.String(), instructions: Type.String() })),
 			replay: "safe",
 			execute: async () => {
 				const rows = [];
 				for (const home of await listHomes(root)) {
 					const config = await readToml(home);
 					const models = (config.models ?? {}) as { brain?: string };
-					const persona = (await readFile(home.personaFile, "utf8").catch(() => "")).split("\n").find((line) => line.trim() !== "") ?? "";
-					rows.push({ path: pathOf(root, home), state: await status(deps, home), brain: models.brain ?? "(default)", persona: persona.slice(0, 120) });
+					adoptInstructions(home);
+					const first = (await readFile(home.instructionsFile, "utf8").catch(() => "")).split("\n").find((line) => line.trim() !== "") ?? "";
+					rows.push({ path: pathOf(root, home), state: await status(deps, home), brain: models.brain ?? "(default)", instructions: first.slice(0, 120) });
 				}
 				return { structuredOutput: rows };
 			},
@@ -183,18 +184,18 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 		defineTool({
 			name: "profile_create",
 			description:
-				"Create a mochi profile: another mochi with its own home, persona, memory and service, below this one (path poteto/relay nests " +
+				"Create a mochi profile: another mochi with its own home, instructions, memory and service, below this one (path poteto/relay nests " +
 				"under poteto). It gets this mochi's model keys, never channel keys, and an A2A link to its parent. models overrides [models] " +
 				"(brain, fast). env adds variables, such as a channel's keys. Restart the parent to call it with a2a_ask.",
 			parameters: Type.Object({
 				path: PathSchema,
-				persona: Type.String({ minLength: 1 }),
+				instructions: Type.String({ minLength: 1 }),
 				models: Type.Optional(Type.Object({ brain: Type.Optional(Type.String()), fast: Type.Optional(Type.String()) })),
 				env: Type.Optional(Type.Record(Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" }), Type.String())),
 			}),
 			structuredOutputSchema: Type.Object({ path: Type.String(), home: Type.String(), unit: Type.String(), a2a: Type.String() }),
 			replay: "unsafe",
-			execute: async ({ path, persona, models, env }) => {
+			execute: async ({ path, instructions, models, env }) => {
 				const home = resolveInside(root, path);
 				if (existsSync(home.dir)) throw new Error(`Profile ${path} exists. Use profile_update.`);
 				const parent = parentOf(root, path);
@@ -226,7 +227,7 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 					a2a: { peers: { [parent.name]: { url: `http://127.0.0.1:${parentPort}`, tokenEnv: tokenEnv(parent.name) } } },
 				};
 				await writeToml(home, childConfig);
-				await writeFile(home.personaFile, `${persona.trim()}\n`);
+				await writeFile(home.instructionsFile, `${instructions.trim()}\n`);
 
 				// The parent learns the child: it accepts the child's token and may call it.
 				await writeEnv(parent.home, { ...withPeerToken(parentEnv, name, toParent), [tokenEnv(name)]: toChild });
@@ -239,14 +240,17 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 		}),
 		defineTool({
 			name: "profile_update",
-			description: "Change a profile's persona, or merge config (TOML table keys, such as models or triggers) into its config.toml, then restart it and the profiles below it.",
-			parameters: Type.Object({ path: PathSchema, persona: Type.Optional(Type.String({ minLength: 1 })), config: Type.Optional(Type.String({ minLength: 1, description: "TOML to merge, top-level keys replace" })) }),
+			description: "Change a profile's instructions, or merge config (TOML table keys, such as models or triggers) into its config.toml, then restart it and the profiles below it.",
+			parameters: Type.Object({ path: PathSchema, instructions: Type.Optional(Type.String({ minLength: 1 })), config: Type.Optional(Type.String({ minLength: 1, description: "TOML to merge, top-level keys replace" })) }),
 			structuredOutputSchema: Type.Object({ path: Type.String(), restarted: Type.Array(Type.String()) }),
 			replay: "safe",
-			execute: async ({ path, persona, config }) => {
+			execute: async ({ path, instructions, config }) => {
 				const home = resolveInside(root, path);
 				if (!existsSync(home.dir)) throw new Error(`No profile ${path}. Use profile_list.`);
-				if (persona !== undefined) await writeFile(home.personaFile, `${persona.trim()}\n`);
+				if (instructions !== undefined) {
+					adoptInstructions(home);
+					await writeFile(home.instructionsFile, `${instructions.trim()}\n`);
+				}
 				if (config !== undefined) await writeToml(home, { ...(await readToml(home)), ...(parse(config) as Record<string, unknown>) });
 				const restarted: string[] = [];
 				for (const each of [home, ...(await listHomes(home))]) {

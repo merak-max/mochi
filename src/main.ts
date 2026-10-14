@@ -12,7 +12,7 @@ import { createTelegramChannel } from "./channels/telegram.ts";
 import { createWhatsAppChannel } from "./channels/whatsapp.ts";
 import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./channels/types.ts";
 import { type Config, type ChatUser, loadConfig } from "./config.ts";
-import { resolveHome } from "./home.ts";
+import { adoptInstructions, type Home, resolveHome } from "./home.ts";
 import { migrate } from "./migrate.ts";
 import { SearchIndex } from "./index/fts.ts";
 import { acquireLock } from "./lock.ts";
@@ -187,7 +187,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			scheduling: channelSet === "terminal" ? "local" : "daemon",
 			today: () => new Intl.DateTimeFormat("en-CA", { timeZone: config.timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()),
 			log,
-			...(await readPersona(config.dataDir)),
+			...(await readInstructions(config.home)),
 		},
 		BACKGROUND_CONTEXT,
 	);
@@ -225,10 +225,11 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	};
 }
 
-/** `data/persona.md`, root's own instructions; no file leaves root's as they are. */
-async function readPersona(dataDir: string): Promise<{ persona?: string }> {
-	const text = await readFile(join(dataDir, "persona.md"), "utf8").catch(() => undefined);
-	return text === undefined || text.trim() === "" ? {} : { persona: text.trim() };
+/** `<home>/instructions.md`, root's own instructions; no file leaves root's as they are. */
+async function readInstructions(home: Home): Promise<{ instructions?: string }> {
+	adoptInstructions(home);
+	const text = await readFile(home.instructionsFile, "utf8").catch(() => undefined);
+	return text === undefined || text.trim() === "" ? {} : { instructions: text.trim() };
 }
 
 /** `<dataDir>/mochi.sock`, or a short path in the temp directory when that exceeds the Unix socket limit. */

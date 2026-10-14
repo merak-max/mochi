@@ -109,9 +109,9 @@ export function contextInstructions(peer: string): string {
 export async function ensureContext(tx: Tx, peer: string, contextId: string): Promise<ConversationId> {
 	const doc = await tx.doc(A2AContextDoc, `${peer}:${contextId}`, null);
 	if (doc.conversation === null) {
-		// The persona is root's instructions; a profile answers its peers in its own voice.
-		const persona = (await tx.doc(AgentDoc, ROOT_CONVERSATION_ID)).instructions;
-		const instructions = persona === undefined || persona === "" ? contextInstructions(peer) : `${persona}\n\n${contextInstructions(peer)}`;
+		// Root's own instructions come first, so a profile answers its peers as itself.
+		const own = (await tx.doc(AgentDoc, ROOT_CONVERSATION_ID)).instructions;
+		const instructions = own === undefined || own === "" ? contextInstructions(peer) : `${own}\n\n${contextInstructions(peer)}`;
 		doc.conversation = await createSeatConversation(tx, "agent", { kind: "ownerless" }, { instructions });
 	}
 	return doc.conversation;

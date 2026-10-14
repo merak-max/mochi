@@ -4,7 +4,7 @@ import { stringify } from "smol-toml";
 import type { Home } from "./home.ts";
 
 /**
- * Moves an older mochi into a home: the data directory (store, work, memory, roles, persona) becomes the home, its
+ * Moves an older mochi into a home: the data directory (store, work, memory, roles, instructions) becomes the home, its
  * config.json becomes config.toml, and the env file becomes the home's .env. The old data directory is left as a
  * symlink to the home, so paths written into past transcripts still resolve. Run it with the daemon stopped.
  */

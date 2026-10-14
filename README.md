@@ -2,7 +2,7 @@
 
 A personal agent that runs all day on your own machine. You text it on iMessage, Telegram or WhatsApp, and it does the work: email, calendar, the web, files, code, errands. It stays quiet until something needs you.
 
-mochi is built on [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable), the durable runtime under [pi](https://github.com/earendil-works/pi). Every reply, routine and helper is a durable task, so a crash or a restart never loses work or sends a message twice.
+mochi is built on [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable), the durable runtime under [pi](https://github.com/earendil-works/pi). Every reply, routine, agent and fork is a durable task, so a crash or a restart never loses work or sends a message twice.
 
 ## What it does
 
@@ -10,9 +10,9 @@ mochi is built on [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-
 - **Few tools, one code mode.** The model sees three tools. Everything else (web, apps, files, agents, routines, memory) is a function its scripts call, so the first request is about 3,700 tokens.
 - **Copies of itself.** `fork` copies the current conversation, context and all, and reuses its prompt cache, so trying three drafts at once costs the new tokens only. `agent` starts a fresh copy from a brief. Every copy has the same tools, so copies make copies, as deep as the work needs.
 - **Routines.** Cron, one-shot and webhook triggers run in their own conversations. A cheap check script or a classifier gate decides whether a run happens at all, and a run reaches you only when it calls `notify`.
-- **Roles.** A routine or a helper can run as a role: a Markdown file with instructions and a model. Routine roles run on the fast model.
+- **Roles.** A routine or an agent can run as a role: a Markdown file with instructions and a model. Routine roles run on the fast model.
 - **Memory.** Notes you can read and edit, and searchable history. Before a quiet conversation is compacted, a fork of it, with the whole context still in its cache, saves anything worth keeping.
-- **Profiles.** mochi can start other mochis, each with its own home, persona and memory, nested as deep as you like. They talk over A2A.
+- **Profiles.** A profile is a mochi with its own address: home, instructions, memory, channels and service, nested as deep as you like. Use one when a bot needs its own number or identity; for anything else, fork. Profiles talk over A2A.
 - **Prompt-cache care.** Stable prompt sections, bursts of texts answered in one turn, and quiet threads compacted while their cache is still warm.
 
 ## Start
@@ -46,7 +46,7 @@ Everything that is yours lives in `~/.mochi` (or `MOCHI_HOME`). The repository h
 |---|---|
 | `config.toml` | Time zone, providers and models, routines, users, peers. See `config.example.toml`. |
 | `.env` | Keys and tokens. See `.env.example`. |
-| `persona.md` | Who mochi is to you. Optional. |
+| `instructions.md` | Root's own instructions, after the built-in prompt. Optional. A `persona.md` from older homes is renamed to this at start. |
 | `agents/*.md` | Your roles. A file with a bundled name replaces the bundled role. |
 | `skills/` | Your skills, next to the bundled ones. |
 | `memory/` | Your notes as Markdown in a local Git repository. |
@@ -81,13 +81,13 @@ thinking: medium
 You are relay. You own the inboxes. Notify only when ignoring a mail would cost the owner something.
 ```
 
-Put it in `~/.mochi/agents/relay.md`, then name it in a routine (`role = "relay"`) or ask mochi to start it as a helper.
+Put it in `~/.mochi/agents/relay.md`, then name it in a routine (`role = "relay"`) or ask mochi to start an agent with it.
 
 ## Profiles
 
 Ask mochi: "make a profile called poteto for my day planning". It runs `profile_create`, which:
 
-1. Creates `~/.mochi/profiles/poteto` with its own config, persona and keys. Channel keys are never copied.
+1. Creates `~/.mochi/profiles/poteto` with its own config, instructions and keys. Channel keys are never copied.
 2. Links it to its parent over A2A.
 3. Starts it as a user service.
 
