@@ -225,7 +225,7 @@ function socketPath(dataDir: string): string {
 }
 
 /** The outside services mochi calls. Models and the web need a key; without OpenRouter the trigger gates pass. */
-export function services(config: Pick<Config, "modelSetup" | "web" | "dataDir" | "appsUrl" | "file">): readonly (readonly [string, Setup<void>])[] {
+function services(config: Pick<Config, "modelSetup" | "web" | "dataDir" | "appsUrl" | "file">): readonly (readonly [string, Setup<void>])[] {
 	const missing = config.modelSetup.missing;
 	const unknown = unknownKeys(config.file);
 	return [
@@ -238,7 +238,7 @@ export function services(config: Pick<Config, "modelSetup" | "web" | "dataDir" |
 }
 
 /** Every ready adapter, and one readiness line per adapter. */
-export function configuredChannels(env: Env, users: readonly ChatUser[] = []): { readonly channels: Channels; readonly report: readonly string[] } {
+function configuredChannels(env: Env, users: readonly ChatUser[] = []): { readonly channels: Channels; readonly report: readonly string[] } {
 	const setups = (Object.keys(ADAPTERS) as ChatChannelId[]).map((id) => [id, ADAPTERS[id](env, users)] as const);
 	const channels = new Map(setups.flatMap(([id, setup]) => (setup.kind === "ready" ? [[id, setup.value] as const] : [])));
 	return { channels, report: setupReport(setups) };

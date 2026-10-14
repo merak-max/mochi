@@ -2,10 +2,10 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { MediaClient, type MediaDeps } from "./client.ts";
 
-export { MediaClient, type MediaDeps } from "./client.ts";
+export type { MediaDeps } from "./client.ts";
 export { splitAttachments, loadAttachment } from "./files.ts";
 export { prepareInbound } from "./inbound.ts";
-export { MediaConfigSchema, parseMediaConfig, type MediaConfig } from "./providers.ts";
+export { MediaConfigSchema } from "./providers.ts";
 
 const PathResult = Type.Object({ path: Type.String() });
 

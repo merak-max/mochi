@@ -55,7 +55,7 @@ async function readTree(read: MemoryReader, owner: Owner, context: Context): Pro
 const writeTree = (tx: Tx, owner: Owner): Promise<Tree> => (owner === "root" ? tx.doc(MemoryLog) : tx.doc(ProfileMemoryLog, owner.profile, null));
 
 /** One turn log per conversation; `upTo` is the newest entry folded into it. */
-export const TurnLog = defineDoc<Tree & { readonly upTo: number }>({
+const TurnLog = defineDoc<Tree & { readonly upTo: number }>({
 	kind: "mochi.turn-log",
 	version: 1,
 	scope: "conversation",
@@ -215,7 +215,7 @@ export async function maintain(harness: Harness, fast: FastCompletion, owners: r
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 
 /** Whose memory the conversation uses, read in a commit. */
-export type OwnerOf = (tx: Tx, conversation: ConversationId) => Promise<Owner>;
+type OwnerOf = (tx: Tx, conversation: ConversationId) => Promise<Owner>;
 
 export function noteTool(index: SearchIndex, ownerOf: OwnerOf) {
 	return defineTool({
@@ -334,7 +334,7 @@ export function windowExtension(): Extension {
 	return defineExtension({
 		name: "fast-compaction",
 		hooks: [hook(CompactionTask, {
-			beforeCompact: async (input, api, context) => {
+			beforeCompact: async (_input, api, context) => {
 				const log = await api.snapshot(TurnLog, api.conversationId, context);
 				if (log === undefined || log.lines.length === 0) return undefined;
 				const view = wake(log);

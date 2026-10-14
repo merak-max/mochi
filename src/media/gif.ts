@@ -15,7 +15,7 @@ function decode(text: string): string {
 	return text.replace(/&(?:quot|amp|lt|gt|#(\d+));/g, (entity, code: string | undefined) => (code === undefined ? ENTITIES[entity]! : String.fromCodePoint(Number(code))));
 }
 
-export function parseTenorPage(html: string): GifHit[] {
+function parseTenorPage(html: string): GifHit[] {
 	const hits: GifHit[] = [];
 	const seen = new Set<string>();
 	for (const figure of html.matchAll(/<figure class="UniversalGifListItem[\s\S]*?<\/figure>/g)) {

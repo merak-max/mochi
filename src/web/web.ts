@@ -24,7 +24,7 @@ function searchHits(web: WebHit[]): SearchHit[] {
 }
 const FIND_TOOLS = { provider: "firecrawl", capability: "find-tools" } as const;
 
-export interface WebDeps {
+interface WebDeps {
 	/** The web service key; absent, every web function fails with a clear error naming `keyEnv`. Bash never gets it. */
 	readonly apiKey: string | undefined;
 	readonly keyEnv: string;

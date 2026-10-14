@@ -110,7 +110,7 @@ export const RETRY: Retry = { firstMs: 5_000, maxMs: 5 * 60_000, giveUpMs: 60 * 
 
 const delayOf = (retry: Retry, attempt: number): number => Math.min(retry.firstMs * 2 ** (attempt - 1), retry.maxMs);
 
-export function nextOutage(outage: Outage | null, now: number, retry: Retry = RETRY): Outage | "give-up" {
+function nextOutage(outage: Outage | null, now: number, retry: Retry = RETRY): Outage | "give-up" {
 	if (outage === null) return { retryAt: now + retry.firstMs, attempt: 1, downMs: 0 };
 	const downMs = outage.downMs + delayOf(retry, outage.attempt);
 	if (downMs >= retry.giveUpMs) return "give-up";
@@ -149,7 +149,7 @@ const LineDoc = defineDoc<{ conversation: ConversationId | null }>({
 	initial: () => ({ conversation: null }),
 });
 
-export const UserDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
+const UserDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
 	kind: "mochi.user",
 	version: 1,
 	scope: "session",
@@ -198,10 +198,10 @@ export interface Line {
 // The record is a passive write, which a task's conversation handle cannot submit, so it uses the host's handles.
 type TurnHost = Pick<Line, "root" | "harness" | "users" | "channels" | "workDir" | "media"> & { readonly retry: Retry; readonly log: Log };
 
-export const NOTIFY_ENTRY = "app.notify";
+const NOTIFY_ENTRY = "app.notify";
 const DELIVERED_RECORD_CHARS = 280;
 
-export function deliveredRecord(input: RunTurn, recipient: string): string {
+function deliveredRecord(input: RunTurn, recipient: string): string {
 	const from = input.from.kind === "trigger" ? `trigger ${input.from.id}` : `conversation ${input.from.id}`;
 	const where = input.channel === "cli" ? "in the terminal" : `on ${input.channel}`;
 	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${clip(input.text, DELIVERED_RECORD_CHARS)}`;

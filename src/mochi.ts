@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import type { Models } from "@earendil-works/pi-ai";
 import {
@@ -44,7 +44,7 @@ import { profileFns, type Profiles } from "./profiles/profiles.ts";
 import type { WebConfig } from "./config.ts";
 import { type Home, homeAt } from "./home.ts";
 
-export interface MochiOptions {
+interface MochiOptions {
 	readonly storage: Storage;
 	readonly models: Models;
 	readonly brain: ModelRef;

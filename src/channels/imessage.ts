@@ -22,7 +22,7 @@ import {
 const TEXT_LIMIT = 4000;
 const REMEMBERED_MESSAGES = 200;
 
-export const IMESSAGE_PROFILE: ChannelProfile = {
+const IMESSAGE_PROFILE: ChannelProfile = {
 	id: "imessage",
 	style:
 		"imessage: plain text. Each blank-line-separated paragraph is its own bubble, so write one to three short ones. " +
@@ -35,11 +35,11 @@ export const IMESSAGE_PROFILE: ChannelProfile = {
 
 const TAPBACK_TEXT_CHARS = 80;
 
-export interface ReactionHandle {
+interface ReactionHandle {
 	unsend(): Promise<void>;
 }
 
-export interface IMessageMessage {
+interface IMessageMessage {
 	readonly id: string;
 	readonly sequence?: number;
 	readonly direction: "inbound" | "outbound";
@@ -51,7 +51,7 @@ export interface IMessageMessage {
 	read?(): Promise<void>;
 }
 
-export interface IMessageSpace {
+interface IMessageSpace {
 	send(text: string): Promise<unknown>;
 	/** A threaded reply to `targetMessageId`; a plain send when the target cannot be found. */
 	sendReply(text: string, targetMessageId: string): Promise<unknown>;
@@ -62,7 +62,7 @@ export interface IMessageSpace {
 	getMessage(id: string): Promise<IMessageMessage | undefined>;
 }
 
-export interface IMessageApp {
+interface IMessageApp {
 	readonly messages: AsyncIterable<readonly [IMessageSpace, IMessageMessage]>;
 	/** Owner events after `since`, ending at catchup.complete. Absent when the stack cannot replay. */
 	catchUp?(since: number): AsyncIterable<readonly [IMessageSpace, IMessageMessage]>;
@@ -70,17 +70,17 @@ export interface IMessageApp {
 	stop(): Promise<void>;
 }
 
-export const LINK = { tickMs: 30_000, silentProbeMs: 5 * 60_000, failedProbesToRebuild: 2, catchUpEveryMs: 10 * 60_000, rebuildDelayMs: 5_000 };
+const LINK = { tickMs: 30_000, silentProbeMs: 5 * 60_000, failedProbesToRebuild: 2, catchUpEveryMs: 10 * 60_000, rebuildDelayMs: 5_000 };
 
 /** Silence alone never rebuilds, it only earns a probe; the periodic catch-up heals a stall that probes cannot see. */
-export function judge(health: { readonly lastSignalAt: number; readonly failedProbes: number; readonly ended: boolean }, now: number, config: typeof LINK): "none" | "probe" | "rebuild" {
+function judge(health: { readonly lastSignalAt: number; readonly failedProbes: number; readonly ended: boolean }, now: number, config: typeof LINK): "none" | "probe" | "rebuild" {
 	if (health.ended || health.failedProbes >= config.failedProbesToRebuild) return "rebuild";
 	return now - health.lastSignalAt >= config.silentProbeMs ? "probe" : "none";
 }
 
 type Credentials = { readonly projectId: string; readonly projectSecret: string };
 
-export interface IMessageDeps {
+interface IMessageDeps {
 	readonly connect?: (credentials: Credentials) => Promise<IMessageApp>;
 	readonly link?: typeof LINK;
 	readonly log?: Log;
@@ -153,7 +153,7 @@ async function collect(content: Content, into: Collected): Promise<void> {
 
 type ParsedIMessage = { readonly kind: "message"; readonly message: Inbound } | { readonly kind: "ignored"; readonly reason: "outbound" | "not-owner" | "empty" };
 
-export async function toInbound(message: IMessageMessage, owner: string, users: readonly string[] = []): Promise<ParsedIMessage> {
+async function toInbound(message: IMessageMessage, owner: string, users: readonly string[] = []): Promise<ParsedIMessage> {
 	if (message.direction === "outbound") return { kind: "ignored", reason: "outbound" };
 	const sender = message.sender?.id === undefined ? "" : normalizeHandle(message.sender.id);
 	if (sender === "" || (sender !== owner && !users.includes(sender))) return { kind: "ignored", reason: "not-owner" };

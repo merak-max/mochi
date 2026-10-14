@@ -40,7 +40,7 @@ type Meta = Static<typeof MetaSchema>;
 type ProcInput = { readonly name: string; readonly pid: number; readonly watch?: string };
 type ProcState = { readonly phase: "watch"; readonly fired: boolean };
 type ProcResult = { readonly code: number | null };
-export type ProcTask = Task<ProcInput, ProcState, ProcResult, object>;
+type ProcTask = Task<ProcInput, ProcState, ProcResult, object>;
 
 type Status = { readonly state: "running" } | { readonly state: "exited"; readonly code: number } | { readonly state: "lost" };
 

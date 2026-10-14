@@ -20,7 +20,7 @@ interface SearchQuery {
 	readonly hidden?: { readonly conversation: number; readonly fromEntry: number };
 }
 
-export interface SearchHit {
+interface SearchHit {
 	readonly kind: DocKind;
 	readonly ref: string;
 	readonly conversation: number | null;
@@ -158,7 +158,7 @@ function docKind(value: unknown): DocKind {
 }
 
 /** Free text to an FTS5 expression: every word quoted, any word may match, BM25 ranks. */
-export function toMatchExpression(text: string): string | undefined {
+function toMatchExpression(text: string): string | undefined {
 	const words = text.match(/[\p{L}\p{N}_]+/gu);
 	if (words === null) return undefined;
 	return words.map((word) => `"${word}"`).join(" OR ");

@@ -18,7 +18,7 @@ const RULES = [
 	"Otherwise report the completed result and visible evidence. Never repeat a completed action.",
 ].join("\n");
 
-export async function browse(deps: BrowserDeps, args: Static<typeof BrowseInput>, signal?: AbortSignal): Promise<Static<typeof BrowseOutput>> {
+async function browse(deps: BrowserDeps, args: Static<typeof BrowseInput>, signal?: AbortSignal): Promise<Static<typeof BrowseOutput>> {
 	const url = new URL(args.url);
 	if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) throw new Error("browse needs an HTTP(S) URL without credentials.");
 	if (!args.task.trim()) throw new Error("browse needs a task.");

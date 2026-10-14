@@ -1,7 +1,7 @@
 import { defineDoc, type TaskId, type Tx } from "@earendil-works/pi-durable";
 
 /** What a task created under each key, so a replayed call finds its child instead of creating a second one. */
-export const Journal = defineDoc<{ created: Record<string, TaskId> }>({
+const Journal = defineDoc<{ created: Record<string, TaskId> }>({
 	kind: "mochi.journal",
 	version: 1,
 	scope: "task",

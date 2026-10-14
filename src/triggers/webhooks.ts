@@ -47,7 +47,7 @@ function webhookContent(id: string, prompt: string, body: Buffer): string {
 
 const single = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
 
-export async function startWebhookServer(
+async function startWebhookServer(
 	deps: WebhookDeps,
 	listen: { readonly host: string; readonly port: number },
 	context: Context,

@@ -12,10 +12,10 @@ import { answerText } from "../turn/turn.ts";
 // lives as long as the profile, and its own memory log. Its file is `<home>/profiles/<name>/instructions.md` with
 // front matter for `model` and `thinking`. Work reaches it by `profile_send` or a trigger with `profile`.
 
-export const THINKING = ["low", "medium", "high", "xhigh", "max"] as const satisfies readonly ModelThinkingLevel[];
+const THINKING = ["low", "medium", "high", "xhigh", "max"] as const satisfies readonly ModelThinkingLevel[];
 type Thinking = (typeof THINKING)[number];
 
-export interface Profile {
+interface Profile {
 	readonly name: string;
 	readonly description: string;
 	readonly instructions: string;
@@ -27,7 +27,7 @@ export interface Profile {
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-export function parseProfile(name: string, text: string): Profile {
+function parseProfile(name: string, text: string): Profile {
 	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
 	const fields = new Map<string, string>();
 	for (const line of (match?.[1] ?? "").split(/\r?\n/)) {
@@ -102,7 +102,7 @@ export function agentOf(profile: Profile, profiles: Profiles, header: string): R
 }
 
 /** Each profile's standing conversation, by name. */
-export const ProfileDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
+const ProfileDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
 	kind: "mochi.profile",
 	version: 1,
 	scope: "session",
@@ -111,7 +111,7 @@ export const ProfileDoc = defineDocFamily<{ conversation: ConversationId | null 
 });
 
 /** Which profile owns each conversation: its standing one and each trigger run that names it. */
-export const ProfileOfDoc = defineDocFamily<{ profile: string | null }, null>({
+const ProfileOfDoc = defineDocFamily<{ profile: string | null }, null>({
 	kind: "mochi.profile-of",
 	version: 1,
 	scope: "session",

@@ -22,14 +22,14 @@ export interface SearchHit {
 	description?: string | undefined;
 }
 
-export interface ScrapeRequest {
+interface ScrapeRequest {
 	url: string;
 	formats: ["markdown", "html"];
 	onlyMainContent: true;
 	maxAge?: number | undefined;
 }
 
-export interface ScrapedPage {
+interface ScrapedPage {
 	markdown?: string | undefined;
 	html?: string | undefined;
 	/** The source's HTTP status, 0 when Firecrawl gives none. */
@@ -45,7 +45,7 @@ export interface AlexandriaCall {
 	options?: Record<string, unknown> | undefined;
 }
 
-export interface AlexandriaResult {
+interface AlexandriaResult {
 	data: JsonValue;
 	/** Credits this call charged; 0 for discovery. */
 	creditsCost: number;

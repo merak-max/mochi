@@ -62,7 +62,7 @@ function relativeTime(at: number, now: number): string {
 	return Math.abs(at - now) < 30_000 ? "now" : at > now ? `in ${span}` : `${span} ago`;
 }
 
-export async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "timeZone" | "channels">, context: Context): Promise<string> {
+async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "timeZone" | "channels">, context: Context): Promise<string> {
 	const now = deps.now();
 	const [live, view, usage, triggers] = await Promise.all([
 		deps.harness.snapshot(LiveDoc, deps.root.id, context),

@@ -20,12 +20,12 @@ import {
 	SendUnknown,
 } from "./types.ts";
 
-export const GRAPH_API = "https://graph.facebook.com/v25.0";
+const GRAPH_API = "https://graph.facebook.com/v25.0";
 const TEXT_LIMIT = 4096;
 const UNREACHABLE = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH"]);
 const SEND_TIMEOUT_MS = 30_000;
 
-export const WHATSAPP_PROFILE: ChannelProfile = {
+const WHATSAPP_PROFILE: ChannelProfile = {
 	id: "whatsapp",
 	style: "whatsapp: plain text with *bold* and _italic_, no tables, one message per reply, up to 4,096 characters. react sets an emoji reaction.",
 	maxBubbles: 3,
@@ -37,7 +37,7 @@ export const WHATSAPP_PROFILE: ChannelProfile = {
 const MAX_BODY_BYTES = 1_000_000;
 const DEFAULT_PORT = 8787;
 
-export interface WhatsAppDeps {
+interface WhatsAppDeps {
 	readonly fetch?: typeof fetch;
 	readonly log?: Log;
 	readonly sendTimeoutMs?: number;
@@ -122,7 +122,7 @@ function classifyWhatsAppError(error: unknown, status?: number): DeliveryError {
 	return typeof code === "string" && UNREACHABLE.has(code) ? new ChannelDown(message, { cause: error }) : new SendUnknown(message, { cause: error });
 }
 
-export function extractMessages(body: unknown): unknown[] {
+function extractMessages(body: unknown): unknown[] {
 	if (!Value.Check(Envelope, body)) return [];
 	return body.entry.flatMap((entry) =>
 		entry.changes.flatMap((change) => (change.field === "messages" ? (change.value.messages ?? []) : [])),
@@ -146,7 +146,7 @@ function mediaOf(message: WaMessage): { readonly kind: Attachment["kind"]; reado
 	}
 }
 
-export function parseWhatsAppMessage(raw: unknown, owner: string): ParsedMessage {
+function parseWhatsAppMessage(raw: unknown, owner: string): ParsedMessage {
 	if (!Value.Check(WaMessage, raw)) return { kind: "ignored", reason: "invalid" };
 	if (raw.from !== owner) return { kind: "ignored", reason: "not-owner", id: raw.id };
 	const base = { messageId: raw.id, at: new Date(Number(raw.timestamp) * 1000) };

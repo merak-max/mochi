@@ -23,8 +23,8 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  *   peer     another agent's requests over A2A. It works with the owner's apps and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
-export const SEATS = ["agent", "trigger", "peer", "user"] as const;
-export type Seat = (typeof SEATS)[number];
+const SEATS = ["agent", "trigger", "peer", "user"] as const;
+type Seat = (typeof SEATS)[number];
 
 const ALL = SEATS;
 const AGENT: readonly Seat[] = ["agent"];
@@ -33,14 +33,14 @@ const AGENT_TRIGGER: readonly Seat[] = ["agent", "trigger"];
 const NOT_USER: readonly Seat[] = ["agent", "trigger", "peer"];
 
 /** The tools the model calls directly, and the seats that get each. Their `control` (handoff, terminate) works only on a model-issued call. */
-export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
+const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 	codemode: ALL,
 	notify: AGENT_TRIGGER,
 	handoff: ["agent", "user"],
 };
 
 /** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. */
-export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readonly inline: boolean }>> = {
+const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readonly inline: boolean }>> = {
 	read: { seats: ALL, inline: true },
 	bash: { seats: ALL, inline: true },
 	edit: { seats: ALL, inline: true },
@@ -90,13 +90,10 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	profile_update: { seats: AGENT, inline: false },
 };
 
-/** Anthropic's billing classifier flags these names. */
-export const FORBIDDEN_TOOL_NAME = /^(memory|session_search)$|^mcp_(?!_)/;
-
 const SHARED = ["identity", "notes", "skills", "fast-compaction"];
 
 /** The extensions a seat's agent names. Owner notes describe the owner, so a user's thread leaves them out. */
-export function selection(seat: Seat): string[] {
+function selection(seat: Seat): string[] {
 	const shared = seat === "user" ? SHARED.filter((name) => name !== "notes") : SHARED;
 	return [...shared, `seat-${seat}`];
 }

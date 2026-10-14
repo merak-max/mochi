@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { type Static, Type } from "typebox";
 import { createModelSetup, type ModelSetup, ModelsSchema, ProviderSchema } from "./brain/providers.ts";

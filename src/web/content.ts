@@ -29,7 +29,7 @@ export async function cleanFirecrawlHtml(html: string, url: string): Promise<str
 	}
 }
 
-export interface Extracted {
+interface Extracted {
 	readonly text: string;
 	readonly usage: Usage;
 	/** The model saw the page with its middle cut out. */

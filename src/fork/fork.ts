@@ -12,7 +12,7 @@ type ForkInput = { readonly name: string; readonly brief: string };
 type ForkResult = { readonly answer: string } | { readonly failure: string };
 
 /** How many forks of one call run at once; the rest wait their turn. */
-export const FORK_BATCH = 6;
+const FORK_BATCH = 6;
 
 /** Call inside the commit that read `forkPoint`. The task kind keeps its stored name, `mochi.agent`. */
 export async function startFork(
