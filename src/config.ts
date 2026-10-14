@@ -74,12 +74,10 @@ export interface Config {
 	readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-/**
- * Resolves the home, loads its `.env`, and reads its config. Pass `home` to read another directory;
- * otherwise `MOCHI_HOME` (or `MOCHI_DATA_DIR`) or `~/.mochi`.
- */
-export async function loadConfig(env: Readonly<Record<string, string | undefined>>, home: Home = resolveHome(env)): Promise<Config> {
-	if (env === process.env && existsSync(home.envFile)) process.loadEnvFile(home.envFile);
+/** Resolves the home, loads its `.env` into `process.env`, and reads its config. */
+export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
+	const home = resolveHome(env);
+	if (existsSync(home.envFile)) process.loadEnvFile(home.envFile);
 	const file = parseWith(FileSchema, await readConfigFile(home), "config.toml");
 	const timeZone = file.timeZone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 	assertTimeZone(timeZone);
@@ -124,15 +122,10 @@ function a2aPeers(file: FileConfig, env: Readonly<Record<string, string | undefi
 
 /** `config.toml`, else nothing: every field has a default. */
 async function readConfigFile(home: Home): Promise<unknown> {
-	const toml = await readText(home.configFile);
-	return toml === undefined ? {} : parseToml(toml);
-}
-
-async function readText(path: string): Promise<string | undefined> {
 	try {
-		return await readFile(path, "utf8");
+		return parseToml(await readFile(home.configFile, "utf8"));
 	} catch (error) {
-		if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") return {};
 		throw error;
 	}
 }
