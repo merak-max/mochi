@@ -20,7 +20,7 @@ import { listenAttach } from "./attach/server.ts";
 import { AttachClient } from "./attach/client.ts";
 import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
-import { AgentCatalog } from "./agents/catalog.ts";
+import { Profiles } from "./profiles/profiles.ts";
 import { triggersComponent } from "./triggers/webhooks.ts";
 import { a2aComponent, a2aServerSetup } from "./a2a/server.ts";
 import { AUTH_COMMAND, authFile, loginExecutor, storedTokenConnector } from "./auth/executor.ts";
@@ -156,14 +156,14 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			models,
 			brain: config.modelSetup.brain,
 			fast: config.modelSetup.fast,
-			classify: createClassify(models),
+			classify: createClassify(models, config.modelSetup.classifier),
 			firecrawlKey: config.firecrawlKey,
 			...(config.env.FIRECRAWL_PROFILE?.trim() ? { firecrawlProfile: config.env.FIRECRAWL_PROFILE.trim() } : {}),
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env, ...(config.file.providers === undefined ? {} : { providers: config.file.providers }) } }),
 			...(apps === undefined ? {} : { apps }),
 			index,
 			skillsDir: join(REPO, "skills"),
-			agents: await AgentCatalog.load(join(REPO, "agents"), config.home.agentsDir, config.modelSetup.ref),
+			profiles: new Profiles(config.home.profilesDir, join(REPO, "agents"), config.modelSetup.ref),
 			workDir,
 			channels,
 			users: config.users,
@@ -181,7 +181,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	await listenAttach(socketPath(config.dataDir), { line: mochi.line, models, log }, running);
 
 	const background = [
-		runFeed(mochi.harness, index, fastCompletion(models, config.modelSetup.fast), running, (error) => log("memory.failed", { error: String(error) })),
+		runFeed(mochi.harness, index, fastCompletion(models, config.modelSetup.fast), mochi.catalog, running, (error) => log("memory.failed", { error: String(error) })),
 		...(apps === undefined ? [] : [apps.run(running)]),
 		// A terminal-only daemon (chat, print) serves one script; triggers wait for the real daemon.
 		...(channelSet === "terminal" ? [] : [triggersComponent(mochi, config, running), a2aComponent(mochi, config, a2a, running)]),
@@ -226,11 +226,11 @@ function socketPath(dataDir: string): string {
 }
 
 /** The outside services mochi calls. Models and the web need a key; without OpenRouter the trigger gates pass. */
-export function services(config: Pick<Config, "modelSetup" | "openRouterKey" | "firecrawlKey" | "dataDir" | "executorUrl">): readonly (readonly [string, Setup<void>])[] {
+export function services(config: Pick<Config, "modelSetup" | "firecrawlKey" | "dataDir" | "executorUrl">): readonly (readonly [string, Setup<void>])[] {
 	const missing = config.modelSetup.missing;
 	return [
 		["models", missing.length === 0 ? ready(undefined) : broken(`${missing.join("; ")}. Fix: put the key in ~/.mochi/.env`)],
-		["classifier", config.openRouterKey === undefined ? off : ready(undefined)],
+		["classifier", config.modelSetup.classifier === undefined ? off : ready(undefined)],
 		["firecrawl", config.firecrawlKey === undefined ? broken("FIRECRAWL_API_KEY is not set. Fix: put it in ~/.mochi/.env") : ready(undefined)],
 		["executor", config.executorUrl === undefined ? off : existsSync(authFile(config.dataDir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
 	];

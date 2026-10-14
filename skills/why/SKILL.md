@@ -29,11 +29,11 @@ Map the evidence to sources, one investigator per source that could hold it:
 
 Skip a source only with a written reason, for example "no bank app connected" or "the target has no public side". A skipped source is a gap in the answer, not a choice.
 
-For a narrow question where one source already holds a direct answer, answer it yourself and say which sources you didn't search. Otherwise start each investigator with `agent` in `codemode`, `type: "worker"`, model `fast` or `default`, using [references/investigator-prompt.md](references/investigator-prompt.md). Start them in one script with `Promise.all`.
+For a narrow question where one source already holds a direct answer, answer it yourself and say which sources you didn't search. Otherwise start the investigators in one `fork({ briefs: [...] })` call, each brief built from [references/investigator-prompt.md](references/investigator-prompt.md).
 
 ## 4. Synthesize
 
-Weigh the findings yourself per [references/synthesizer-prompt.md](references/synthesizer-prompt.md), or hand them to one `default` subagent when they are bulky. Spot-check the citations that carry the answer. Never upgrade an inference into a fact.
+Weigh the findings yourself per [references/synthesizer-prompt.md](references/synthesizer-prompt.md), or hand them to one fork when they are bulky. Spot-check the citations that carry the answer. Never upgrade an inference into a fact.
 
 ## 5. Reply
 

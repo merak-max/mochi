@@ -1,276 +1,200 @@
-import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
-import { homedir, platform } from "node:os";
-import { join, relative, sep } from "node:path";
-import { promisify } from "node:util";
-import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
-import { parse, stringify } from "smol-toml";
-import { adoptInstructions, type Home, homeAt } from "../home.ts";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { Context } from "@earendil-works/chord";
+import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
+import { AgentDoc, configure, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { createSeatConversation } from "../seats.ts";
+import type { Owner } from "../memory/memory.ts";
+import { answerText } from "../turn/turn.ts";
 
-const run = promisify(execFile);
+// A profile is a standing teammate inside this daemon: a name, a role (instructions), a model, a conversation that
+// lives as long as the profile, and its own memory log. Its file is `<home>/profiles/<name>/instructions.md` with
+// front matter for `model` and `thinking`. Work reaches it by `profile_send` or a trigger with `profile`.
+
+export const THINKING = ["low", "medium", "high", "xhigh", "max"] as const satisfies readonly ModelThinkingLevel[];
+type Thinking = (typeof THINKING)[number];
+
+export interface Profile {
+	readonly name: string;
+	readonly description: string;
+	readonly instructions: string;
+	readonly model?: string;
+	readonly thinking?: Thinking;
+	/** The only tools its conversations may use; absent: its seat's tools. `codemode` and `notify` stay, so a list names script functions. */
+	readonly tools?: readonly string[];
+}
+
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const PathSchema = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*(/[a-z0-9]+(-[a-z0-9]+)*)*$", maxLength: 120 });
 
-function profileHome(root: Home, path: string): Home {
-	const parts = path.split("/");
-	if (parts.some((part) => !NAME.test(part))) throw new Error(`Profile path "${path}" must be lowercase names joined by "/".`);
-	return homeAt(join(root.dir, ...parts.flatMap((part) => ["profiles", part])));
-}
-
-const pathOf = (root: Home, home: Home): string => relative(root.dir, home.dir).split(sep).filter((part, i) => i % 2 === 1).join("/");
-
-export const unitName = (root: Home, home: Home): string => `mochi-${pathOf(root, home).replaceAll("/", "--")}.service`;
-
-async function listHomes(home: Home): Promise<Home[]> {
-	const names = (await readdir(home.profilesDir).catch(() => [] as string[])).filter((name) => NAME.test(name)).sort();
-	const found: Home[] = [];
-	for (const name of names) {
-		const child = homeAt(join(home.profilesDir, name));
-		found.push(child, ...(await listHomes(child)));
+export function parseProfile(name: string, text: string): Profile {
+	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
+	const fields = new Map<string, string>();
+	for (const line of (match?.[1] ?? "").split(/\r?\n/)) {
+		const pair = /^([\w-]+):\s*(.*)$/.exec(line);
+		if (pair?.[1] !== undefined) fields.set(pair[1], (pair[2] ?? "").trim());
 	}
-	return found;
+	const thinkingText = fields.get("thinking");
+	const thinking = THINKING.find((level) => level === thinkingText);
+	if (thinkingText !== undefined && thinking === undefined) throw new Error(`profile ${name}: thinking "${thinkingText}" is not one of ${THINKING.join(", ")}.`);
+	const model = fields.get("model") || undefined;
+	const tools = fields.get("tools")?.split(",").map((tool) => tool.trim()).filter(Boolean);
+	return {
+		name,
+		description: fields.get("description") ?? "",
+		...(tools === undefined ? {} : { tools }),
+		instructions: (match?.[2] ?? text).trim(),
+		...(model === undefined ? {} : { model }),
+		...(thinking === undefined ? {} : { thinking }),
+	};
 }
 
-async function freePort(): Promise<number> {
-	return new Promise((resolvePort, reject) => {
-		const server = createServer();
-		server.once("error", reject);
-		server.listen(0, "127.0.0.1", () => {
-			const address = server.address();
-			server.close(() => (typeof address === "object" && address !== null ? resolvePort(address.port) : reject(new Error("No port"))));
-		});
-	});
-}
+/** The profiles on disk, re-read on each call so an edited instructions.md reaches the next run without a restart. */
+export class Profiles {
+	readonly #dir: string;
+	readonly #bundled: string;
+	readonly model: (name: string) => ModelRef;
 
-type Env = Record<string, string>;
-
-const readEnv = async (home: Home): Promise<Env> => {
-	const text = await readFile(home.envFile, "utf8").catch(() => "");
-	const env: Env = {};
-	for (const line of text.split("\n")) {
-		const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-		if (match !== null) env[match[1]!] = match[2]!.replace(/^["']|["']$/g, "");
+	constructor(dir: string, bundled: string, model: (name: string) => ModelRef) {
+		this.#dir = dir;
+		this.#bundled = bundled;
+		this.model = model;
 	}
-	return env;
-};
 
-const writeEnv = async (home: Home, env: Env): Promise<void> => {
-	await writeFile(home.envFile, `${Object.entries(env).map(([key, value]) => `${key}=${value}`).join("\n")}\n`, { mode: 0o600 });
-	await chmod(home.envFile, 0o600);
-};
+	async all(): Promise<Profile[]> {
+		const found = new Map<string, Profile>();
+		for (const file of (await readdir(this.#bundled).catch(() => [] as string[])).filter((each) => each.endsWith(".md")).sort()) {
+			const name = file.slice(0, -3);
+			found.set(name, parseProfile(name, await readFile(join(this.#bundled, file), "utf8")));
+		}
+		for (const name of (await readdir(this.#dir).catch(() => [] as string[])).sort()) {
+			const file = join(this.#dir, name, "instructions.md");
+			if (NAME.test(name) && existsSync(file)) found.set(name, parseProfile(name, await readFile(file, "utf8")));
+		}
+		return [...found.values()];
+	}
 
-const readToml = async (home: Home): Promise<Record<string, unknown>> => {
-	const text = await readFile(home.configFile, "utf8").catch(() => undefined);
-	return text === undefined ? {} : (parse(text) as Record<string, unknown>);
-};
+	async get(name: string): Promise<Profile> {
+		const all = await this.all();
+		const found = all.find((profile) => profile.name === name);
+		if (found === undefined) throw new Error(`Unknown profile "${name}". Profiles: ${all.map((profile) => profile.name).join(", ")}.`);
+		return found;
+	}
 
-const writeToml = (home: Home, config: Record<string, unknown>): Promise<void> => writeFile(home.configFile, `${stringify(config)}\n`, { mode: 0o600 });
-
-function withPeerToken(env: Env, name: string, token: string | undefined): Env {
-	const pairs = (env.MOCHI_A2A_PEER_TOKENS ?? "").split(",").map((pair) => pair.trim()).filter((pair) => pair !== "" && !pair.startsWith(`${name}:`));
-	if (token !== undefined) pairs.push(`${name}:${token}`);
-	return { ...env, MOCHI_A2A_PEER_TOKENS: pairs.join(",") };
-}
-
-const tokenEnv = (name: string): string => `${name.toUpperCase().replaceAll("-", "_")}_A2A_TOKEN`;
-
-/** A profile has its own channels, address and peers; every other key of its parent carries over. */
-const OWN_KEYS = /^(MOCHI_|WHATSAPP_|PHOTON_|IMESSAGE_)|_A2A_TOKEN$/;
-
-interface ProfileDeps {
-	readonly home: Home;
-	readonly repo: string;
-	readonly systemctl?: (args: readonly string[]) => Promise<string>;
-	readonly unitDir?: string;
-}
-
-const unitDirOf = (deps: ProfileDeps): string => deps.unitDir ?? join(homedir(), ".config", "systemd", "user");
-
-const systemctlOf = (deps: ProfileDeps) =>
-	deps.systemctl ?? (async (args: readonly string[]) => (await run("systemctl", ["--user", ...args])).stdout.trim());
-
-async function installUnit(deps: ProfileDeps, home: Home): Promise<string> {
-	if (platform() !== "linux") throw new Error("Profiles run as systemd user services, which need Linux. On this machine start one by hand: MOCHI_HOME=<home> node src/main.ts --headless");
-	const unit = unitName(deps.home, home);
-	const text = [
-		"[Unit]",
-		`Description=mochi profile ${pathOf(deps.home, home)}`,
-		"After=network-online.target",
-		"StartLimitIntervalSec=0",
-		"",
-		"[Service]",
-		"Type=simple",
-		`WorkingDirectory=${deps.repo}`,
-		`Environment=MOCHI_HOME=${home.dir}`,
-		`Environment=PATH=${process.env.PATH ?? "/usr/bin:/bin"}`,
-		`ExecStart=${process.execPath} src/main.ts --headless`,
-		"Restart=always",
-		"RestartSec=5",
-		`StandardOutput=append:${home.logFile}`,
-		`StandardError=append:${home.logFile}`,
-		"UMask=0077",
-		"",
-		"[Install]",
-		"WantedBy=default.target",
-		"",
-	].join("\n");
-	const dir = unitDirOf(deps);
-	await mkdir(dir, { recursive: true });
-	await writeFile(join(dir, unit), text);
-	const systemctl = systemctlOf(deps);
-	await systemctl(["daemon-reload"]);
-	await systemctl(["enable", "--now", unit]);
-	return unit;
-}
-
-async function status(deps: ProfileDeps, home: Home): Promise<string> {
-	try {
-		return await systemctlOf(deps)(["is-active", unitName(deps.home, home)]);
-	} catch (error) {
-		const out = (error as { stdout?: string }).stdout?.trim();
-		return out === undefined || out === "" ? "unknown" : out;
+	async write(name: string, text: string): Promise<void> {
+		if (!NAME.test(name)) throw new Error(`Profile names are lowercase words joined by hyphens, not "${name}".`);
+		parseProfile(name, text);
+		await mkdir(join(this.#dir, name), { recursive: true });
+		await writeFile(join(this.#dir, name, "instructions.md"), `${text.trim()}\n`);
 	}
 }
 
-const parentOf = (root: Home, path: string): { home: Home; name: string } => {
-	const parts = path.split("/");
-	return parts.length === 1 ? { home: root, name: "parent" } : { home: profileHome(root, parts.slice(0, -1).join("/")), name: parts.at(-2)! };
-};
+export type RunAgent = { readonly profile: string | undefined; readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly tools: readonly string[] | undefined; readonly instructions: string };
 
-export function profileFns(deps: ProfileDeps): ToolRegistration[] {
-	const root = deps.home;
+/** The model, tools and instructions a conversation runs under for `profile`. */
+export function agentOf(profile: Profile, profiles: Profiles, header: string): RunAgent {
+	return {
+		profile: profile.name,
+		agent: { model: profiles.model(profile.model ?? "default"), ...(profile.thinking === undefined ? {} : { thinkingLevel: profile.thinking }) },
+		tools: profile.tools === undefined ? undefined : ["codemode", "notify", "handoff", ...profile.tools],
+		instructions: profile.instructions === "" ? header : `${header}\n\n${profile.instructions}`,
+	};
+}
+
+/** Each profile's standing conversation, by name. */
+export const ProfileDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
+	kind: "mochi.profile",
+	version: 1,
+	scope: "session",
+	family: true,
+	initial: () => ({ conversation: null }),
+});
+
+/** Which profile owns each conversation: its standing one and each trigger run that names it. */
+export const ProfileOfDoc = defineDocFamily<{ profile: string | null }, null>({
+	kind: "mochi.profile-of",
+	version: 1,
+	scope: "session",
+	family: true,
+	initial: () => ({ profile: null }),
+});
+
+/** The memory owner of a conversation, through a committed reader (prompt sections) or a transaction. */
+export async function ownerOf(read: Pick<DocumentReader, "snapshot">, conversation: ConversationId, context: Context): Promise<Owner> {
+	const profile = (await read.snapshot(ProfileOfDoc, String(conversation), context))?.profile;
+	return profile == null ? "root" : { profile };
+}
+
+export async function ownerIn(tx: Tx, conversation: ConversationId): Promise<Owner> {
+	const { profile } = await tx.doc(ProfileOfDoc, String(conversation), null);
+	return profile === null ? "root" : { profile };
+}
+
+/** Writes a run's profile, model, instructions and tool list into a conversation; no list clears an old one. */
+export async function applyAgent(tx: Tx, conversation: ConversationId, run: RunAgent): Promise<void> {
+	await configure(tx, conversation, { ...run.agent, instructions: run.instructions });
+	(await tx.doc(ProfileOfDoc, String(conversation), null)).profile = run.profile ?? null;
+	const agent = await tx.doc(AgentDoc, conversation);
+	if (run.tools === undefined) delete agent.tools;
+	else agent.tools = [...run.tools];
+}
+
+const HEADER = (name: string) => `You are the ${name} profile, a standing teammate of mochi. Messages here come from mochi or its other profiles, not the owner. Answer the sender; use notify only when the owner must see something now.`;
+
+async function ensureConversation(tx: Tx, profile: Profile, profiles: Profiles): Promise<ConversationId> {
+	const doc = await tx.doc(ProfileDoc, profile.name, null);
+	const run = agentOf(profile, profiles, HEADER(profile.name));
+	doc.conversation ??= await createSeatConversation(tx, "agent", { kind: "ownerless" });
+	await applyAgent(tx, doc.conversation, run);
+	return doc.conversation;
+}
+
+type Host = Pick<Harness, "commit" | "conversation">;
+
+/** Submits `message` to the profile's standing conversation, creating it the first time. Same requestId, same submission. */
+export async function sendToProfile(host: Host, profiles: Profiles, name: string, message: string, requestId: string, context: Context): Promise<Submission> {
+	const profile = await profiles.get(name);
+	const conversation = await host.commit((tx) => ensureConversation(tx, profile, profiles), context);
+	const target = await host.conversation(conversation, context);
+	if (target === undefined) throw new Error(`Profile ${name} has no conversation.`);
+	return target.submit({ type: "input", content: message, requestId, whenBusy: "followUp" }, context);
+}
+
+export function profileFns(profiles: Profiles, host: () => Host): ToolRegistration[] {
 	return [
 		defineTool({
 			name: "profile_list",
-			description: "List the mochi profiles below this one (a path such as poteto/relay), each with its service state, brain model and first instructions line.",
+			description: "The profiles: standing teammates with their own role, model and memory. Each has a name and what it does.",
 			parameters: Type.Object({}),
-			structuredOutputSchema: Type.Array(Type.Object({ path: Type.String(), state: Type.String(), brain: Type.String(), instructions: Type.String() })),
+			structuredOutputSchema: Type.Array(Type.Object({ name: Type.String(), description: Type.String(), model: Type.Optional(Type.String()) })),
 			replay: "safe",
-			execute: async () => {
-				const rows = [];
-				for (const home of await listHomes(root)) {
-					const config = await readToml(home);
-					const models = (config.models ?? {}) as { brain?: string };
-					adoptInstructions(home);
-					const first = (await readFile(home.instructionsFile, "utf8").catch(() => "")).split("\n").find((line) => line.trim() !== "") ?? "";
-					rows.push({ path: pathOf(root, home), state: await status(deps, home), brain: models.brain ?? "(default)", instructions: first.slice(0, 120) });
-				}
-				return { structuredOutput: rows };
-			},
+			execute: async () => ({ structuredOutput: (await profiles.all()).map(({ name, description, model }) => JSON.parse(JSON.stringify({ name, description, model }))) }),
 		}),
 		defineTool({
-			name: "profile_create",
+			name: "profile_send",
 			description:
-				"Create a mochi profile: another mochi with its own home, instructions, memory and service, below this one (path poteto/relay nests " +
-				"under poteto). It gets this mochi's model keys, never channel keys, and an A2A link to its parent. models overrides [models] " +
-				"(brain, fast). env adds variables, such as a channel's keys. Restart the parent to call it with a2a_ask.",
-			parameters: Type.Object({
-				path: PathSchema,
-				instructions: Type.String({ minLength: 1 }),
-				models: Type.Optional(Type.Object({ brain: Type.Optional(Type.String()), fast: Type.Optional(Type.String()) })),
-				env: Type.Optional(Type.Record(Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" }), Type.String())),
-			}),
-			structuredOutputSchema: Type.Object({ path: Type.String(), home: Type.String(), unit: Type.String(), a2a: Type.String() }),
+				"Give a profile a message: a task, a question, or a board item id. It works in its own standing conversation with its own memory. " +
+				"Resolves to its answer; with background it returns at once, and the profile calls notify if the owner needs the result.",
+			parameters: Type.Object({ name: Type.String(), message: Type.String({ minLength: 1 }), background: Type.Optional(Type.Boolean()) }),
+			structuredOutputSchema: Type.String(),
 			replay: "unsafe",
-			execute: async ({ path, instructions, models, env }) => {
-				const home = profileHome(root, path);
-				if (existsSync(home.dir)) throw new Error(`Profile ${path} exists. Use profile_update.`);
-				const parent = parentOf(root, path);
-				if (!existsSync(parent.home.dir)) throw new Error(`Its parent ${path.split("/").slice(0, -1).join("/")} does not exist.`);
-				const name = path.split("/").at(-1)!;
-				const parentEnv = await readEnv(parent.home);
-				const parentConfig = await readToml(parent.home);
-				const [a2aPort, hooksPort] = [await freePort(), await freePort()];
-				const toChild = randomBytes(24).toString("hex");
-				const toParent = randomBytes(24).toString("hex");
-				const parentPort = Number(parentEnv.MOCHI_A2A_PORT || 8789);
-
-				await mkdir(home.dir, { recursive: true, mode: 0o700 });
-				const keys = Object.fromEntries(Object.entries(parentEnv).filter(([key]) => !OWN_KEYS.test(key)));
-				await writeEnv(home, {
-					...keys,
-					MOCHI_A2A_AGENT_NAME: name,
-					MOCHI_A2A_PORT: String(a2aPort),
-					MOCHI_HOOKS_PORT: String(hooksPort),
-					MOCHI_BIND_HOST: "127.0.0.1",
-					MOCHI_A2A_PEER_TOKENS: `${parent.name}:${toChild}`,
-					[tokenEnv(parent.name)]: toParent,
-					...env,
-				});
-				const childConfig: Record<string, unknown> = {
-					...(parentConfig.timeZone === undefined ? {} : { timeZone: parentConfig.timeZone }),
-					...(parentConfig.providers === undefined ? {} : { providers: parentConfig.providers }),
-					models: { ...(parentConfig.models as object | undefined), ...models },
-					a2a: { peers: { [parent.name]: { url: `http://127.0.0.1:${parentPort}`, tokenEnv: tokenEnv(parent.name) } } },
-				};
-				await writeToml(home, childConfig);
-				await writeFile(home.instructionsFile, `${instructions.trim()}\n`);
-
-				await writeEnv(parent.home, { ...withPeerToken(parentEnv, name, toParent), [tokenEnv(name)]: toChild });
-				const peers = ((parentConfig.a2a as { peers?: Record<string, unknown> } | undefined)?.peers ?? {}) as Record<string, unknown>;
-				await writeToml(parent.home, { ...parentConfig, a2a: { peers: { ...peers, [name]: { url: `http://127.0.0.1:${a2aPort}`, tokenEnv: tokenEnv(name) } } } });
-
-				const unit = await installUnit(deps, home);
-				return { structuredOutput: { path, home: home.dir, unit, a2a: `peer "${name}" on 127.0.0.1:${a2aPort}; the parent sees it after a restart` } };
+			execute: async ({ name, message, background }, api, context) => {
+				const submission = await sendToProfile(host(), profiles, name, message, `profile:${api.taskId}`, context);
+				if (background === true) return { structuredOutput: `Sent to ${name}.` };
+				const settled = await submission.wait(context);
+				if (settled.status !== "done" || settled.type !== "input") throw new Error(`Profile ${name} did not answer: ${settled.reason ?? settled.status}.`);
+				return { structuredOutput: await api.commit((tx) => answerText(tx, settled.answer), context) };
 			},
 		}),
 		defineTool({
 			name: "profile_update",
-			description: "Change a profile's instructions, or merge config (TOML table keys, such as models or triggers) into its config.toml, then restart it and the profiles below it.",
-			parameters: Type.Object({ path: PathSchema, instructions: Type.Optional(Type.String({ minLength: 1 })), config: Type.Optional(Type.String({ minLength: 1, description: "TOML to merge, top-level keys replace" })) }),
-			structuredOutputSchema: Type.Object({ path: Type.String(), restarted: Type.Array(Type.String()) }),
+			description: "Create a profile or replace its instructions.md: front matter with description, model (a tier or alias) and thinking, then the role. Reaches its next message.",
+			parameters: Type.Object({ name: Type.String(), text: Type.String({ minLength: 1 }) }),
+			structuredOutputSchema: Type.String(),
 			replay: "safe",
-			execute: async ({ path, instructions, config }) => {
-				const home = profileHome(root, path);
-				if (!existsSync(home.dir)) throw new Error(`No profile ${path}. Use profile_list.`);
-				if (instructions !== undefined) {
-					adoptInstructions(home);
-					await writeFile(home.instructionsFile, `${instructions.trim()}\n`);
-				}
-				if (config !== undefined) await writeToml(home, { ...(await readToml(home)), ...(parse(config) as Record<string, unknown>) });
-				const restarted: string[] = [];
-				for (const each of [home, ...(await listHomes(home))]) {
-					await systemctlOf(deps)(["restart", unitName(root, each)]);
-					restarted.push(pathOf(root, each));
-				}
-				return { structuredOutput: { path, restarted } };
-			},
-		}),
-		defineTool({
-			name: "profile_remove",
-			description: "Stop a profile and every profile below it, and archive its home under profiles/.archive. Nothing is deleted.",
-			parameters: Type.Object({ path: PathSchema }),
-			structuredOutputSchema: Type.Object({ archived: Type.String(), stopped: Type.Array(Type.String()) }),
-			replay: "safe",
-			execute: async ({ path }) => {
-				const home = profileHome(root, path);
-				if (!existsSync(home.dir)) throw new Error(`No profile ${path}. Use profile_list.`);
-				const systemctl = systemctlOf(deps);
-				const stopped: string[] = [];
-				for (const each of [...(await listHomes(home))].reverse().concat(home)) {
-					const unit = unitName(root, each);
-					await systemctl(["disable", "--now", unit]).catch(() => "");
-					await rm(join(unitDirOf(deps), unit), { force: true });
-					stopped.push(pathOf(root, each));
-				}
-				await systemctl(["daemon-reload"]);
-				const parent = parentOf(root, path);
-				const name = path.split("/").at(-1)!;
-				const parentEnv = await readEnv(parent.home);
-				const { [tokenEnv(name)]: _dropped, ...rest } = withPeerToken(parentEnv, name, undefined);
-				await writeEnv(parent.home, rest);
-				const parentConfig = await readToml(parent.home);
-				const peers = { ...((parentConfig.a2a as { peers?: Record<string, unknown> } | undefined)?.peers ?? {}) };
-				delete peers[name];
-				await writeToml(parent.home, { ...parentConfig, a2a: { peers } });
-				const archive = join(parent.home.profilesDir, ".archive", `${name}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-				await mkdir(join(parent.home.profilesDir, ".archive"), { recursive: true });
-				await rename(home.dir, archive);
-				return { structuredOutput: { archived: archive, stopped } };
+			execute: async ({ name, text }) => {
+				await profiles.write(name, text);
+				return { structuredOutput: `Saved profile ${name}.` };
 			},
 		}),
 	];

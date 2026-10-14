@@ -5,7 +5,8 @@ import { allPages } from "../pages.ts";
 import { pause } from "../pause.ts";
 import { messageText } from "../text.ts";
 import type { FastCompletion } from "../turn/lifecycle.ts";
-import { maintain, MemoryLog } from "./memory.ts";
+import type { Profiles } from "../profiles/profiles.ts";
+import { maintain, MemoryLog, type Owner } from "./memory.ts";
 
 const PAGE = 200;
 const RETRY_MS = 5000;
@@ -15,7 +16,7 @@ const RETRY_MS = 5000;
  * and folds its turns into memory, until `context` aborts. Subscribing first means no commit falls between the catch-up
  * and the live feed.
  */
-export async function runFeed(harness: Harness, index: SearchIndex, fast: FastCompletion, context: Context, onError: (error: unknown) => void): Promise<void> {
+export async function runFeed(harness: Harness, index: SearchIndex, fast: FastCompletion, profiles: Profiles, context: Context, onError: (error: unknown) => void): Promise<void> {
 	const signal = context.abortSignal;
 	const aborted = (): boolean => signal?.aborted === true;
 	const dirty = new Set<ConversationId>();
@@ -34,7 +35,8 @@ export async function runFeed(harness: Harness, index: SearchIndex, fast: FastCo
 			try {
 				const conversations = all ? await allConversations(harness, context) : marked;
 				for (const conversation of conversations) await indexConversation(harness, index, conversation, context);
-				await maintain(harness, fast, conversations, context);
+				const owners: Owner[] = ["root", ...(await profiles.all()).map((profile) => ({ profile: profile.name }))];
+				await maintain(harness, fast, owners, conversations, context);
 				index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
 				all = false;
 			} catch (error) {

@@ -16,8 +16,8 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 
 /**
  * A seat is how far a conversation is trusted, stored in its agent and written only here.
- *   agent    root and every copy of it: agents and forks. They have the same tools and prompt, so a fork reuses its
- *            parent's prompt cache and any agent can start or fork agents, at any depth.
+ *   agent    root, every fork of it and every profile. A fork has its parent's tools and prompt, so it reuses its
+ *            parent's prompt cache, and forks can fork at any depth.
  *   trigger  a trigger run. It reads outside data (webhook bodies, mail), so it cannot write notes, start agents, add
  *            triggers or change profiles. It reaches the owner only with notify.
  *   peer     another agent's requests over A2A. It works with the owner's apps and answers; nothing else.
@@ -55,8 +55,6 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	llm: { seats: ALL, inline: true },
 	apps_search: { seats: NOT_USER, inline: true },
 	apps_call: { seats: NOT_USER, inline: true },
-	agent: { seats: AGENT, inline: true },
-	agent_start: { seats: AGENT, inline: false },
 	fork: { seats: AGENT, inline: true },
 	fork_start: { seats: AGENT, inline: false },
 	trigger_add: { seats: AGENT, inline: true },
@@ -67,9 +65,6 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	web_alexandria: { seats: ALL, inline: false },
 	classify: { seats: ALL, inline: false },
 	apps_skills: { seats: NOT_USER, inline: false },
-	agent_send: { seats: AGENT, inline: false },
-	agent_stop: { seats: AGENT, inline: false },
-	agent_status: { seats: AGENT, inline: false },
 	browse: { seats: ALL, inline: false },
 	browse_fast: { seats: ALL, inline: false },
 	image_gen: { seats: ALL, inline: false },
@@ -90,9 +85,8 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	board_list: { seats: AGENT, inline: false },
 	board_update: { seats: AGENT, inline: false },
 	profile_list: { seats: AGENT, inline: false },
-	profile_create: { seats: AGENT, inline: false },
+	profile_send: { seats: AGENT, inline: true },
 	profile_update: { seats: AGENT, inline: false },
-	profile_remove: { seats: AGENT, inline: false },
 };
 
 /** Anthropic's billing classifier flags these names. */
@@ -167,41 +161,6 @@ export async function createSeatConversation(tx: Tx, seat: Seat, ownership: Conv
 	agent.extensions = selection(seat);
 	if (change.instructions !== undefined) agent.instructions = change.instructions;
 	return id;
-}
-
-export async function createMemoryConversation(tx: Tx, change: { model: ModelRef; instructions: string }): Promise<ConversationId> {
-	const conversation = await tx.createConversation({ ownership: { kind: "ownerless" } });
-	const agent = await tx.doc(AgentDoc, conversation.id);
-	for (const key of Object.keys(agent) as (keyof typeof agent)[]) delete agent[key];
-	agent.model = { ...change.model };
-	agent.extensions = [];
-	agent.instructions = change.instructions;
-	agent.thinkingLevel = "off";
-	return conversation.id;
-}
-
-/** Root predates seats and `harness.root` ignores `agent` for an existing root, so each boot re-asserts it. */
-export async function seatRoot(tx: Tx): Promise<boolean> {
-	const agent = await tx.doc(AgentDoc, ROOT_CONVERSATION_ID);
-	const seated = selection("agent");
-	if (JSON.stringify(agent.extensions) === JSON.stringify(seated)) return false;
-	agent.extensions = seated;
-	return true;
-}
-
-/**
- * The seats retired on 2026-10-14, and where each conversation goes. A task-owned one is an agent's child, so it
- * becomes a copy of root. An ownerless `run` is a trigger run; an ownerless `worker` is an A2A context or the line.
- */
-export async function reseat(tx: Tx, id: ConversationId): Promise<boolean> {
-	const agent = await tx.doc(AgentDoc, id);
-	if (!Array.isArray(agent.extensions)) return false;
-	const old = agent.extensions.find((name) => name === "seat-owner" || name === "seat-run" || name === "seat-worker");
-	if (old === undefined) return false;
-	const owned = (await tx.conversation(id))?.owner !== undefined;
-	const seat: Seat = old === "seat-owner" || owned ? "agent" : old === "seat-run" ? "trigger" : "peer";
-	agent.extensions = selection(seat);
-	return true;
 }
 
 /** The entry a fork made now would start after: the parent's newest. Read it before the commit's first write. */

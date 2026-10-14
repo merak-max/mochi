@@ -12,7 +12,7 @@ Look for:
 - Executor app tools and arguments that had to be discovered, and the app instructions that mattered
 - Website quirks: logins, captchas, flows that need the persistent browser profile, pages that block plain fetches
 - Trigger and gate details: cron timing, gate questions that misfired, prompts a cold run misread
-- Subagent briefs that came back wrong because the brief lacked something
+- Fork and profile briefs that came back wrong because the brief lacked something
 - Errors and how they were worked around
 
 Only route to skills, tools or notes this conversation actually used, or to `tune description: <skill>`.

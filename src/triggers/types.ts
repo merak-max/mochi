@@ -10,9 +10,9 @@ export type WebhookAuth = Static<typeof WebhookAuthSchema>;
 
 const Thinking = Type.Union(["off", "low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level)));
 
-/** Stops the chain unless P(yes) reaches `threshold` (default 0.5). `on: "output"` judges the notify text instead of the input. */
-const JevStepSchema = Type.Object({
-	jev: Type.Object({
+/** Stops the chain unless the classifier's P(yes) reaches `threshold` (default 0.5). `on: "output"` judges the notify text. */
+const ClassifyStepSchema = Type.Object({
+	classify: Type.Object({
 		question: Type.String({ minLength: 1 }),
 		yes: Type.String({ minLength: 1 }),
 		no: Type.String({ minLength: 1 }),
@@ -20,7 +20,7 @@ const JevStepSchema = Type.Object({
 		on: Type.Optional(Type.Union([Type.Literal("input"), Type.Literal("output")])),
 	}),
 });
-export const StepSchema = Type.Union([JevStepSchema, Type.Object({ model: Type.Object({}) })]);
+export const StepSchema = Type.Union([ClassifyStepSchema, Type.Object({ model: Type.Object({}) })]);
 export type Step = Static<typeof StepSchema>;
 
 /**

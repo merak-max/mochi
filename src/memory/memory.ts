@@ -5,6 +5,8 @@ import {
 	CompactionTask,
 	type ConversationId,
 	defineDoc,
+	defineDocFamily,
+	type DocumentReader,
 	defineExtension,
 	defineTool,
 	type EntryRecord,
@@ -36,6 +38,21 @@ type Tree = { readonly lines: Line[]; readonly blocks: Record<string, string> };
 const empty = (): Tree => ({ lines: [], blocks: {} });
 
 export const MemoryLog = defineDoc<Tree>({ kind: "mochi.memory-log", version: 1, scope: "session", initial: empty });
+
+/** A profile's own memory log, by profile name. Root's is `MemoryLog`. */
+const ProfileMemoryLog = defineDocFamily<Tree, null>({ kind: "mochi.profile-memory", version: 1, scope: "session", family: true, initial: empty });
+
+/** Whose memory a conversation reads and writes: a profile's name, or root. */
+export type Owner = { readonly profile: string } | "root";
+
+type MemoryReader = Pick<DocumentReader, "snapshot">;
+
+async function readTree(read: MemoryReader, owner: Owner, context: Context): Promise<Tree> {
+	const tree = owner === "root" ? await read.snapshot(MemoryLog, context) : await read.snapshot(ProfileMemoryLog, owner.profile, context);
+	return tree ?? empty();
+}
+
+const writeTree = (tx: Tx, owner: Owner): Promise<Tree> => (owner === "root" ? tx.doc(MemoryLog) : tx.doc(ProfileMemoryLog, owner.profile, null));
 
 /** One turn log per conversation; `upTo` is the newest entry folded into it. */
 export const TurnLog = defineDoc<Tree & { readonly upTo: number }>({
@@ -174,14 +191,16 @@ export async function importOldNotes(tx: Tx): Promise<void> {
 	for (const note of notes) log.lines.push({ at: note.updated, text: `${note.subject} (${note.kind}): ${note.body.replace(/\s+/g, " ").trim()}` });
 }
 
-/** One pass over memory: fold new turns, then build due blocks. The feed runs it after commits. */
-export async function maintain(harness: Harness, fast: FastCompletion, conversations: readonly ConversationId[], context: Context): Promise<void> {
-	await buildBlocks(
-		async () => (await harness.snapshot(MemoryLog, context)) ?? empty(),
-		(key, summary) => harness.commit(async (tx) => void ((await tx.doc(MemoryLog)).blocks[key] = summary), context),
-		fast,
-		context,
-	);
+/** One pass over memory: fold new turns, then build due blocks in every memory log. The feed runs it after commits. */
+export async function maintain(harness: Harness, fast: FastCompletion, owners: readonly Owner[], conversations: readonly ConversationId[], context: Context): Promise<void> {
+	for (const owner of owners) {
+		await buildBlocks(
+			() => readTree(harness, owner, context),
+			(key, summary) => harness.commit(async (tx) => void ((await writeTree(tx, owner)).blocks[key] = summary), context),
+			fast,
+			context,
+		);
+	}
 	for (const conversation of conversations) {
 		await foldTurns(harness, fast, conversation, context);
 		await buildBlocks(
@@ -195,7 +214,10 @@ export async function maintain(harness: Harness, fast: FastCompletion, conversat
 
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 
-export function noteTool(index: SearchIndex) {
+/** Whose memory the conversation uses, read in a commit. */
+export type OwnerOf = (tx: Tx, conversation: ConversationId) => Promise<Owner>;
+
+export function noteTool(index: SearchIndex, ownerOf: OwnerOf) {
 	return defineTool({
 		name: "note",
 		description:
@@ -209,19 +231,19 @@ export function noteTool(index: SearchIndex) {
 			let position = await api.memo<number>("note.position", context);
 			if (position === undefined) {
 				const appended = await api.commit(async (tx) => {
-					const log = await tx.doc(MemoryLog);
+					const log = await writeTree(tx, await ownerOf(tx, api.conversationId));
 					log.lines.push({ at, text: one });
 					return log.lines.length - 1;
 				}, context);
 				position = await api.memo("note.position", appended, context);
 			}
-			index.addMemory(position, at, one);
+			if ((await api.commit((tx) => ownerOf(tx, api.conversationId), context)) === "root") index.addMemory(position, at, one);
 			return text(`Kept as #${position}.`);
 		},
 	});
 }
 
-export function zoomTool() {
+export function zoomTool(ownerOf: OwnerOf) {
 	return defineTool({
 		name: "zoom",
 		description: "Open one block of memory, or of this conversation's earlier turns, into its two halves, down to the raw lines. Pass the id as the view prints it, like 0-7.",
@@ -229,7 +251,8 @@ export function zoomTool() {
 		replay: "safe",
 		execute: async (args, api, context) => {
 			const block = parseBlock(args.block);
-			const tree = args.turns === true ? await api.snapshot(TurnLog, api.conversationId, context) : await api.snapshot(MemoryLog, context);
+			const owner = await api.commit((tx) => ownerOf(tx, api.conversationId), context);
+			const tree = args.turns === true ? await api.snapshot(TurnLog, api.conversationId, context) : await readTree(api, owner, context);
 			if (tree === undefined || block[0] >= tree.lines.length) throw new Error(`#${args.block} is past the end of the log.`);
 			return text(zoom(tree, block));
 		},
@@ -296,10 +319,10 @@ export function historyTool(index: SearchIndex) {
  * The memory section: the wake view of the memory log. It always renders, so the section set never changes. The
  * extension keeps the name the stored conversations already select.
  */
-export function memoryExtension(): Extension {
+export function memoryExtension(ownerOf: (read: DocumentReader, conversation: ConversationId, context: Context) => Promise<Owner>): Extension {
 	return defineExtension({
 		name: "notes",
-		sections: [section("memory", async (input, context) => wake((await input.read.snapshot(MemoryLog, context)) ?? empty()) || "Nothing kept yet. Keep the first line with tools.note.")],
+		sections: [section("memory", async (input, context) => wake(await readTree(input.read, await ownerOf(input.read, input.conversationId, context), context)) || "Nothing kept yet. Keep the first line with tools.note.")],
 	});
 }
 

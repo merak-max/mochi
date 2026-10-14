@@ -8,19 +8,19 @@ import { getBuiltinClassifierModel, getBuiltinModel } from "@earendil-works/pi-a
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { type Static, Type } from "typebox";
 import type { Env } from "../channels/types.ts";
-import { JEV } from "./classifier.ts";
 
 /**
  * `[providers.<name>]` in config.toml: an endpoint, the wire protocol it speaks, and the env variable with its key.
  *   anthropic  Anthropic Messages (Anthropic, or a gateway's Anthropic route)
  *   responses  OpenAI Responses (OpenAI, Azure, or a gateway's OpenAI route)
  *   chat       OpenAI chat completions (OpenRouter, Ollama, vLLM, LiteLLM, most gateways)
+ *   classifier the System One classifier protocol (OpenRouter, TypeSafe, OpenCode), for the `classifier` model
  * A gateway is one provider per protocol it serves. A model is `<provider>/<model id>`,
  * and the id is sent as written, so a gateway's own ids (`anthropic/claude-opus-5-5`) work unchanged.
  */
 export const ProviderSchema = Type.Object(
 	{
-		api: Type.Union([Type.Literal("anthropic"), Type.Literal("responses"), Type.Literal("chat")]),
+		api: Type.Union([Type.Literal("anthropic"), Type.Literal("responses"), Type.Literal("chat"), Type.Literal("classifier")]),
 		url: Type.Optional(Type.String({ pattern: "^https?://" })),
 		keyEnv: Type.Optional(Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" })),
 		headers: Type.Optional(Type.Record(Type.String(), Type.String())),
@@ -49,6 +49,8 @@ export const ModelsSchema = Type.Object(
 		/** The strongest model, for an agent that asks for `strongest`. Default: the brain. */
 		strongest: Type.Optional(Type.String({ minLength: 3 })),
 		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names an agent file or a trigger may use. */
+		/** The yes/no classifier for `classify` and classify steps, on a provider with api "classifier". */
+		classifier: Type.Optional(Type.String({ minLength: 3 })),
 		aliases: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), Type.String({ minLength: 3 }))),
 		/** Facts about a model pi-ai's catalog does not know, by `<provider>/<id>`: dollars per million tokens and limits. */
 		overrides: Type.Optional(Type.Record(Type.String({ minLength: 3 }), ModelOverrideSchema)),
@@ -61,6 +63,7 @@ const DEFAULTS = {
 	anthropic: { url: "https://api.anthropic.com", keyEnv: "ANTHROPIC_API_KEY" },
 	responses: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
 	chat: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
+	classifier: { url: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "typesafe/jev-1.13" },
 } as const;
 
 /** The url and key variable of a `[providers]` entry, with the protocol's defaults filled in. */
@@ -75,6 +78,8 @@ export interface ModelSetup {
 	readonly models: MutableModels;
 	readonly brain: ModelRef;
 	readonly fast: ModelRef;
+	/** `[models] classifier`; absent, `classify` and classify steps fail with a clear error. */
+	readonly classifier?: ModelRef;
 	/** `brain` (or `default`), `fast`, `strongest`, an alias, or `provider/id`. */
 	ref(name: string): ModelRef;
 	/** One line per provider whose key is not set, for the setup report. */
@@ -93,8 +98,20 @@ function defaultModels(providers: Record<string, ProviderConfig>): Required<Pick
 	return { brain: `${name}/gpt-6-sol`, fast: `${name}/gpt-6-luna` };
 }
 
-/** Opus serves 1M, but compaction is relative to `contextWindow`: 200k compacts near 150k instead of 950k. */
+/** A model the catalog does not know: this much context, until `[models.overrides]` says otherwise. */
 const CONTEXT_WINDOW = 200_000;
+
+/** pi-ai's classifier catalog entry for an id served by any System One provider, for its prices and limits. */
+function classifierCatalog(id: string): object | undefined {
+	for (const provider of ["openrouter", "typesafe", "opencode"] as const) {
+		try {
+			return getBuiltinClassifierModel(provider, id as never) as object;
+		} catch {
+			continue;
+		}
+	}
+	return undefined;
+}
 
 /** pi-ai's catalog entry for an id, looked up by its last path part, so `anthropic/claude-opus-5-5` finds Opus. */
 function catalog(provider: "anthropic" | "openai", id: string): Model<Api> | undefined {
@@ -126,7 +143,7 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 		id,
 		provider,
 		baseUrl: url,
-		contextWindow: Math.min(override.contextWindow ?? base.contextWindow, CONTEXT_WINDOW),
+		contextWindow: override.contextWindow ?? base.contextWindow,
 		...(override.cost === undefined ? {} : { cost: override.cost }),
 		...(override.maxTokens === undefined ? {} : { maxTokens: override.maxTokens }),
 		promptCache: override.promptCache ?? base.promptCache ?? (wire === "anthropic-messages" ? { short: 300, long: 3600 } : undefined),
@@ -134,9 +151,12 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 	} as Model<Api>;
 }
 
-export function createModelSetup(input: { readonly providers?: Record<string, ProviderConfig>; readonly models?: ModelsConfig; readonly env: Env; readonly openRouterKey?: string }): ModelSetup {
-	const providers = input.providers !== undefined && Object.keys(input.providers).length > 0 ? input.providers : defaultProviders(input.env);
-	const chosen = { ...defaultModels(providers), ...input.models };
+export function createModelSetup(input: { readonly providers?: Record<string, ProviderConfig>; readonly models?: ModelsConfig; readonly env: Env }): ModelSetup {
+	const configured = input.providers !== undefined && Object.keys(input.providers).length > 0 ? input.providers : defaultProviders(input.env);
+	// A key for the classifier protocol's default endpoint alone turns `classify` on, with that endpoint's model.
+	const implicit = input.models?.classifier === undefined && !Object.values(configured).some((each) => each.api === "classifier") && Boolean(input.env[DEFAULTS.classifier.keyEnv]?.trim());
+	const providers: Record<string, ProviderConfig> = implicit ? { ...configured, classifier: { api: "classifier" } } : configured;
+	const chosen = { ...defaultModels(configured), ...(implicit ? { classifier: `classifier/${DEFAULTS.classifier.model}` } : {}), ...input.models };
 	const aliases = chosen.aliases ?? {};
 	const named: Record<string, string> = { brain: chosen.brain, default: chosen.brain, fast: chosen.fast, strongest: chosen.strongest ?? chosen.brain, ...aliases };
 	const split = (full: string): { provider: string; id: string } => {
@@ -148,6 +168,7 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 	};
 	const models = createModels();
 	const missing: string[] = [];
+	let classifier: ModelRef | undefined;
 	// Each provider serves the ids named so far; a model first named at run time re-registers its provider with it.
 	const served = new Map<string, Set<string>>(Object.keys(providers).map((name) => [name, new Set<string>()]));
 	const register = (name: string): void => {
@@ -172,19 +193,25 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 	for (const [name, config] of Object.entries(providers)) {
 		const keyEnv = config.keyEnv ?? DEFAULTS[config.api].keyEnv;
 		if (!input.env[keyEnv]?.trim()) missing.push(`${name}: ${keyEnv} is not set`);
-		register(name);
+		if (config.api !== "classifier") register(name);
 	}
-	if (input.openRouterKey !== undefined) {
-		const apiKey = input.openRouterKey;
+	if (chosen.classifier !== undefined) {
+		const { provider, id } = split(chosen.classifier);
+		const config = providers[provider]!;
+		if (config.api !== "classifier") throw new Error(`[models] classifier ${chosen.classifier}: provider "${provider}" has api "${config.api}", not "classifier".`);
+		const { baseUrl, keyEnv } = providerEndpoint(provider, providers);
+		const apiKey = input.env[keyEnv]?.trim() ?? "";
+		const known = classifierCatalog(id);
 		models.setProvider(
 			createProvider<Api>({
-				id: JEV.provider,
-				name: "OpenRouter (classifiers)",
-				auth: { apiKey: { name: "OPENROUTER_API_KEY", resolve: async () => ({ auth: { apiKey }, source: "OPENROUTER_API_KEY" }) } },
-				models: [getBuiltinClassifierModel(JEV.provider, JEV.modelId)],
+				id: provider,
+				name: provider,
+				auth: { apiKey: { name: keyEnv, resolve: async () => ({ auth: { apiKey, ...(config.headers === undefined ? {} : { headers: config.headers }) }, source: keyEnv }) } },
+				models: [{ ...(known ?? { name: id, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192 }), id, provider, baseUrl, api: "typesafe-system-one", type: "classifier" } as never],
 				classifiers: { "typesafe-system-one": typesafeSystemOneApi() },
 			}),
 		);
+		classifier = { provider, modelId: id };
 	}
 	const ref = (nameOrFull: string): ModelRef => {
 		const full = Object.hasOwn(named, nameOrFull) ? named[nameOrFull]! : nameOrFull;
@@ -196,5 +223,5 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 		}
 		return { provider, modelId: id };
 	};
-	return { models, brain: ref("brain"), fast: ref("fast"), ref, missing };
+	return { models, brain: ref("brain"), fast: ref("fast"), ...(classifier === undefined ? {} : { classifier }), ref, missing };
 }

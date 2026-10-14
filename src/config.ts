@@ -56,8 +56,6 @@ export interface Config {
 	readonly dataDir: string;
 	readonly executorUrl: string | undefined;
 	readonly modelSetup: ModelSetup;
-	/** Absent: the classifier is unavailable, so the `classify` tool errors and trigger gates pass. */
-	readonly openRouterKey: string | undefined;
 	/** Absent: the web functions in `code` fail with a clear error. */
 	readonly firecrawlKey: string | undefined;
 	readonly timeZone: string;
@@ -70,7 +68,7 @@ export interface Config {
 }
 
 /**
- * Resolves the home, loads its `.env`, and reads its config. Pass `home` to read a profile or a test directory;
+ * Resolves the home, loads its `.env`, and reads its config. Pass `home` to read another directory;
  * otherwise `MOCHI_HOME` (or `MOCHI_DATA_DIR`) or `~/.mochi`.
  */
 export async function loadConfig(env: Readonly<Record<string, string | undefined>>, home: Home = resolveHome(env)): Promise<Config> {
@@ -78,13 +76,11 @@ export async function loadConfig(env: Readonly<Record<string, string | undefined
 	const file = parseWith(FileSchema, await readConfigFile(home), home.configFile.endsWith(".toml") ? "config.toml" : "config.json");
 	const timeZone = file.timeZone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 	assertTimeZone(timeZone);
-	const openRouterKey = env.OPENROUTER_API_KEY || undefined;
 	return {
 		home,
 		dataDir: home.dir,
 		executorUrl: env.EXECUTOR_URL ?? file.executorUrl,
-		modelSetup: createModelSetup({ ...(file.providers === undefined ? {} : { providers: file.providers }), ...(file.models === undefined ? {} : { models: file.models }), env, ...(openRouterKey === undefined ? {} : { openRouterKey }) }),
-		openRouterKey,
+		modelSetup: createModelSetup({ ...(file.providers === undefined ? {} : { providers: file.providers }), ...(file.models === undefined ? {} : { models: file.models }), env }),
 		firecrawlKey: env.FIRECRAWL_API_KEY?.trim() || undefined,
 		timeZone,
 		users: chatUsers(file.users ?? []),

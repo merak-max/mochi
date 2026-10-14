@@ -35,7 +35,7 @@ const Answer = Type.Union([
 	Type.Object({ type: Type.Literal("score"), score: Type.Number(), confidence: Type.Number() }),
 ]);
 
-/** Fast-model calls from scripts: `llm` on the fast model with no tools, and `classify` on Jev, the gates' classifier. */
+/** Fast-model calls from scripts: `llm` on the fast model with no tools, and `classify` on the classifier model. */
 export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRef; readonly classify: Classify }): readonly ToolRegistration[] {
 	const slot = limiter(LLM_CONCURRENCY);
 	return [
@@ -62,7 +62,7 @@ export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRe
 		}),
 		defineTool({
 			name: "classify",
-			description: "Typed bool, choice or score questions about a JSON object, answered by Jev in ~300 ms with probabilities. Gate pattern: classify({state:{payload}, questions:{need:{type:'bool', instructions:'Does this need the owner?', criteria:{true:'...', false:'...'}}}}), then act only when answers.need.probability is above your threshold. A trigger can do the same before its model with a jev step.",
+			description: "Typed bool, choice or score questions about a JSON object, answered by the classifier model with probabilities. Gate pattern: classify({state:{payload}, questions:{need:{type:'bool', instructions:'Does this need the owner?', criteria:{true:'...', false:'...'}}}}), then act only when answers.need.probability is above your threshold. A trigger can do the same before its model with a classify step.",
 			parameters: Type.Object({
 				state: Type.Record(Type.String(), Type.Unknown()),
 				questions: Type.Record(Type.String({ pattern: "^[a-z0-9_]+$" }), Question, { minProperties: 1, maxProperties: 8 }),

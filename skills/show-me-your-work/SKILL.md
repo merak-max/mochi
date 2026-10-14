@@ -38,7 +38,7 @@ Append a row with `bash` (`printf` with tabs, appended with `>>`) or `edit`. Str
 
 Log forks, completed units with their check, pivots and undos with their cause, blockers, and defaults you applied for the owner. Skip the self-evident. For loops, write one row per iteration.
 
-When a new run picks up a log that already has rows (a trigger run, a resumed project), its first row has phase `start` and names the run, such as the trigger id or agent name. Use phase `start` for nothing else.
+When a new run picks up a log that already has rows (a trigger run, a resumed project), its first row has phase `start` and names the run, such as the trigger id, fork name or profile name. Use phase `start` for nothing else.
 
 The log is append-only. A wrong call gets a new row that supersedes it. Never edit or delete history.
 
@@ -48,6 +48,6 @@ Check that the log told the truth. Walk this run's rows against what actually ha
 
 ## Second opinion
 
-For work the owner will rely on, start one subagent on a different model from the one that did the work. It reads the log and the run, and flags what the owner should look at: weak or missing evidence, checks claimed but not done, risky choices, and gaps a skim would miss. It doesn't redo the work.
+For work the owner will rely on, send the log path to a profile on a different model from the one that did the work (`profile_list` shows each one's model). It reads the log and the run, and flags what the owner should look at: weak or missing evidence, checks claimed but not done, risky choices, and gaps a skim would miss. It doesn't redo the work.
 
 A reply for a run with a log ends with an Attention section. Its first line is `reviewed by <model>`, followed by each flag with the row or moment it points to. "No flags" is a valid result.

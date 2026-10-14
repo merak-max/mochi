@@ -102,7 +102,7 @@ async function act(cdp: Cdp, sessionId: string, page: PageSnapshot, action: Acti
 		return;
 	}
 	const target = parseWith(Type.Union([Type.Null(), Type.Object({ x: Type.Number(), y: Type.Number() })]), await cdp.evaluate(`(action => {
-		const e = window.__jevFast?.nodes.get(action.node);
+		const e = window.__mochiFast?.nodes.get(action.node);
 		if (!e?.isConnected || e.matches(':disabled') || e.closest('[aria-disabled="true"],[inert]') || !e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return null;
 		if (action.kind === 'fill' && (e.readOnly || e.getAttribute('aria-readonly') === 'true')) return null;
 		const r = e.getBoundingClientRect(), x = r.x + r.width/2, y = r.y + r.height/2;
@@ -129,7 +129,7 @@ async function act(cdp: Cdp, sessionId: string, page: PageSnapshot, action: Acti
 export function fastBrowserFns(deps: FastDeps): readonly ToolRegistration[] {
 	return [defineTool({
 		name: "browse_fast",
-		description: "Experimental Jev browser loop, bounded to 60 actions. Check the success flag and evidence before reporting completion.",
+		description: "Experimental classifier-driven browser loop, bounded to 60 actions. Check the success flag and evidence before reporting completion.",
 		parameters: Type.Object({ url: BrowseInput.properties.url, task: BrowseInput.properties.task }),
 		structuredOutputSchema: Type.Object({ ...BrowseOutput.properties, steps: Type.Integer(), success: Type.Boolean(), evidence: Type.String() }),
 		replay: "unsafe",

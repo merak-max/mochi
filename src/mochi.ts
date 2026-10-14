@@ -18,8 +18,8 @@ import type { Channels } from "./channels/types.ts";
 import { workEnv } from "./env/work-env.ts";
 import type { SearchIndex } from "./index/fts.ts";
 import type { Log } from "./log.ts";
-import type { AgentCatalog } from "./agents/catalog.ts";
-import { agentFns, AgentTask } from "./agents/subagent.ts";
+import { forkFns, ForkTask } from "./fork/fork.ts";
+import { ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
 import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
@@ -40,7 +40,7 @@ import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
 import { type A2APeers, a2aFns } from "./a2a/tools.ts";
 import { boardFns, defineSweep, ensureSweep, SWEEP_EVERY_MS } from "./board/board.ts";
-import { profileFns } from "./profiles/profiles.ts";
+import { profileFns, type Profiles } from "./profiles/profiles.ts";
 import { type Home, homeAt } from "./home.ts";
 
 export interface MochiOptions {
@@ -69,7 +69,7 @@ export interface MochiOptions {
 	readonly index: SearchIndex;
 	/** Bundled skills, `<skillsDir>/<name>/SKILL.md`, listed in the prompt and opened with `read`. */
 	readonly skillsDir: string;
-	readonly agents: AgentCatalog;
+	readonly profiles: Profiles;
 	/** Where bash, read, edit and write run when a conversation sets no cwd. */
 	readonly workDir: string;
 	readonly channels: Channels;
@@ -98,7 +98,7 @@ export interface Mochi {
 	readonly classify: Classify;
 	readonly line: Line;
 	readonly trigger: TriggerTask;
-	readonly catalog: AgentCatalog;
+	readonly catalog: Profiles;
 }
 
 /** The one context policy: pi-durable's built-in compaction, at its own defaults, written down. */
@@ -121,13 +121,13 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		handoffTool(),
 	];
 	const now = options.now ?? (() => new Date());
-	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.agents, classify: options.classify });
+	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.profiles, classify: options.classify });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
 	const library: ToolRegistration[] = [
 		...(await codingTools()),
-		noteTool(index),
-		zoomTool(),
+		noteTool(index, ownerIn),
+		zoomTool(ownerIn),
 		recallTool(index),
 		historyTool(index),
 		reactTool(options.channels),
@@ -138,19 +138,19 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...gifFns({ workDir: options.workDir }),
 		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
-		...agentFns({ catalog: options.agents, read: (read, context) => harness.commit(read, context), abortTask: (id, context) => harness.abortTask(id, context) }),
-		...triggerFns({ task: trigger, catalog: options.agents, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users }),
+		...forkFns((name) => join(options.workDir, "forks", name)),
+		...triggerFns({ task: trigger, catalog: options.profiles, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users }),
 		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 		...a2aFns(a2aPeers),
-		...profileFns({ home: options.home ?? homeAt(options.workDir), repo: resolve(import.meta.dirname, "..") }),
-		...boardFns({ by: "root", now: () => now().getTime() }),
+		...profileFns(options.profiles, () => harness),
+		...boardFns({ by: async (tx, conversation) => { const owner = await ownerIn(tx, conversation); return owner === "root" ? "root" : owner.profile; }, now: () => now().getTime() }),
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),
-		memoryExtension(),
+		memoryExtension(ownerOf),
 		skillsExtension(options.skillsDir),
 		windowExtension(),
-		defineExtension({ name: "agents", tasks: [AgentTask] }),
+		defineExtension({ name: "agents", tasks: [ForkTask] }),
 		defineExtension({ name: "procs", tasks: [procWatch] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
@@ -196,7 +196,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
 	if (options.scheduling === "daemon") {
-		const sweep = defineSweep({ harness: () => harness, everyMs: options.sweepEveryMs ?? SWEEP_EVERY_MS, log });
+		const sweep = defineSweep({ harness: () => harness, everyMs: options.sweepEveryMs ?? SWEEP_EVERY_MS, log, toProfile: async (name, brief, key, context) => void (await sendToProfile(harness, options.profiles, name, brief, key, context)) });
 		registry.install(defineExtension({ name: "board", tasks: [sweep] }));
 		await ensureSweep(harness, sweep, context);
 	}
@@ -214,7 +214,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	};
 	await harness.commit(importOldNotes, context);
 	index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
-	return { harness, root, registry, classify: options.classify, line, trigger, catalog: options.agents };
+	return { harness, root, registry, classify: options.classify, line, trigger, catalog: options.profiles };
 }
 
 const notConnected = async (): Promise<never> => {

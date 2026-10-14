@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineDoc, defineTask, defineTool, type Harness, ROOT_CONVERSATION_ID, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
-import { startFork } from "../agents/subagent.ts";
+import { startFork } from "../fork/fork.ts";
 import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
 import { forkPoint } from "../seats.ts";
@@ -18,8 +18,10 @@ export type BoardTask = {
 	title: string;
 	/** ISO time with offset. Absent: no reminder, the task waits until someone picks it up. */
 	due?: string;
-	/** Who works it: `root` or a profile path. The first one is the lead and owns the status. */
+	/** Who works it: `root` or a profile name. The first one is the lead and owns the status. */
 	bots: string[];
+	/** Who is working it now, until when (ms). A live claim by someone else refuses another claim. */
+	claim?: { by: string; until: number };
 	status: Status;
 	log: { at: string; by: string; text: string }[];
 	/** The `due` the sweep last acted on, when, and how often. A woken task left untouched is woken again, up to `WAKES_MAX`. */
@@ -38,9 +40,6 @@ export const BoardDoc = defineDoc<{ next: number; tasks: Record<string, BoardTas
 /** The task one board_add call made, scoped to that call's task. */
 const BoardCallDoc = defineDoc<{ id: number | null }>({ kind: "mochi.board-call", version: 1, scope: "task", initial: () => ({ id: null }) });
 
-const LOG_MAX = 50;
-const TEXT_MAX = 2000;
-
 const parseDue = (due: string): number => {
 	const at = Date.parse(due);
 	if (Number.isNaN(at) || !/[zZ]|[+-]\d\d:?\d\d$/.test(due)) throw new Error(`Invalid due "${due}"; use ISO 8601 with an offset, such as 2026-10-15T09:00:00+05:30.`);
@@ -48,8 +47,7 @@ const parseDue = (due: string): number => {
 };
 
 const append = (task: BoardTask, by: string, text: string, now: number) => {
-	task.log.push({ at: new Date(now).toISOString(), by, text: text.slice(0, TEXT_MAX) });
-	if (task.log.length > LOG_MAX) task.log.splice(0, task.log.length - LOG_MAX);
+	task.log.push({ at: new Date(now).toISOString(), by, text });
 };
 
 const live = (task: BoardTask) => task.status === "open" || task.status === "waiting";
@@ -84,14 +82,14 @@ export function boardBrief(task: BoardTask): string {
 		`Due ${task.due}. Bots: ${task.bots.join(", ")} (the first leads).`,
 		...task.log.slice(-10).map((entry) => `- ${entry.at} ${entry.by}: ${entry.text}`),
 		"",
-		"You are a fork of the owner's conversation, woken by the board. Do what the task needs now. If another bot leads it, hand it over with a2a_send. " +
+		"The board woke you for this task. Claim it with tools.board_claim, then do what it needs now. " +
 			"Record what happened with tools.board_update: done when finished, waiting with a new due when it needs time, or a log line. " +
 			"notify the owner only if they must act or asked to be told. Your answer goes nowhere.",
 	];
 	return lines.join("\n");
 }
 
-const Bot = Type.String({ pattern: "^(root|[a-z0-9-]+(/[a-z0-9-]+)*)$", maxLength: 80 });
+const Bot = Type.String({ pattern: "^(root|[a-z0-9]+(-[a-z0-9]+)*)$" });
 const TaskSchema = Type.Object({
 	id: Type.Number(),
 	title: Type.String(),
@@ -99,10 +97,14 @@ const TaskSchema = Type.Object({
 	bots: Type.Array(Type.String()),
 	status: Type.String(),
 	log: Type.Array(Type.Object({ at: Type.String(), by: Type.String(), text: Type.String() })),
+	claim: Type.Optional(Type.Object({ by: Type.String(), until: Type.Number() })),
 });
 
-/** `by`: who writes, `root` here, a profile's path in a profile. */
-export function boardFns(deps: { readonly by: string; readonly now: () => number }): ToolRegistration[] {
+/** Claims last this long unless the claimer says otherwise; a crashed worker's claim lapses. */
+const CLAIM_MS = 2 * 60 * 60_000;
+
+/** `by`: who writes, `root` or the calling profile's name. */
+export function boardFns(deps: { readonly by: (tx: Tx, conversation: ConversationId) => Promise<string>; readonly now: () => number }): ToolRegistration[] {
 	const view = (task: BoardTask) => {
 		const { nudged: _nudged, nudgedAt: _at, wakes: _wakes, ...rest } = task;
 		return rest;
@@ -113,10 +115,10 @@ export function boardFns(deps: { readonly by: string; readonly now: () => number
 			description:
 				"Put a promise or follow-up on the board. due (ISO with offset) wakes the lead then. bots: root or profile paths, lead first.",
 			parameters: Type.Object({
-				title: Type.String({ minLength: 1, maxLength: 300 }),
+				title: Type.String({ minLength: 1 }),
 				due: Type.Optional(Type.String()),
-				bots: Type.Optional(Type.Array(Bot, { minItems: 1, maxItems: 8 })),
-				note: Type.Optional(Type.String({ maxLength: TEXT_MAX })),
+				bots: Type.Optional(Type.Array(Bot, { minItems: 1 })),
+				note: Type.Optional(Type.String()),
 			}),
 			structuredOutputSchema: TaskSchema,
 			replay: "safe",
@@ -131,7 +133,7 @@ export function boardFns(deps: { readonly by: string; readonly now: () => number
 					if (board.tasks[String(id)] === undefined) {
 						const created: BoardTask = { id, title, bots: bots ?? ["root"], status: "open", log: [] };
 						if (due !== undefined) created.due = due;
-						append(created, deps.by, note ?? "added", deps.now());
+						append(created, await deps.by(tx, api.conversationId), note ?? "added", deps.now());
 						board.tasks[String(id)] = created;
 						board.next = Math.max(board.next, id + 1);
 					}
@@ -165,9 +167,9 @@ export function boardFns(deps: { readonly by: string; readonly now: () => number
 				id: Type.Number(),
 				status: Type.Optional(Type.Union(STATUSES.map((status) => Type.Literal(status)))),
 				due: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-				bots: Type.Optional(Type.Array(Bot, { minItems: 1, maxItems: 8 })),
-				title: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
-				note: Type.Optional(Type.String({ maxLength: TEXT_MAX })),
+				bots: Type.Optional(Type.Array(Bot, { minItems: 1 })),
+				title: Type.Optional(Type.String({ minLength: 1 })),
+				note: Type.Optional(Type.String()),
 			}),
 			structuredOutputSchema: TaskSchema,
 			replay: "safe",
@@ -183,7 +185,28 @@ export function boardFns(deps: { readonly by: string; readonly now: () => number
 					if (bots !== undefined) (found.bots = bots), changes.push(`bots ${bots.join(", ")}`);
 					if (title !== undefined) (found.title = title), changes.push("retitled");
 					const text = [changes.join("; "), note].filter((part) => part !== undefined && part !== "").join(": ");
-					if (text !== "") append(found, deps.by, text, deps.now());
+					if (status === "done" || status === "dropped") delete found.claim;
+					if (text !== "") append(found, await deps.by(tx, api.conversationId), text, deps.now());
+					return JSON.parse(JSON.stringify(found)) as BoardTask;
+				}, context);
+				return { structuredOutput: view(task) };
+			},
+		}),
+		defineTool({
+			name: "board_claim",
+			description: "Take a board task before you work it, so no other profile or fork takes it too. Fails while someone else holds it. The claim lapses after hours (default 2), or when you set the task done.",
+			parameters: Type.Object({ id: Type.Number(), hours: Type.Optional(Type.Number({ exclusiveMinimum: 0 })) }),
+			structuredOutputSchema: TaskSchema,
+			replay: "safe",
+			execute: async ({ id, hours }, api, context) => {
+				const task = await api.commit(async (tx) => {
+					const found = (await tx.doc(BoardDoc)).tasks[String(id)];
+					if (found === undefined) throw new Error(`No board task #${id}.`);
+					const by = await deps.by(tx, api.conversationId);
+					const now = deps.now();
+					if (found.claim !== undefined && found.claim.by !== by && found.claim.until > now) throw new Error(`Board task #${id} is claimed by ${found.claim.by} until ${new Date(found.claim.until).toISOString()}.`);
+					found.claim = { by, until: now + (hours === undefined ? CLAIM_MS : hours * 60 * 60_000) };
+					append(found, by, "claimed", now);
 					return JSON.parse(JSON.stringify(found)) as BoardTask;
 				}, context);
 				return { structuredOutput: view(task) };
@@ -198,7 +221,7 @@ export const SWEEP_EVERY_MS = 60_000;
 type SweepState = { readonly phase: "sweep"; readonly next: number };
 
 /** The director: one background task of root. It costs no model call until a task is due. */
-export function defineSweep(deps: { readonly harness: () => Harness; readonly everyMs: number; readonly log: Log }) {
+export function defineSweep(deps: { readonly harness: () => Harness; readonly everyMs: number; readonly log: Log; readonly toProfile: (name: string, brief: string, key: string, context: Context) => Promise<void> }) {
 	return defineTask<null, SweepState, null>({
 		name: "mochi.board-sweep",
 		version: 1,
@@ -210,6 +233,20 @@ export function defineSweep(deps: { readonly harness: () => Harness; readonly ev
 				const now = runtime.now();
 				const due = dueTasks(Object.values((await harness.snapshot(BoardDoc, context))?.tasks ?? {}), now);
 				for (const item of due) {
+					const lead = item.bots[0] ?? "root";
+					if (lead !== "root") {
+						const wake = item.nudged === item.due ? (item.wakes ?? 1) + 1 : 1;
+						await deps.toProfile(lead, boardBrief(item), `board:${item.id}:${item.due}:${wake}`, context);
+						await harness.commit(async (tx) => {
+							const current = (await tx.doc(BoardDoc)).tasks[String(item.id)];
+							if (current === undefined || item.due === undefined || current.due !== item.due) return;
+							current.nudged = item.due;
+							current.nudgedAt = now;
+							current.wakes = wake;
+						}, context);
+						deps.log("board.woke", { task: item.id, profile: lead });
+						continue;
+					}
 					const { id, created } = await harness.commit(async (tx) => {
 						const at = await forkPoint(tx, ROOT_CONVERSATION_ID);
 						const board = await tx.doc(BoardDoc);
