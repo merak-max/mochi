@@ -18,7 +18,9 @@ export interface Home {
 	readonly logFile: string;
 }
 
-function homeAt(dir: string): Home {
+/** `MOCHI_HOME`, then the older `MOCHI_DATA_DIR`, then `~/.mochi`. */
+export function resolveHome(env: Readonly<Record<string, string | undefined>>): Home {
+	const dir = resolve(env.MOCHI_HOME ?? env.MOCHI_DATA_DIR ?? join(homedir(), ".mochi"));
 	return {
 		dir,
 		envFile: join(dir, ".env"),
@@ -28,9 +30,4 @@ function homeAt(dir: string): Home {
 		profilesDir: join(dir, "profiles"),
 		logFile: join(dir, "mochi.log"),
 	};
-}
-
-/** `MOCHI_HOME`, then the older `MOCHI_DATA_DIR`, then `~/.mochi`. */
-export function resolveHome(env: Readonly<Record<string, string | undefined>>): Home {
-	return homeAt(resolve(env.MOCHI_HOME ?? env.MOCHI_DATA_DIR ?? join(homedir(), ".mochi")));
 }
