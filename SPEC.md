@@ -10,7 +10,7 @@ These were decided with the owner. Do not reopen them in code review.
 
 | Area | Decision |
 |---|---|
-| Runtime | Node 24, TypeScript run directly with type stripping. Pinned exact `@earendil-works/*` 1.0.3. |
+| Runtime | Node 24, TypeScript run directly with type stripping. Pinned exact `@earendil-works/*` 1.2.0 from npm. |
 | Brain | `anthropic/claude-opus-5-5` through Bifrost at `https://bifrost.shau.me/anthropic` with `x-bf-vk: $BIFROST_VIRTUAL_KEY`. Mochi holds no Anthropic credential and does no Claude Code impersonation. |
 | Fast model | `azure/gpt-6-luna` through Bifrost's OpenAI route, for subagents and summaries. |
 | Classifier | TypeSafe Jev (`typesafe/jev-1.13`) through OpenRouter directly with `OPENROUTER_API_KEY`, for yes/no and pick-one decisions before an Opus step. Not through Bifrost. |
@@ -52,7 +52,8 @@ The TUI follows pi's experimental durable TUI. It renders the shown conversation
 ## Conversation layout
 
 - The owner has **one root conversation** across every channel. `harness.root()` is that conversation.
-- Every inbound message becomes `root.submit({ type: "input", content, requestId, whenBusy: "steer" })`.
+- Every inbound message becomes `root.submit({ type: "input", content, requestId, whenBusy: "steer" })`. The harness runs with `steeringMode` and `followUpMode` `"all"`, so a burst of texts that lands while an answer is written reaches the model as one turn.
+- **Settle.** One background `mochi.settle` task of the line looks every 30 s at root and each user thread. A thread whose last request was at least 30,000 prompt tokens, idle and quiet for 4 minutes (inside the brain model's short cache life), is compacted once per quiet spell. The next message after a break then rewrites only the fast-model summary to the cache instead of the whole context.
 - `requestId` is `<channel>:<channel message id>`. A redelivered message is submitted once.
 - The content is prefixed with a one-line channel tag: `[whatsapp 2026-10-05 14:02 IST id=wamid.HBg...]`. The model sees where each message came from and the id it can react to.
 - Each adapter is built for the owner's address from its variables and drops every other sender before `ingest` sees a message. The one exception is iMessage users (see below).
@@ -216,6 +217,7 @@ The library, `LIBRARY` in `src/seats.ts`: every other tool, registered with `cal
 | Tool | Replay | Behavior |
 |---|---|---|
 | `note` | safe | Create or replace one note in `mochi.memory`, with the codemode call's assistant entry as its source; an empty `body` forgets it. Refuses a credential (secret scan), an edit or removal of an `owner` note, and a write that would push the always-in-prompt notes (`user`, `rule`) past 4,000 characters total. |
+| `history` | safe | Owner, run and worker seats, deferred. Past chat as rows `{ at, kind, entry, conversation, text }`, oldest first, up to 2,000 per call, for a script to filter, chunk and map over `llm`; only what the script prints reaches the model. `everywhere` adds trigger and agent runs. |
 | `recall` | safe | With `query`: FTS5 BM25 search over past chat text and notes, optional `after`, `before`, `limit` (default 10, at most 30). Chat hits are snippets with entry ids and timestamps; note hits carry the whole note. Subagent and scheduler conversations rank below the root. With `entry`: the five entries before and after it. With `asOf`: every note as it stood then. |
 | `bash`, `read`, `edit`, `write` | pi-durable | pi-durable's coding tools in the conversation's environment, `data/work` unless the agent sets a `cwd`, with the daemon's full access. `bash` resolves in scripts to `{ output, truncated, exitCode }`. `read` returns images through pi-durable's Photon processor; HEIC, HEIF, AVIF and TIFF go through ffmpeg first. ffmpeg must be 8 or newer, from mise: 7.1 decodes only the first tile of an iPhone photo. |
 | `react` | safe | Tapback on an owner message: `love`, `like`, `dislike`, `laugh`, `emphasize`, `question`, or `none`, and optional `messageId` (default: the owner's newest chat message). |
@@ -289,8 +291,9 @@ Each trigger is one durable `mochi.trigger` task, a background task of the trigg
 
 ### Runs
 
-- Each trigger owns one `ownerless` conversation, created with the trigger. Runs of the same trigger append to it, so a periodic check sees what it already reported, and re-adding an id reuses it. It compacts like any conversation. Nothing owns it, so root's `/stop` never reaches a trigger.
-- The task plans the next slot with the pure `plan(trigger, last, now)`, sleeps to it with `runtime.sleep`, then submits `{ type: "input", content, requestId }` with `whenBusy: "reject"`. A slot that finds the previous run still busy is recorded `skipped-busy`.
+- Each trigger owns one `ownerless` conversation, created with the trigger. Each run starts from a keyed `pi.reset` whose handoff is the last run's closing note (its final text, or what it notified), so a run never resends the trigger's history and the cached prefix stays small. Older runs stay searchable with `recall` and `history`. Re-adding an id reuses the conversation. Nothing owns it, so root's `/stop` never reaches a trigger.
+- A trigger's `role` names an agent type (`agents/<role>.md`, or the owner's own in `<dataDir>/agents/`). The role's instructions follow the trigger's, and its `model` and `thinking` are the run's defaults. The trigger's own `model` and `thinking` override the role's. With neither, a run uses the `fast` tier. The `trigger-agents` boot step re-applies this to every live trigger, so an edited role file reaches the next run.
+- The task plans the next slot with the pure `plan(trigger, last, now)`, sleeps to it with `runtime.sleep`, then submits `{ type: "input", content, requestId }` with `whenBusy: "followUp"`. A slot that finds the previous run still busy keeps its context and queues behind it; the run deadline still ends a hung run.
 - `requestId` is `<kind>:<id>:<slot ISO>` or `webhook:<id>:<delivery id>`. A restart inside a slot never double-fires. A cron slot more than 15 minutes late (downtime) is recorded `missed`; a `once` always fires, late if it must.
 - A run still going 30 minutes after it started is aborted (the conversation's ordinary scope; the trigger task is background and survives) and recorded `timed-out`, so a hung run cannot block later slots.
 - `trigger_remove` aborts the trigger task, never its conversation, so a run that removes its own trigger finishes its turn.
@@ -411,7 +414,6 @@ Results and transcripts are in `docs/eval.md` and `eval/runs/`.
 - Named persistent bots with inboxes.
 - Remote attach to the systemd daemon from another machine, through pi-server and pi-client. The local Unix socket covers this box.
 - Errands as `defineTask` tasks with phases, the task id as the idempotency key toward outside services, and an `abort` handler that undoes what it can. Waits for the first concrete errand with an undo (a booking, a draft). Until then an errand is an agent, and the kill switch is a task-tree abort.
-- A `beforeCompact` hook that writes the summary, if compaction loses commitments in practice. Memory already survives compaction because it renders as a section.
 - `MemoryStorage` for unit tests that never restart. Tests open SQLite files today because many reopen the same directory to simulate a restart.
 - Secure-input page.
 - A memory eval of about 50 questions from real chats: search versus full context on Opus 5.5.
@@ -433,7 +435,7 @@ Mochi publishes typed durable notes into a separate local Cognition-style memory
 | 2026-10-05 | Channels expose `react`. | Owner request. Native on WhatsApp and Telegram; iMessage via tapbacks if the SDK supports it. |
 | 2026-10-05 | Heartbeat removed; periodic checks are `cron` triggers. | Owner request. Cron and webhooks are the main agent's tools for running itself; a fixed checklist note was a second mechanism for the same thing. |
 | 2026-10-05 | Jev classifier gates on webhooks (`admitWhen`) and `notify` (`notifyWhen`), plus a `classify` tool. Per-message thinking effort was rejected. | Live probe: Jev ~300 ms and ~$0.00002 per call, decisive on clear cases, low confidence on ambiguous ones, so it gates cheap yes/no decisions and fails open. pi-durable itself never calls classifiers. |
-| 2026-10-05 | Ported firecrawl-web, pi-processes and pi-subagents' mechanism; added codemode from `@earendil-works/pi-codemode`. | Owner request to make them first class. The pi packages target pi-coding-agent's `ExtensionAPI` and TUI, so the mechanisms were ported, not installed. Background subagents follow pi-durable's own example 23. codemode adds `llm_query`/`llm_batch` so Opus can hand data slices to Luna, after prime-agent's RLM harness. |
+| 2026-10-05 | Ported firecrawl-web, pi-processes and pi-subagents' mechanism; added codemode from `@earendil-works/pi-codemode`. | Owner request to make them first class. The pi packages target pi-coding-agent's `ExtensionAPI` and TUI, so the mechanisms were ported, not installed. Background subagents follow pi-durable's own example 23. codemode adds `llm` (a batch is `Promise.all`, 8 in flight) so Opus can hand data slices to Luna, after prime-agent's RLM harness. `history` (2026-10-14) gives a script the transcript as rows to slice. |
 | 2026-10-05 | Smart model, minimal harness. No injection-defense hooks, no done-claim check on answers, no approval prompts. | Owner decision. Opus 5.5 follows the identity section's rule that tool and web content is data. pi-durable features are used where they delete mochi code or add a capability: memory documents, agent tasks and the kill switch, compaction, the attach view. |
 | 2026-10-05 | Memory moves from `data/notes/*.md` into the rewindable root document `mochi.memory`. ~~Tool names stay `notes_*`, because the skills call them that.~~ Renamed 2026-10-06 (architect U3). | Owner decision ("pi durable already has memory, we can remove notes"). A write commits with its source entry; `snapshotAsOf` answers "what did you believe on that date" and lets mochi restore a bad note. One document on root, not a session family, because only conversation documents are rewindable. Existing files are imported once at start. |
 | 2026-10-05 | The frozen `mochi.notes-snapshot` is removed; memory sections render live. | Measured through Bifrost on Opus 5.5 with a 20,785-token prefix: after a mid-conversation system message replaced one section, the next request read 20,797 tokens from cache and wrote 73, and the model used the new section. pi-durable sends only changed sections, so the snapshot bought nothing. |

@@ -26,7 +26,7 @@ Passive timestamped `mochi.memory-change` entries anchor historical recall after
 
 ## Dreaming configuration
 
-Dreaming is off by default. The daemon supports these `data/config.json` settings:
+Dreaming is off by default; the owner's daemon turns it on. The daemon supports these `data/config.json` settings:
 
 ```json
 {
@@ -49,4 +49,4 @@ Each scheduled run pins current memory, a bounded set of committed transcript ev
 
 The task persists the proposal batch and absolute deadline before applying it. A resumed expired proposal is discarded without a memory write. A single SQLite commit rejects a stale memory base or changed revision, including edits that later restore identical bytes. It also rejects invented or out-of-cutoff evidence, owner-note changes, secrets, duplicate targets, and standing user or rule proposals. Only the owner's note tool can create standing user and rule notes; Dreaming cannot promote webhook or assistant text into those prompt sections. Valid edits use the normal note owner and publication queue. Failure, timeout, empty output, and missed slots advance silently. Configuration replacement revokes the old task's application rights, aborts its model conversation, then creates a new generation. No scheduled work enters the root model conversation.
 
-Evidence selection includes the owner conversation and up to 63 other recent non-maintenance conversations, with 50 recent entries per conversation, 40,000 characters total, and 6,000 per entry. A durable conversation marker excludes prior Dreaming and publication work even when its instructions change. Evidence validation verifies committed text and provenance, not semantic truth. Conservative inference remains a model judgment.
+Evidence selection includes the owner conversation and up to 63 other recent non-maintenance conversations: every entry after the previous successful dream's cutoff, up to 1,500,000 characters, and 6,000 per entry. A dream that fails or is rejected leaves the cutoff, so the next one reads the same entries. Evidence over 40,000 characters is first narrowed: the fast model maps each 40,000-character chunk to the entries that state a lasting fact (memoized per chunk, 8 in flight), and the reviewer reduces over the newest picks that fit. A durable conversation marker excludes prior Dreaming and publication work even when its instructions change. Evidence validation verifies committed text and provenance, not semantic truth. Conservative inference remains a model judgment.
