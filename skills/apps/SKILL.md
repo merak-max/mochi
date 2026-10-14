@@ -14,7 +14,7 @@ An app with more than one account takes `args: { accountId, input: { ... } }`. T
 
 Mochi accepts Executor approvals by itself, so a gated call runs at once. Only the owner's conversation and trigger runs have these tools.
 
-For ordinary web search, page reading and site maps, use `web_search`, `web_fetch` and `web_map`. Use Executor's Firecrawl only for sites where the owner is logged in:
+For ordinary web search, page reading and site maps, use `web_search`, `web_fetch` and `web_map`. For structured data from a provider (podcasts, app stores, filings and more), find a tool with the free `web_find_tools`, then run it with `web_alexandria`, which spends credits. Use Executor's Firecrawl only for sites where the owner is logged in:
 
 1. Scrape the page with `profile: { name: "mochi" }`. Do not pass `saveChanges`.
 2. Call Executor's Firecrawl interact on the returned `scrapeId` with a plain-language prompt.

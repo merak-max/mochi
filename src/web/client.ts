@@ -1,3 +1,5 @@
+import type { JsonValue } from "@earendil-works/chord";
+
 const FIRECRAWL_V2_BASE_URL = "https://api.firecrawl.dev/v2";
 
 export interface SearchRequest {
@@ -22,6 +24,20 @@ export interface ScrapedPage {
 	status: number;
 	/** The source's error, else its page title. */
 	error?: string | undefined;
+}
+
+/** One Alexandria request: a catalogue tool by provider and capability, with its options. */
+export interface AlexandriaCall {
+	provider: string;
+	capability: string;
+	options?: Record<string, unknown> | undefined;
+}
+
+export interface AlexandriaResult {
+	data: JsonValue;
+	/** Credits this call charged; 0 for discovery. */
+	creditsCost: number;
+	records?: number | undefined;
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -75,6 +91,19 @@ export class FirecrawlClient {
 		return hits(success(await this.#request("map", options, signal), "map").links).map((link) => link.url);
 	}
 
+	/** Runs one Alexandria tool through /scrape. Discovery (firecrawl/find-tools) is free; every other tool charges its listed credits. */
+	async alexandria(call: AlexandriaCall, signal?: AbortSignal): Promise<AlexandriaResult> {
+		const label = `alexandria ${call.provider}/${call.capability}`;
+		const response = data(await this.#request("scrape", { alexandria: [call] }, signal), label);
+		const results = Array.isArray(response.alexandria) ? response.alexandria : [];
+		const result = record(results[0]);
+		if (result === undefined) throw new Error(`Firecrawl returned no result for ${label}.`);
+		const error = record(result.error);
+		if (error !== undefined) throw new Error(`Firecrawl ${label} failed (${text(error.code) ?? "error"}): ${text(error.message) ?? "no message"}.`);
+		const cost = typeof result.creditsCost === "number" ? result.creditsCost : typeof response.creditsCost === "number" ? response.creditsCost : 0;
+		return { data: (result.data ?? null) as JsonValue, creditsCost: cost, records: typeof result.records === "number" ? result.records : undefined };
+	}
+
 	async #request(endpoint: string, body: object, signal?: AbortSignal): Promise<unknown> {
 		signal?.throwIfAborted();
 		let response: Response;
@@ -96,7 +125,12 @@ export class FirecrawlClient {
 			signal?.throwIfAborted();
 			throw new Error(`Firecrawl returned a non-JSON response (HTTP ${response.status}).`);
 		}
-		if (!response.ok) throw new Error(`Firecrawl HTTP ${response.status}: ${text(record(payload)?.error) ?? "request failed"}.`);
+		if (!response.ok) {
+			const failure = record(payload);
+			const termsUrl = text(record(failure?.requiresAction)?.url);
+			const action = termsUrl === undefined ? "" : ` An org admin must accept the provider terms at ${termsUrl}.`;
+			throw new Error(`Firecrawl HTTP ${response.status}: ${text(failure?.error) ?? "request failed"}.${action}`);
+		}
 		return payload;
 	}
 }

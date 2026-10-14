@@ -68,6 +68,8 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	trigger_list: { seats: AGENT_TRIGGER, inline: true },
 	trigger_remove: { seats: AGENT_TRIGGER, inline: false },
 	web_map: { seats: ALL, inline: false },
+	web_find_tools: { seats: ALL, inline: false },
+	web_alexandria: { seats: ALL, inline: false },
 	classify: { seats: ALL, inline: false },
 	apps_skills: { seats: NOT_USER, inline: false },
 	agent_send: { seats: AGENT, inline: false },

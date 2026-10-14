@@ -68,3 +68,38 @@ test("web_fetch cleans with Defuddle, extracts on the fast model with an instruc
 	await assert.rejects(web(broken.baseUrl).call("web_fetch", { url: "https://docs.dev/x" }), /HTTP 404/);
 	await assert.rejects(web(api.baseUrl, null).call("web_map", { url: "https://a.dev" }), /FIRECRAWL_API_KEY is unset/);
 });
+
+test("web_find_tools sends a free firecrawl/find-tools call and follows next", async (t) => {
+	const next = { provider: "firecrawl", capability: "find-tools", options: { limit: 2, query: "podcasts", offset: 2 } };
+	const item = { id: "particle/podcasts/episodes/search", provider: "particle", capability: "podcasts/episodes/search", description: "Find episodes", creditsCost: 15, next };
+	const api = await fakeFirecrawl(t, {
+		"/scrape": { success: true, data: { alexandria: [{ provider: "firecrawl", capability: "find-tools", creditsCost: 0, data: { level: "tools", items: [item], total: 52, next } }], creditsCost: 0 } },
+	});
+	const { call } = web(api.baseUrl);
+	assert.deepEqual(await call("web_find_tools", { query: " podcasts ", providers: ["particle"], limit: 2 }), { level: "tools", total: 52, items: [item], next });
+	assert.deepEqual(api.requests[0], {
+		path: "/scrape",
+		auth: "Bearer fc-test",
+		body: { alexandria: [{ provider: "firecrawl", capability: "find-tools", options: { limit: 2, query: "podcasts", providers: ["particle"] } }] },
+	});
+	await call("web_find_tools", { next });
+	assert.deepEqual(api.requests[1]?.body, { alexandria: [next] });
+	await assert.rejects(call("web_find_tools", { next: { provider: "particle", capability: "podcasts/episodes/search" } }), /next must be a firecrawl\/find-tools request/);
+});
+
+test("web_alexandria splits the tool id, returns data with its credit cost, and reports tool errors", async (t) => {
+	const api = await fakeFirecrawl(t, {
+		"/scrape": { success: true, data: { alexandria: [{ provider: "particle", capability: "podcasts/episodes/search", creditsCost: 15, data: { episodes: [{ id: "e1" }] } }], creditsCost: 15 } },
+	});
+	assert.deepEqual(await web(api.baseUrl).call("web_alexandria", { tool: "particle/podcasts/episodes/search", options: { keyword_search: "AI agents" } }), {
+		data: { episodes: [{ id: "e1" }] },
+		creditsCost: 15,
+	});
+	assert.deepEqual(api.requests[0]?.body, { alexandria: [{ provider: "particle", capability: "podcasts/episodes/search", options: { keyword_search: "AI agents" } }] });
+	await assert.rejects(web(api.baseUrl).call("web_alexandria", { tool: "particle" }), /provider\/capability/);
+
+	const failing = await fakeFirecrawl(t, {
+		"/scrape": { success: true, data: { alexandria: [{ provider: "x", capability: "b", error: { code: "invalid_option", message: "b does not take bogus." } }], creditsCost: 0 } },
+	});
+	await assert.rejects(web(failing.baseUrl).call("web_alexandria", { tool: "x/b", options: { bogus: 1 } }), /invalid_option.*does not take bogus/);
+});
