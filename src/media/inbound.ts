@@ -8,6 +8,19 @@ import { mimeOf, outputPath, workPath } from "./files.ts";
 
 const execute = promisify(execFile);
 
+/**
+ * The type an image's bytes say it is. A channel's label can be wrong (iMessage sends PNGs as image/jpeg), and the model
+ * provider rejects an image whose label does not match its bytes.
+ */
+function imageType(bytes: Uint8Array): string | undefined {
+	const starts = (...prefix: number[]) => prefix.every((byte, i) => bytes[i] === byte);
+	if (starts(0x89, 0x50, 0x4e, 0x47)) return "image/png";
+	if (starts(0xff, 0xd8, 0xff)) return "image/jpeg";
+	if (starts(0x47, 0x49, 0x46, 0x38)) return "image/gif";
+	if (starts(0x52, 0x49, 0x46, 0x46) && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "image/webp";
+	return undefined;
+}
+
 export async function prepareInbound(
 	files: readonly SavedFile[],
 	workDir: string,
@@ -32,7 +45,8 @@ export async function prepareInbound(
 					throw error;
 				}
 			} else if (file.kind === "image" && /^(image\/png|image\/jpeg|image\/gif|image\/webp)$/.test(file.mimeType)) {
-				images.push({ type: "image", mimeType: file.mimeType, data: (await readFile(absolute)).toString("base64") });
+				const bytes = await readFile(absolute);
+				images.push({ type: "image", mimeType: imageType(bytes) ?? file.mimeType, data: bytes.toString("base64") });
 			} else if (file.kind === "audio" || file.mimeType.startsWith("audio/") || file.mimeType.startsWith("video/")) {
 				const transcript = await client.transcript(file.path, signal);
 				const duration = transcript.duration === undefined ? "" : `, ${Math.round(transcript.duration)} s`;
