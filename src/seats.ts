@@ -50,6 +50,7 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	edit: { seats: ALL, inline: true },
 	write: { seats: ALL, inline: true },
 	recall: { seats: ALL, inline: true },
+	history: { seats: OWNER_RUN_WORKER, inline: false },
 	note: { seats: OWNER, inline: true },
 	react: { seats: OWNER, inline: true },
 	web_search: { seats: ALL, inline: true },

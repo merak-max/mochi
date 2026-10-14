@@ -202,6 +202,31 @@ export function recallTool(index: SearchIndex) {
 	});
 }
 
+/** The most rows one `history` call returns; a longer span is read in pages by `after`. */
+export const HISTORY_LIMIT = 2000;
+
+/** Past chat as data for a script: rows stay in the script, and only what it prints reaches the model. */
+export function historyTool(index: SearchIndex) {
+	return defineTool({
+		name: "history",
+		description:
+			"Past chat as rows { at, kind, entry, conversation, text }, oldest first, for a script to filter, chunk and hand to llm; " +
+			"print only the result. after/before are ISO times. everywhere also reads trigger and agent runs. Up to 2000 rows; page with after.",
+		parameters: Type.Object({
+			after: Type.Optional(Type.String()),
+			before: Type.Optional(Type.String()),
+			everywhere: Type.Optional(Type.Boolean()),
+			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: HISTORY_LIMIT })),
+		}),
+		structuredOutputSchema: Type.Array(Type.Object({ at: Type.String(), kind: Type.String(), entry: Type.Integer(), conversation: Type.Integer(), text: Type.String() })),
+		replay: "safe",
+		execute: async (args) => {
+			const rows = index.range({ ...(args.after === undefined ? {} : { after: args.after }), ...(args.before === undefined ? {} : { before: args.before }), everywhere: args.everywhere ?? false, limit: args.limit ?? HISTORY_LIMIT });
+			return { structuredOutput: rows.map((row) => ({ at: row.at, kind: row.kind, entry: Number(row.ref), conversation: row.conversation, text: row.text })) };
+		},
+	});
+}
+
 const clip = (value: string): string => (value.length > MAX_ROW_CHARS ? `${value.slice(0, MAX_ROW_CHARS)}…` : value);
 
 /** `owner`: every user and rule note in full. `notes-index`: one line per other note. Sorted by slug, so equal memory renders equal bytes. */

@@ -5,6 +5,25 @@ import { messageText } from "../text.ts";
 import type { Classify } from "./classifier.ts";
 
 const LLM_MAX_TOKENS = 16_000;
+/** `llm` calls in flight at once across every script; a Promise.all over hundreds of slices waits its turn. */
+export const LLM_CONCURRENCY = 8;
+
+/** A counting gate: `run` waits for a free slot, then runs `work`. */
+export function limiter(slots: number): <T>(work: () => Promise<T>) => Promise<T> {
+	let free = slots;
+	const waiting: (() => void)[] = [];
+	return async (work) => {
+		if (free > 0) free--;
+		else await new Promise<void>((resolve) => waiting.push(resolve));
+		try {
+			return await work();
+		} finally {
+			const next = waiting.shift();
+			if (next === undefined) free++;
+			else next();
+		}
+	};
+}
 const Instructions = Type.String({ minLength: 1, maxLength: 500 });
 const Question = Type.Union([
 	Type.Object({ type: Type.Literal("bool"), instructions: Instructions, yes: Type.String({ minLength: 1 }), no: Type.String({ minLength: 1 }) }),
@@ -19,6 +38,7 @@ const Answer = Type.Union([
 
 /** Fast-model calls from scripts: `llm` on the fast model with no tools, and `classify` on Jev, the gates' classifier. */
 export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRef; readonly classify: Classify }): readonly ToolRegistration[] {
+	const slot = limiter(LLM_CONCURRENCY);
 	return [
 		defineTool({
 			name: "llm",
@@ -30,10 +50,12 @@ export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRe
 				const model = deps.models.getModel(deps.fast.provider, deps.fast.modelId);
 				if (model === undefined) throw new Error(`Model ${deps.fast.provider}/${deps.fast.modelId} is not configured.`);
 				const signal = context.abortSignal;
-				const response = await deps.models.completeSimple(
-					model,
-					{ ...(system === undefined ? {} : { systemPrompt: system }), messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
-					{ ...(signal === undefined ? {} : { signal }), reasoning: "low", maxTokens: Math.min(model.maxTokens, LLM_MAX_TOKENS) },
+				const response = await slot(() =>
+					deps.models.completeSimple(
+						model,
+						{ ...(system === undefined ? {} : { systemPrompt: system }), messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
+						{ ...(signal === undefined ? {} : { signal }), reasoning: "low", maxTokens: Math.min(model.maxTokens, LLM_MAX_TOKENS) },
+					),
 				);
 				if (response.stopReason === "error" || response.stopReason === "aborted") throw new Error(`llm failed: ${response.errorMessage ?? response.stopReason}`);
 				return { structuredOutput: messageText(response), usage: response.usage };

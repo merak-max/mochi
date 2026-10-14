@@ -121,6 +121,18 @@ export class SearchIndex {
 		}));
 	}
 
+	/** Chat rows in time order, oldest first: the owner's chat, or every conversation's, inside `after`..`before`. */
+	range(query: { readonly after?: string; readonly before?: string; readonly everywhere: boolean; readonly limit: number }): (ScrollRow & { readonly conversation: number })[] {
+		const rows = this.#db
+			.prepare(`
+				SELECT kind, ref, at, text, conversation FROM docs
+				WHERE kind != 'note' AND at >= ? AND at <= ? AND (? OR conversation = ${ROOT_CONVERSATION_ID})
+				ORDER BY at, CAST(ref AS INTEGER) LIMIT ?
+			`)
+			.all(query.after ?? "", query.before ?? "\uffff", query.everywhere ? 1 : 0, query.limit);
+		return rows.map((row) => ({ kind: docKind(row.kind), ref: String(row.ref), at: String(row.at), text: String(row.text), conversation: Number(row.conversation) }));
+	}
+
 	/** Indexed chat rows of the entry's conversation, `n` before and after it, oldest first. */
 	scroll(entryId: number, n: number): ScrollRow[] | undefined {
 		const anchor = this.#db.prepare("SELECT conversation FROM docs WHERE ref = ? AND kind != 'note'").get(String(entryId));

@@ -22,7 +22,7 @@ import type { Log } from "./log.ts";
 import type { AgentCatalog } from "./agents/catalog.ts";
 import { agentFns, AgentTask } from "./agents/subagent.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
-import { noteTool, notesExtension, readMemory, recallTool, sortedNotes } from "./memory/memory.ts";
+import { noteTool, notesExtension, readMemory, historyTool, recallTool, sortedNotes } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
 import { defaultSelection, seatExtensions, SCRIPT_DEADLINE_MS } from "./seats.ts";
@@ -130,6 +130,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...(await codingTools()),
 		noteTool({ index, today: options.today }),
 		recallTool(index),
+		historyTool(index),
 		reactTool(options.channels),
 		...webFns({ apiKey: options.firecrawlKey, models: options.models, fast: options.fast }),
 		...browserFns({ apiKey: options.firecrawlKey, profile: options.firecrawlProfile }),

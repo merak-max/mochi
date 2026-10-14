@@ -195,3 +195,28 @@ test("recall skips root entries still in context, finds them after a reset, and 
 	assert.match(await lastResult(), /--- entry \d+ user .*\nMy dog is called Pancake\.\n--- entry \d+ assistant/);
 	await mochi.close();
 });
+
+test("history gives a script past chat as rows to slice and map over llm, and only what it prints reaches the model", async () => {
+	const faux = newFaux();
+	const script = `const rows = await tools.history({});
+const chunks = [];
+for (let i = 0; i < rows.length; i += 2) chunks.push(rows.slice(i, i + 2).map((row) => row.kind + ": " + row.text).join("\\n"));
+const parts = await Promise.all(chunks.map((chunk) => tools.llm({ prompt: "pets in: " + chunk })));
+return rows.length + " rows, " + chunks.length + " chunks: " + parts.join(" | ");`;
+	let llmCalls = 0;
+	faux.setResponses([
+		fauxAssistantMessage("Noted."),
+		fauxAssistantMessage("Noted."),
+		fauxAssistantMessage(fauxToolCall("codemode", { code: script }), { stopReason: "toolUse" }),
+		...[1, 2, 3].map(() => async () => (llmCalls++, fauxAssistantMessage(`chunk ${llmCalls}`))),
+		fauxAssistantMessage("Done."),
+	]);
+	const mochi = await openTestMochi(await tempDir(), faux);
+	await ask(mochi, "My dog is called Biscuit.");
+	await ask(mochi, "My cat is called Pancake.");
+	await indexOnce(mochi.harness, mochi.index, context);
+	await ask(mochi, "Which pets did I mention?");
+	assert.equal(llmCalls, 3);
+	assert.match((await results(mochi)).at(-1)!, /^"?4 rows, 2 chunks: chunk \d \| chunk \d"?$|^6 rows, 3 chunks: chunk 1 \| chunk 2 \| chunk 3$/);
+	await mochi.close();
+});
