@@ -190,6 +190,8 @@ export function handoffTool() {
 		parameters: Type.Object({ note: Type.String({ minLength: 1, maxLength: 4000 }) }),
 		replay: "safe",
 		execute: async ({ note }, api, context) => {
+			const record = await api.commit((tx) => tx.conversation(api.conversationId), context);
+			if (record?.owner !== undefined) throw new Error("Your answer goes back to the agent that started you, so finish instead of handing off.");
 			const self = await api.conversation(api.conversationId, context);
 			if (self === undefined) throw new Error("Handoff conversation is missing.");
 			await self.submit({ type: "input", content: "Continue.", requestId: `handoff:${api.taskId}`, whenBusy: "followUp" }, context);

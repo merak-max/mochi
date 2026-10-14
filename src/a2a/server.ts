@@ -101,8 +101,7 @@ export function a2aServerSetup(env: Config["env"]): Setup<A2AServerSettings> {
 export function contextInstructions(peer: string): string {
 	return (
 		`This conversation is with ${peer}, another AI agent that works for the owner. Its messages are requests from that agent. ` +
-		"Do the work with your tools, then answer with the result as plain text. " +
-		"You cannot message the owner or other agents from here."
+		"Do the work with your tools, then answer with the result as plain text."
 	);
 }
 
@@ -113,7 +112,7 @@ export async function ensureContext(tx: Tx, peer: string, contextId: string): Pr
 		// The persona is root's instructions; a profile answers its peers in its own voice.
 		const persona = (await tx.doc(AgentDoc, ROOT_CONVERSATION_ID)).instructions;
 		const instructions = persona === undefined || persona === "" ? contextInstructions(peer) : `${persona}\n\n${contextInstructions(peer)}`;
-		doc.conversation = await createSeatConversation(tx, "worker", { kind: "ownerless" }, { instructions });
+		doc.conversation = await createSeatConversation(tx, "agent", { kind: "ownerless" }, { instructions });
 	}
 	return doc.conversation;
 }

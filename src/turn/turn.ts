@@ -200,7 +200,7 @@ export async function ensureUser(tx: Tx, user: ChatUser): Promise<ConversationId
 export async function ensureLine(harness: Harness, context: Context): Promise<ConversationId> {
 	return harness.commit(async (tx) => {
 		const line = await tx.doc(LineDoc);
-		if (line.conversation === null) line.conversation = await createSeatConversation(tx, "worker", { kind: "ownerless" });
+		if (line.conversation === null) line.conversation = await createSeatConversation(tx, "user", { kind: "ownerless" });
 		return line.conversation;
 	}, context);
 }
@@ -560,7 +560,7 @@ async function conversationOf(line: Line, id: ConversationId, context: Context):
 	return conversation;
 }
 
-/** `react` on the owner's chat messages. Only the owner seat's scripts get it. */
+/** `react` on the owner's chat messages. Only agent conversations' scripts get it. */
 export function reactTool(channels: Channels): ToolRegistration {
 	return defineTool({
 				name: "react",

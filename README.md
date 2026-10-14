@@ -7,7 +7,8 @@ mochi is built on [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-
 ## What it does
 
 - **One thread per person.** You get one long conversation across every channel. Each configured friend gets their own.
-- **Few tools, one code mode.** The model sees two tools. Everything else (web, apps, files, subagents, routines, memory) is a function its scripts call, so the first request is about 3,600 tokens.
+- **Few tools, one code mode.** The model sees three tools. Everything else (web, apps, files, agents, routines, memory) is a function its scripts call, so the first request is about 3,700 tokens.
+- **Copies of itself.** `fork` copies the current conversation, context and all, and reuses its prompt cache, so trying three drafts at once costs the new tokens only. `agent` starts a fresh copy from a brief. Every copy has the same tools, so copies make copies, as deep as the work needs.
 - **Routines.** Cron, one-shot and webhook triggers run in their own conversations. A cheap check script or a classifier gate decides whether a run happens at all, and a run reaches you only when it calls `notify`.
 - **Roles.** A routine or a helper can run as a role: a Markdown file with instructions and a model. Routine roles run on the fast model.
 - **Memory.** Notes you can read and edit, searchable history, and a nightly review that keeps lasting facts with a source for each.

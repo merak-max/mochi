@@ -47,7 +47,7 @@ test("the proposed notify return terminates after queueing without a narration r
 			},
 		}));
 		mochi.registry.install(defineExtension({ name: "notify-terminate-test", wraps: [patched] }));
-		const run = await mochi.harness.commit((tx) => createSeatConversation(tx, "run", { kind: "ownerless" }), context);
+		const run = await mochi.harness.commit((tx) => createSeatConversation(tx, "agent", { kind: "ownerless" }), context);
 		const conversation = await mochi.harness.conversation(run, context);
 		assert.ok(conversation);
 		await conversation.configure({ extensions: [...(await conversation.agent(context)).extensions, defineExtension({ name: "notify-terminate-test" })] }, context);

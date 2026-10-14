@@ -19,7 +19,7 @@ If a deterministic script can process every item in one pass, run it in `codemod
 
 ## Fan out
 
-Start every worker with `agent`, `type: "worker"`, in one script with `Promise.all`. Each brief stands alone: the goal, its exact slice, how to check its work, and what to return. Every worker reports `PASS`, `ISSUES` or `BLOCKED` with evidence (links, quotes, prices with their source). A worker that finds problems lists all of them, not just the first.
+Start every worker in one script with `Promise.all`: `fork` when the slice needs what this conversation knows, otherwise `agent` with `type: "worker"`, often on the fast model. An `agent` brief stands alone: the goal, its exact slice, how to check its work, and what to return. Every worker reports `PASS`, `ISSUES` or `BLOCKED` with evidence (links, quotes, prices with their source). A worker that finds problems lists all of them, not just the first.
 
 ## Merge
 

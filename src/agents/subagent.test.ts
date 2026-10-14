@@ -64,7 +64,7 @@ test("agent files give instructions, model and thinking; the catalog resolves na
 	assert.throws(() => catalog.model("nowhere/x"), /provider "nowhere", which is not in \[providers\]/);
 });
 
-test("a foreground agent answers through the calling script, in seat worker with no agent functions", async () => {
+test("a foreground agent answers through the calling script, with root's own tools", async () => {
 	const faux = newFaux();
 	const seen = new Map<string, Seen>();
 	scripted(faux, { go: [tool("codemode", { code: `return await tools.agent({ name: "primes", brief: "Name three primes.", type: "tester" })` }), "done"], "Name three primes.": [fauxAssistantMessage("2, 3, 5."), ""] }, seen);
@@ -73,8 +73,9 @@ test("a foreground agent answers through the calling script, in seat worker with
 	const result = (await rootEntries(mochi)).find((entry) => entry.kind === "pi.tool-result");
 	assert.match(messageText(result!.model![0]!), /^Script completed\nWall time [\d.]+ seconds\nOutput:\n\n2, 3, 5\.$/);
 	const child = seen.get("Name three primes.")!;
-	assert.deepEqual(child.direct, ["codemode"]);
-	assert.deepEqual(child.scripted, ["read", "write", "edit", "bash", "recall", "web_search", "web_fetch", "llm", "apps_search", "apps_call"]);
+	const parent = seen.get("go")!;
+	assert.deepEqual(child, parent);
+	assert.ok(child.scripted.includes("agent") && child.scripted.includes("fork"), child.scripted.join(", "));
 	await mochi.close();
 });
 
@@ -96,10 +97,60 @@ test("background agents post nothing into root: a notify reaches the channel ver
 	const records = entries.filter((entry) => entry.kind === NOTIFY_ENTRY);
 	assert.equal(records.length, 1);
 	assert.match(messageText(records[0]!.model![0]!), /^\[context, no reply needed: told user1 on whatsapp, from conversation \d+\] Build failed on main\.$/);
-	const run = seen.get("Check the build.")!;
-	assert.deepEqual(run.direct, ["notify", "codemode"]);
-	assert.ok(run.scripted.includes("trigger_list"));
-	assert.ok(!run.scripted.some((name) => name.startsWith("agent") || name === "trigger_add"), run.scripted.join(", "));
+	await mochi.close();
+});
+
+test("a fork sees the conversation it was made from and answers the calling script", async () => {
+	const faux = newFaux();
+	let forkSaw: string[] = [];
+	faux.setResponses([
+		fauxAssistantMessage("Noted: the code word is ostrich."),
+		tool("codemode", { code: `return await tools.fork({ name: "probe", brief: "What is the code word?" })` }),
+		(transcript) => {
+			forkSaw = transcript.messages.map((message) => messageText(message));
+			return fauxAssistantMessage("ostrich");
+		},
+		fauxAssistantMessage("The fork said ostrich."),
+	]);
+	const mochi = await openTestMochi(await tempDir(), faux);
+	await (await mochi.root.submit({ type: "input", content: "The code word is ostrich." }, context)).wait(context);
+	await (await mochi.root.submit({ type: "input", content: "Ask a fork." }, context)).wait(context);
+	assert.ok(forkSaw.includes("The code word is ostrich."), forkSaw.join(" | "));
+	assert.match(forkSaw.at(-1)!, /^You are probe, a fork of this conversation[\s\S]*What is the code word\?$/);
+	const result = (await rootEntries(mochi)).find((entry) => entry.kind === "pi.tool-result");
+	assert.match(messageText(result!.model![0]!), /ostrich$/);
+	const [task] = await agentTasks(mochi);
+	const child = await mochi.harness.commit(async (tx) => (await tx.scanConversations({ ownerTaskId: task! }, 1)).items[0], context);
+	assert.equal(child?.parent?.conversationId, ROOT_CONVERSATION_ID);
+	await mochi.close();
+});
+
+test("agents recurse: a fork starts its own agent, and a nested agent's answer climbs back to root", async () => {
+	const faux = newFaux();
+	const seen = new Map<string, Seen>();
+	scripted(faux, {
+		go: [tool("codemode", { code: `return await tools.agent({ name: "one", brief: "Level one." })` }), "done"],
+		"Level one.": [tool("codemode", { code: `return await tools.agent({ name: "two", brief: "Level two." })` }), "one heard two"],
+		"Level two.": [tool("codemode", { code: `return await tools.agent({ name: "three", brief: "Level three." })` }), "two heard three"],
+		"Level three.": [fauxAssistantMessage("bottom"), ""],
+	}, seen);
+	const mochi = await openTestMochi(await tempDir(), faux);
+	await (await mochi.root.submit({ type: "input", content: "go" }, context)).wait(context);
+	assert.equal((await agentTasks(mochi)).length, 3);
+	const result = (await rootEntries(mochi)).find((entry) => entry.kind === "pi.tool-result");
+	assert.match(messageText(result!.model![0]!), /one heard two$/);
+	await mochi.close();
+});
+
+test("root cannot notify: its reply already reaches the owner", async () => {
+	const faux = newFaux();
+	faux.setResponses([tool("notify", { text: "hi" }), (transcript) => fauxAssistantMessage(messageText(transcript.messages.at(-1)!))]);
+	const whatsapp = recordingChannel("whatsapp");
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
+	await (await mochi.root.submit({ type: "input", content: "go" }, context)).wait(context);
+	assert.deepEqual(whatsapp.sent, []);
+	const result = (await rootEntries(mochi)).find((entry) => entry.kind === "pi.tool-result");
+	assert.match(messageText(result!.model![0]!), /owner's own thread/);
 	await mochi.close();
 });
 

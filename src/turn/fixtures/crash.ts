@@ -82,7 +82,7 @@ const owner = (messageId: string, attachments: readonly Attachment[] = []): Inbo
 if (scenario === "notify") {
 	const file = join(dir, "run-conversation");
 	await once("run", async () => {
-		const run = await mochi.harness.commit((tx) => createSeatConversation(tx, "run", { kind: "ownerless" }), context);
+		const run = await mochi.harness.commit((tx) => createSeatConversation(tx, "agent", { kind: "ownerless" }), context);
 		writeFileSync(file, String(run));
 		await (await mochi.harness.conversation(run, context))!.submit({ type: "input", content: "please notify", requestId: "run:1" }, context);
 	});

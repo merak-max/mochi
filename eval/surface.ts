@@ -18,7 +18,7 @@ export interface Surface {
 	readonly totalBytes: number;
 }
 
-export async function measureSurface(seat: Seat = "owner"): Promise<Surface> {
+export async function measureSurface(seat: Seat = "agent", where: "root" | "new" = "root"): Promise<Surface> {
 	const faux = newFaux();
 	let seen: Message[] = [];
 	faux.setResponses([
@@ -33,7 +33,7 @@ export async function measureSurface(seat: Seat = "owner"): Promise<Surface> {
 		skillsDir: join(REPO, "skills"),
 		agents: await AgentCatalog.load(join(REPO, "agents"), undefined, (name) => testCatalog().model(name)),
 	});
-	const id = seat === "owner" ? mochi.root.id : await mochi.harness.commit((tx) => createSeatConversation(tx, seat, { kind: "ownerless" }), BACKGROUND_CONTEXT);
+	const id = seat === "agent" && where === "root" ? mochi.root.id : await mochi.harness.commit((tx) => createSeatConversation(tx, seat, { kind: "ownerless" }), BACKGROUND_CONTEXT);
 	const conversation = (await mochi.harness.conversation(id, BACKGROUND_CONTEXT))!;
 	await (await conversation.submit({ type: "input", content: "hi" }, BACKGROUND_CONTEXT)).wait(BACKGROUND_CONTEXT);
 	await mochi.close();

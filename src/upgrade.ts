@@ -4,7 +4,7 @@ import { AgentDoc, configure, type ConversationId, defineDoc, defineDocFamily, L
 import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
 import type { ChannelId } from "./channels/types.ts";
 import { allPages } from "./pages.ts";
-import { seatRoot } from "./seats.ts";
+import { reseat, seatRoot } from "./seats.ts";
 import type { AgentCatalog } from "./agents/catalog.ts";
 import type { Log } from "./log.ts";
 import { addTrigger, runAgent, scanTriggers, type TriggerTask } from "./triggers/trigger.ts";
@@ -212,4 +212,17 @@ export const triggerAgents: UpgradeStep = {
 };
 
 /** In unit order. */
-export const UPGRADES: readonly UpgradeStep[] = [outboxToTurns, rootSeat, triggersToTasks, drainAgentKinds, retireRollover, codeToCodemode, triggerAgents];
+/** The owner, run and worker seats became one agent seat. Every conversation that names a retired seat moves to it. */
+export const oneAgentSeat: UpgradeStep = {
+	unit: "U11",
+	name: "one-agent-seat",
+	async run({ storage, line: { harness } }, context) {
+		let changed = 0;
+		for (const { id } of await allPages((cursor) => storage.scanConversations({}, 256, cursor, context))) {
+			if (await harness.commit((tx) => reseat(tx, id), context)) changed++;
+		}
+		return { changed };
+	},
+};
+
+export const UPGRADES: readonly UpgradeStep[] = [outboxToTurns, rootSeat, triggersToTasks, drainAgentKinds, retireRollover, codeToCodemode, triggerAgents, oneAgentSeat];

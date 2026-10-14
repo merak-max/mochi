@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
 import { type ModelThinkingLevel, type Static, Type } from "@earendil-works/pi-ai";
-import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, configure, defineTask, defineTool, type Harness, type ModelRef, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, configure, defineTask, defineTool, type Harness, type ModelRef, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { admits, checkGate, type Classify } from "../brain/classifier.ts";
 import type { ChannelId } from "../channels/types.ts";
 import { journaled } from "../journal.ts";
@@ -211,7 +211,7 @@ export async function addTrigger(
 	const reused = conversation ?? previous?.conversationId;
 	// The definition owns the run's model and role: a re-added trigger applies them to the conversation it keeps.
 	if (reused !== undefined) await configure(tx, reused, { ...agent, instructions });
-	const conversationId = reused ?? (await createSeatConversation(tx, "run", { kind: "ownerless" }, { instructions, ...agent }));
+	const conversationId = reused ?? (await createSeatConversation(tx, "agent", { kind: "ownerless" }, { instructions, ...agent }));
 	const id = await tx.createTask(task, input, { ownership: { kind: "conversation" }, conversationId, background: true });
 	return { id, replaced: previous !== undefined && live(previous) ? previous.id : undefined };
 }
@@ -424,6 +424,7 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 		}),
 		replay: "safe",
 		execute: async (args, api, context) => {
+			if (api.conversationId === ROOT_CONVERSATION_ID) throw new Error("This is the owner's own thread: your reply reaches them. notify is for agents working out of their sight.");
 			const trigger = await api.commit(async (tx) => (await scanTriggers(tx, api.conversationId)).at(-1)?.input.trigger, context);
 			if (trigger?.notifyWhen !== undefined) {
 				let held = await api.memo<number | null>(GATE_MEMO, context);

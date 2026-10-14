@@ -3,6 +3,7 @@ import {
 	AgentDoc,
 	type ConversationId,
 	type ConversationOwnership,
+	type EntryId,
 	defineDoc,
 	defineExtension,
 	type Extension,
@@ -16,59 +17,57 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 
 /**
  * A seat is the kind of conversation, stored in its agent and written only here.
- *   owner   root. Its only voice is its reply. The only seat that starts agents or adds triggers.
- *   run     a trigger run or a background agent. Reaches the owner only with notify; may end a trigger.
- *   worker  a foreground agent. Its answer returns to the call that started it.
- *   user    a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
+ *   agent  root, a trigger run, a subagent, a fork, an A2A context. Every agent conversation has the same tools and
+ *          prompt, so a fork reuses its parent's prompt cache and any agent can start or fork agents, at any depth.
+ *   user   a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
-export const SEATS = ["owner", "run", "worker", "user"] as const;
+export const SEATS = ["agent", "user"] as const;
 export type Seat = (typeof SEATS)[number];
 
 const ALL = SEATS;
-const OWNER: readonly Seat[] = ["owner"];
-const OWNER_AND_RUN: readonly Seat[] = ["owner", "run"];
-/** A user's thread never reaches the owner's apps: Executor approvals are accepted without asking. */
-const OWNER_RUN_WORKER: readonly Seat[] = ["owner", "run", "worker"];
+const AGENT: readonly Seat[] = ["agent"];
 
 /** The tools the model calls directly, and the seats that get each. Their `control` (handoff, terminate) works only on a model-issued call. */
 export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 	codemode: ALL,
-	notify: ["run"],
-	handoff: ["owner", "user"],
+	notify: AGENT,
+	handoff: ALL,
 };
 
 /** Caps, in characters, on each seat's tool schemas and each prompt section. A description that grows past one fails the build. */
 export const BUDGET: { readonly tools: Readonly<Record<Seat, number>>; readonly sections: Readonly<Record<string, number>> } = {
-	tools: { owner: 3000, run: 3000, worker: 2600, user: 3000 },
+	tools: { agent: 3600, user: 3000 },
 	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000, codemode: 9000 },
 };
 
-/** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. */
+/** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. A user's thread never reaches the owner's apps. */
 export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readonly inline: boolean }>> = {
 	read: { seats: ALL, inline: true },
 	bash: { seats: ALL, inline: true },
 	edit: { seats: ALL, inline: true },
 	write: { seats: ALL, inline: true },
 	recall: { seats: ALL, inline: true },
-	history: { seats: OWNER_RUN_WORKER, inline: false },
-	note: { seats: OWNER, inline: true },
-	react: { seats: OWNER, inline: true },
+	history: { seats: AGENT, inline: false },
+	note: { seats: AGENT, inline: true },
+	react: { seats: AGENT, inline: true },
 	web_search: { seats: ALL, inline: true },
 	web_fetch: { seats: ALL, inline: true },
 	llm: { seats: ALL, inline: true },
-	apps_search: { seats: OWNER_RUN_WORKER, inline: true },
-	apps_call: { seats: OWNER_RUN_WORKER, inline: true },
-	agent: { seats: OWNER, inline: true },
-	agent_start: { seats: OWNER, inline: true },
-	trigger_add: { seats: OWNER, inline: true },
-	trigger_list: { seats: OWNER_AND_RUN, inline: true },
-	trigger_remove: { seats: OWNER_AND_RUN, inline: false },
+	apps_search: { seats: AGENT, inline: true },
+	apps_call: { seats: AGENT, inline: true },
+	agent: { seats: AGENT, inline: true },
+	agent_start: { seats: AGENT, inline: false },
+	fork: { seats: AGENT, inline: true },
+	fork_start: { seats: AGENT, inline: false },
+	trigger_add: { seats: AGENT, inline: true },
+	trigger_list: { seats: AGENT, inline: true },
+	trigger_remove: { seats: AGENT, inline: false },
 	web_map: { seats: ALL, inline: false },
 	classify: { seats: ALL, inline: false },
-	apps_skills: { seats: OWNER_RUN_WORKER, inline: false },
-	agent_send: { seats: OWNER, inline: false },
-	agent_stop: { seats: OWNER, inline: false },
-	agent_status: { seats: OWNER, inline: false },
+	apps_skills: { seats: AGENT, inline: false },
+	agent_send: { seats: AGENT, inline: false },
+	agent_stop: { seats: AGENT, inline: false },
+	agent_status: { seats: AGENT, inline: false },
 	browse: { seats: ALL, inline: false },
 	browse_fast: { seats: ALL, inline: false },
 	image_gen: { seats: ALL, inline: false },
@@ -77,18 +76,18 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	gif_search: { seats: ALL, inline: false },
 	gif_save: { seats: ALL, inline: false },
 	transcribe: { seats: ALL, inline: false },
-	proc_start: { seats: OWNER_AND_RUN, inline: false },
-	proc_status: { seats: OWNER_AND_RUN, inline: false },
-	proc_logs: { seats: OWNER_AND_RUN, inline: false },
-	proc_stop: { seats: OWNER_AND_RUN, inline: false },
-	a2a_list: { seats: OWNER_AND_RUN, inline: false },
-	a2a_ask: { seats: OWNER_AND_RUN, inline: false },
-	a2a_send: { seats: OWNER_AND_RUN, inline: false },
-	a2a_status: { seats: OWNER_AND_RUN, inline: false },
-	profile_list: { seats: OWNER, inline: false },
-	profile_create: { seats: OWNER, inline: false },
-	profile_update: { seats: OWNER, inline: false },
-	profile_remove: { seats: OWNER, inline: false },
+	proc_start: { seats: AGENT, inline: false },
+	proc_status: { seats: AGENT, inline: false },
+	proc_logs: { seats: AGENT, inline: false },
+	proc_stop: { seats: AGENT, inline: false },
+	a2a_list: { seats: AGENT, inline: false },
+	a2a_ask: { seats: AGENT, inline: false },
+	a2a_send: { seats: AGENT, inline: false },
+	a2a_status: { seats: AGENT, inline: false },
+	profile_list: { seats: AGENT, inline: false },
+	profile_create: { seats: AGENT, inline: false },
+	profile_update: { seats: AGENT, inline: false },
+	profile_remove: { seats: AGENT, inline: false },
 };
 
 /** Anthropic's billing classifier flags these names. */
@@ -125,7 +124,8 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 	const disagree = [...drift([...modelTools.map((each) => each.name), "codemode"], SURFACE), ...drift(library.map((each) => each.name), LIBRARY)];
 	if (disagree.length > 0) throw new Error(`SURFACE, LIBRARY and the definitions disagree on ${disagree.join(", ")}.`);
 	return SEATS.map((seat) => {
-		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat));
+		// Direct tools carry `control`, which a script call cannot use, so scripts do not see them.
+		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat)).map((each): ToolRegistration => ({ ...each, callers: ["model"] }));
 		const scripted: ToolRegistration[] = [];
 		for (const each of library) {
 			const entry = LIBRARY[each.name]!;
@@ -137,7 +137,7 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 }
 
 /** The host default, for anything that reaches a conversation without a seat: the least capable one. */
-export const defaultSelection = (installed: (name: string) => Extension | undefined): Extension[] => selection("worker").flatMap((name) => installed(name) ?? []);
+export const defaultSelection = (installed: (name: string) => Extension | undefined): Extension[] => selection("user").flatMap((name) => installed(name) ?? []);
 
 export interface SeatChange {
 	readonly instructions?: string;
@@ -180,8 +180,30 @@ export async function createMemoryConversation(tx: Tx, change: { model: ModelRef
 /** Root predates seats and `harness.root` ignores `agent` for an existing root, so each boot re-asserts it. */
 export async function seatRoot(tx: Tx): Promise<boolean> {
 	const agent = await tx.doc(AgentDoc, ROOT_CONVERSATION_ID);
-	const owner = selection("owner");
-	if (JSON.stringify(agent.extensions) === JSON.stringify(owner)) return false;
-	agent.extensions = owner;
+	const seated = selection("agent");
+	if (JSON.stringify(agent.extensions) === JSON.stringify(seated)) return false;
+	agent.extensions = seated;
 	return true;
+}
+
+/** The seats the agent seat replaced. A conversation that still names one moves to the agent seat. */
+const RETIRED_SEATS = new Set(["seat-owner", "seat-run", "seat-worker"]);
+
+export async function reseat(tx: Tx, id: ConversationId): Promise<boolean> {
+	const agent = await tx.doc(AgentDoc, id);
+	if (!Array.isArray(agent.extensions) || !agent.extensions.some((name) => RETIRED_SEATS.has(name))) return false;
+	agent.extensions = selection("agent");
+	return true;
+}
+
+/** The entry a fork made now would start after: the parent's newest. Read it before the commit's first write. */
+export async function forkPoint(tx: Tx, parent: ConversationId): Promise<EntryId> {
+	const newest = (await tx.scanEntries({ conversationId: parent }, 1)).items[0];
+	if (newest === undefined) throw new Error("There is nothing to fork yet.");
+	return newest.id;
+}
+
+/** A fork keeps its parent's whole agent and history through `at`, so its first request reuses the parent's cached prompt. */
+export async function forkSeatConversation(tx: Tx, parent: ConversationId, at: EntryId, ownership: ConversationOwnership): Promise<ConversationId> {
+	return (await tx.forkConversation(parent, at, { ownership })).id;
 }

@@ -367,7 +367,7 @@ test("a notify sends verbatim and leaves root with exactly one new entry, framed
 	faux.setResponses([fauxAssistantMessage(fauxToolCall("notify", { text: "Build failed on main." }), { stopReason: "toolUse" }), fauxAssistantMessage("done")]);
 	const whatsapp = recordingChannel("whatsapp");
 	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
-	const run = (await mochi.harness.conversation(await mochi.harness.commit((tx) => createSeatConversation(tx, "run", { kind: "ownerless" }), context), context))!;
+	const run = (await mochi.harness.conversation(await mochi.harness.commit((tx) => createSeatConversation(tx, "agent", { kind: "ownerless" }), context), context))!;
 	const before = (await mochi.root.entries({}, 100, undefined, context)).items.length;
 	await (await run.submit({ type: "input", content: "check the build" }, context)).wait(context);
 	await turnsSettled(mochi.harness);

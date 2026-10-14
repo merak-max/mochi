@@ -32,7 +32,7 @@ async function sendText(url: string, token: string, messageId: string, contextId
 
 const conversationOf = async (mochi: TestMochi, peer: string, contextId: string) => (await mochi.harness.snapshot(A2AContextDoc, `${peer}:${contextId}`, context))?.conversation ?? null;
 
-test("a2a server: card, bearer auth, one worker conversation per context, redelivery, non-blocking send and GetTask", async (t) => {
+test("a2a server: card, bearer auth, one agent conversation per context, redelivery, non-blocking send and GetTask", async (t) => {
 	const faux = newFaux();
 	faux.setResponses([fauxAssistantMessage("answer one"), fauxAssistantMessage("answer two"), fauxAssistantMessage("answer three"), fauxAssistantMessage("answer four")]);
 	const mochi = await openTestMochi(await tempDir(), faux);
@@ -53,7 +53,7 @@ test("a2a server: card, bearer auth, one worker conversation per context, redeli
 	assert.equal(first.artifacts?.[0]?.parts[0]?.text, "answer one");
 	const c1 = await conversationOf(mochi, "hermes", "c1");
 	assert.notEqual(c1, null);
-	assert.deepEqual((await mochi.harness.snapshot(AgentDoc, c1!, context))?.extensions, ["identity", "notes", "skills", "fast-compaction", "seat-worker"]);
+	assert.deepEqual((await mochi.harness.snapshot(AgentDoc, c1!, context))?.extensions, ["identity", "notes", "skills", "fast-compaction", "seat-agent"]);
 
 	const again = await sendText(url, "hermes-token-123", "m1", "c1", "first question");
 	assert.equal(again.id, first.id);

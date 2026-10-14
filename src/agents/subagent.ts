@@ -3,13 +3,18 @@ import { type Static, Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineTask, defineTool, type TaskId, type TaskRecord, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { journaled } from "../journal.ts";
 import { allPages } from "../pages.ts";
-import { createSeatConversation } from "../seats.ts";
+import { createSeatConversation, forkPoint, forkSeatConversation } from "../seats.ts";
 import { answerText } from "../turn/turn.ts";
 import { type AgentCatalog, THINKING } from "./catalog.ts";
 
-// One task kind for both modes. `agent` is owned by its mochi.call task, so Esc cascades to the child and the call
-// resolves to the answer. `agent_start` is a background task of root: only /stop reaches it, and it posts nothing back;
-// its child sits in seat `run` and may notify the owner itself. Only root's `code` has these functions, so depth is 1.
+// One task kind for every mode. `agent` and `fork` are owned by the calling tool task, so Esc cascades to the child and
+// the call resolves to the answer. `agent_start` and `fork_start` are background tasks of the calling conversation: only
+// /stop reaches them, and they post nothing back; the child may notify the owner itself. Every agent conversation has
+// these functions, so an agent can start or fork agents at any depth.
+//
+// `agent` starts a fresh conversation from a brief. `fork` copies the calling conversation: its history, its agent and
+// its code-mode state, as of the call. The fork's first request repeats the parent's prompt, so it reads the parent's
+// cache instead of paying for the context again.
 
 export type AgentInput = { readonly name: string; readonly brief: string };
 export type AgentResult = { readonly answer: string } | { readonly failure: string };
@@ -63,6 +68,27 @@ export function agentFns({ catalog, read, abortTask }: AgentFnDeps): ToolRegistr
 		if (found === undefined) throw new Error(`No agent named ${name}.`);
 		return found;
 	};
+	const ForkParams = Type.Object({ name: Name, brief: Type.String({ minLength: 1 }) });
+	const fork = async (background: boolean, args: Static<typeof ForkParams>, api: ToolExecutionApi, context: Context) => {
+		let id: TaskId<AgentResult> | undefined;
+		await api.commit(async (tx) => {
+			const at = await forkPoint(tx, api.conversationId);
+			({ id } = await journaled(tx, api.taskId, "fork", async () => {
+				const brief = `You are ${args.name}, a fork of this conversation made by the script above. Your answer goes back to that script, not to the owner.\n\n${args.brief}`;
+				const id = await tx.createTask(AgentTask, { name: args.name, brief }, background ? { ownership: { kind: "conversation" }, background: true } : { ownership: { kind: "task", taskId: api.taskId } });
+				await forkSeatConversation(tx, api.conversationId, at, { kind: "task", taskId: id });
+				return id;
+			}));
+		}, context);
+		return settle(background, args.name, id!, api, context);
+	};
+	const settle = async (background: boolean, name: string, id: TaskId<AgentResult>, api: ToolExecutionApi, context: Context) => {
+		if (background) return { structuredOutput: { name } };
+		const { outcome } = (await api.waitForTask(id, context)).state;
+		if (outcome.status !== "completed") throw new Error(`Agent ${name} was ${outcome.status}.`);
+		if ("failure" in outcome.result) throw new Error(`Agent ${name} did not answer: ${outcome.result.failure}.`);
+		return { structuredOutput: outcome.result.answer };
+	};
 	const start = async (background: boolean, args: Static<typeof StartParams>, api: ToolExecutionApi, context: Context) => {
 		const type = catalog.types.get(args.type ?? "worker");
 		if (type === undefined) throw new Error(`Unknown type "${args.type}". Use ${types}.`);
@@ -73,7 +99,7 @@ export function agentFns({ catalog, read, abortTask }: AgentFnDeps): ToolRegistr
 			({ id } = await journaled(tx, api.taskId, "agent", async () => {
 				const options = background ? ({ ownership: { kind: "conversation" }, background: true } as const) : { ownership: { kind: "task", taskId: api.taskId } as const };
 				const id = await tx.createTask(AgentTask, { name: args.name, brief: args.brief }, options);
-				await createSeatConversation(tx, background ? "run" : "worker", { kind: "task", taskId: id }, {
+				await createSeatConversation(tx, "agent", { kind: "task", taskId: id }, {
 					...(model === undefined ? {} : { model }),
 					...(thinking === undefined ? {} : { thinkingLevel: thinking }),
 					...(type.instructions === "" ? {} : { instructions: type.instructions }),
@@ -81,16 +107,12 @@ export function agentFns({ catalog, read, abortTask }: AgentFnDeps): ToolRegistr
 				return id;
 			}));
 		}, context);
-		if (background) return { structuredOutput: { name: args.name } };
-		const { outcome } = (await api.waitForTask(id!, context)).state;
-		if (outcome.status !== "completed") throw new Error(`Agent ${args.name} was ${outcome.status}.`);
-		if ("failure" in outcome.result) throw new Error(`Agent ${args.name} did not answer: ${outcome.result.failure}.`);
-		return { structuredOutput: outcome.result.answer };
+		return settle(background, args.name, id!, api, context);
 	};
 	return [
 		defineTool({
 			name: "agent",
-			description: `A subagent in its own conversation; resolves to its answer. It sees nothing of this chat: brief it on the goal, what done looks like and what to return. type: ${types} (default worker). model: fast, default, strongest or an alias.`,
+			description: `A fresh agent; resolves to its answer. It sees nothing of this chat, so brief it fully. type: ${types} (default worker). model: fast, default, strongest or an alias.`,
 			parameters: StartParams,
 			structuredOutputSchema: Type.String(),
 			replay: "safe",
@@ -103,6 +125,22 @@ export function agentFns({ catalog, read, abortTask }: AgentFnDeps): ToolRegistr
 			structuredOutputSchema: Type.Object({ name: Type.String() }),
 			replay: "safe",
 			execute: (args, api, context) => start(true, args, api, context),
+		}),
+		defineTool({
+			name: "fork",
+			description: "A copy of you with this whole conversation; resolves to its answer. The brief is its next message. Reuses this chat's prompt cache, so Promise.all several to try paths at once.",
+			parameters: ForkParams,
+			structuredOutputSchema: Type.String(),
+			replay: "safe",
+			execute: (args, api, context) => fork(false, args, api, context),
+		}),
+		defineTool({
+			name: "fork_start",
+			description: "fork in the background. Returns at once and posts nothing here; it may notify the owner. Check with agent_status.",
+			parameters: ForkParams,
+			structuredOutputSchema: Type.Object({ name: Type.String() }),
+			replay: "safe",
+			execute: (args, api, context) => fork(true, args, api, context),
 		}),
 		defineTool({
 			name: "agent_send",

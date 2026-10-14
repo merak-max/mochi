@@ -88,7 +88,7 @@ const summary = {
 	calls: tools.filter((task) => (task.input as ToolTaskInput).kind === "nested").length,
 	agents: (await mochi.harness.commit((tx) => tx.scanTasks({ kind: "mochi.agent" }, 100), context)).items.map((task) => task.state.status),
 	conversations: (await mochi.harness.commit((tx) => tx.scanConversations({}, 100), context)).items.length,
-	replay: mochi.registry.snapshot().extension("seat-owner")?.tools?.find((tool) => tool.name === "codemode")?.replay,
+	replay: mochi.registry.snapshot().extension("seat-agent")?.tools?.find((tool) => tool.name === "codemode")?.replay,
 };
 await mochi.close();
 process.stdout.write(`${JSON.stringify(summary)}\n`);

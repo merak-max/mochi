@@ -18,7 +18,7 @@ Every candidate gets the same brief, so the brief is the contract.
 
 ## Fan out
 
-Start every candidate with `agent`, `type: "worker"`, in one script with `Promise.all`. Each gets the brief, the shared background, its output path, and an instruction to add a short rationale naming the options it considered and rejected. If one fails, continue with N-1 and note it.
+Start every candidate with `fork` in one script with `Promise.all`. A fork already holds the shared background, so each brief names only its output path and asks for a short rationale naming the options it considered and rejected. For candidates on different models, use `agent` with `type: "worker"` and the shared background in the brief. If one fails, continue with N-1 and note it.
 
 ## Judge and pick
 
