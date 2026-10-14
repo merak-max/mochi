@@ -39,12 +39,9 @@ const FileSchema = Type.Object(
 		models: Type.Optional(ModelsSchema),
 		/** The Executor MCP endpoint for app tools. Absent: the apps functions say they are not connected. */
 		executorUrl: Type.Optional(Type.String({ pattern: "^https?://" })),
-		/** `reflect`: a fork of root saves notes before root is compacted; default true. `dreaming` is the retired nightly review, read and ignored. */
-		memory: Type.Optional(Type.Object({ repo: Type.Optional(Type.String({ minLength: 1 })), reflect: Type.Optional(Type.Boolean()), dreaming: Type.Optional(Type.Unknown()) }, { additionalProperties: false })),
 		/** Image, video and speech providers; see src/media/config.example.json. */
 		media: Type.Optional(MediaConfigSchema),
 		/** Minutes of silence after which an owner message starts a fresh thread; 0 never resets. Default 60. */
-		idleResetMinutes: Type.Optional(Type.Integer({ minimum: 0 })),
 		users: Type.Optional(Type.Array(ChatUserSchema)),
 		/** The owner's other agents that mochi may call over A2A, by name. */
 		a2a: Type.Optional(Type.Object({ peers: Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), A2APeerSchema) }, { additionalProperties: false })),

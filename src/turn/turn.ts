@@ -193,7 +193,6 @@ export interface Line {
 	readonly media: Omit<MediaDeps, "workDir">;
 	readonly users: readonly ChatUser[];
 	readonly command: (input: CommandInput, context: Context) => Promise<CommandReply>;
-	readonly idleReset?: (conversation: Conversation, key: string, context: Context) => Promise<boolean>;
 }
 
 // The record is a passive write, which a task's conversation handle cannot submit, so it uses the host's handles.
@@ -462,8 +461,6 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 			if (known !== null) {
 				const prior = await harness.commit((tx) => tx.submissionByRequest(known, key), context);
 				if (prior !== undefined) return prior.id;
-				// Before the Turn opens: its run phase can submit at once, and a stale thread must not be resent.
-				if (line.idleReset !== undefined) await line.idleReset(await conversationOf(line, known, context), key, context);
 			}
 			const tag = tagOf(inbound.channel, inbound.messageId, inbound.at, line.timeZone);
 			const files = await saveFiles(line.workDir, inbound);

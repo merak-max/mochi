@@ -1,173 +1,262 @@
 import type { Context } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import { type Message, Type } from "@earendil-works/pi-ai";
 import {
-	type Cursor,
-	type DocumentReader,
+	AssistantEntry,
+	CompactionTask,
+	type ConversationId,
 	defineDoc,
 	defineExtension,
 	defineTool,
 	type EntryRecord,
 	type Extension,
 	type Harness,
+	hook,
+	LiveDoc,
 	ROOT_CONVERSATION_ID,
 	section,
-	type ToolExecutionApi,
-	type ToolTaskInput,
 	type Tx,
+	UserEntry,
 } from "@earendil-works/pi-durable";
 import type { SearchIndex } from "../index/fts.ts";
-import { type Note, type NoteDraft, NoteDraftSchema, NoteKindSchema, OWNER_CAP_CHARS, OWNER_KINDS, SlugSchema } from "../notes/schema.ts";
-import { findSecret, secretRejection } from "../notes/secrets.ts";
-import { parseWith } from "../parse.ts";
-import { memoryChanged, replayed, RepoDoc } from "./publication.ts";
+import { messageText } from "../text.ts";
+import type { FastCompletion } from "../turn/lifecycle.ts";
+import { type Block, blockKey, cover, halves, pending, RAW_MAX } from "./tree.ts";
 
-export type Memory = { notes: Record<string, Note> };
+// Two OptMem logs share one tree shape. The memory log holds lines the model chose to keep (`note`); a conversation's
+// log holds one line per turn. Raw lines never change; each complete block gets one summary line, written once. The
+// prompt shows `cover()` of the memory log, and a compaction replaces old turns with `cover()` of the turn log, so
+// nothing is summarized twice and every line can be opened again with `zoom`.
 
-export const MemoryDoc = defineDoc<Memory>({
+/** How many lines the wake view and a compacted window show. A reading size, not a storage limit. */
+const WAKE_LINES = 96;
+
+type Line = { readonly at: string; readonly text: string };
+type Tree = { readonly lines: Line[]; readonly blocks: Record<string, string> };
+
+const empty = (): Tree => ({ lines: [], blocks: {} });
+
+export const MemoryLog = defineDoc<Tree>({ kind: "mochi.memory-log", version: 1, scope: "session", initial: empty });
+
+/** One turn log per conversation; `upTo` is the newest entry folded into it. */
+export const TurnLog = defineDoc<Tree & { readonly upTo: number }>({
+	kind: "mochi.turn-log",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ ...empty(), upTo: 0 }),
+});
+
+const OldMemoryDoc = defineDoc<{ notes: Record<string, { subject: string; kind: string; body: string; updated: string }> }>({
 	kind: "mochi.memory",
 	version: 2,
 	scope: "conversation",
 	history: "rewindable",
 	fork: "current",
 	initial: () => ({ notes: {} }),
-	migrate: (value) => ({ notes: (value.notes ?? {}) as Memory["notes"] }),
 });
 
-/** A section that appears and disappears makes pi-durable re-add every section, so both always render. */
-export const OWNER_EMPTY = "no user note yet";
-export const INDEX_EMPTY = "no other notes yet";
-
-const MAX_ROW_CHARS = 2000;
-
-export async function readMemory(read: DocumentReader, context: Context): Promise<Memory> {
-	return (await read.snapshot(MemoryDoc, ROOT_CONVERSATION_ID, context)) ?? MemoryDoc.definition.initial();
+function render(tree: Tree, [lo, hi]: Block): string {
+	if (hi - lo === 1) return `#${lo} ${tree.lines[lo]!.at} ${tree.lines[lo]!.text}`;
+	const summary = tree.blocks[blockKey([lo, hi])];
+	if (summary !== undefined) return `#${lo}-${hi - 1} ${summary}`;
+	return tree.lines.slice(lo, hi).map((line, i) => `#${lo + i} ${line.at} ${line.text}`).join("\n");
 }
 
-export async function memoryAsOf(harness: DocumentReader & Pick<Harness, "commit">, date: string, context: Context): Promise<Memory> {
-	const at = Date.parse(date.length === 10 ? `${date}T23:59:59.999Z` : date);
-	if (Number.isNaN(at)) throw new Error(`Not a date: ${date}.`);
-	let cursor: Cursor | undefined;
-	do {
-		const page = await harness.commit((tx) => tx.scanEntries({ conversationId: ROOT_CONVERSATION_ID }, 200, cursor), context);
-		const entry = page.items.find((candidate) => entryTime(candidate) <= at);
-		if (entry !== undefined) return (await harness.snapshotAsOf(MemoryDoc, ROOT_CONVERSATION_ID, entry.id, context)) ?? MemoryDoc.definition.initial();
-		cursor = page.next;
-	} while (cursor !== undefined);
-	return MemoryDoc.definition.initial();
+function wake(tree: Tree): string {
+	return cover(tree.lines.length, WAKE_LINES).map((block) => render(tree, block)).join("\n");
 }
 
-const entryTime = (entry: EntryRecord): number =>
-	entry.kind === "mochi.memory-change" && entry.data !== null && typeof entry.data === "object" && !Array.isArray(entry.data) && typeof entry.data?.at === "number"
-		? entry.data.at : entry.model?.[0]?.timestamp ?? Number.POSITIVE_INFINITY;
-
-export function sortedNotes(memory: Memory): Note[] {
-	return Object.values(memory.notes).sort((a, b) => a.slug.localeCompare(b.slug));
+function zoom(tree: Tree, block: Block): string {
+	const parts = halves(block);
+	if (parts === undefined) return render(tree, block);
+	return parts.filter(([lo]) => lo < tree.lines.length).map((part) => render(tree, part)).join("\n");
 }
 
-export async function writeNote(tx: Tx, input: NoteDraft, source: Note["source"], today: string, key?: string): Promise<Note> {
-	const receipt = await replayed(tx, key);
-	if (receipt?.note != null) return { ...receipt.note };
-	const draft = parseWith(NoteDraftSchema, { slug: input.slug, kind: input.kind, subject: input.subject, body: input.body }, "note");
-	const secret = findSecret(`${draft.subject}\n${draft.body}`, process.env);
-	if (secret !== undefined) throw new Error(secretRejection(secret));
-	const memory = await tx.doc(MemoryDoc, ROOT_CONVERSATION_ID);
-	const existing = Object.hasOwn(memory.notes, draft.slug) ? memory.notes[draft.slug] : undefined;
-	if (existing?.writtenBy === "owner") throw new Error(`Note "${draft.slug}" was written by the owner and cannot be edited by mochi.`);
-	if (OWNER_KINDS.has(draft.kind)) {
-		const total = Object.values(memory.notes)
-			.filter((other) => other.slug !== draft.slug && OWNER_KINDS.has(other.kind))
-			.reduce((sum, other) => sum + other.body.length, draft.body.length);
-		if (total > OWNER_CAP_CHARS) {
-			throw new Error(
-				`user and rule notes would total ${total} characters, over the ${OWNER_CAP_CHARS} cap. ` +
-					"Consolidate or shorten existing user/rule notes first, or store this as another kind.",
-			);
-		}
+function parseBlock(id: string): Block {
+	const match = /^#?(\d+)-(\d+)$/.exec(id.trim());
+	if (match === null) throw new Error(`Not a block id: ${id}. Use lo-hi as the view prints it, like 0-7.`);
+	const lo = Number(match[1]);
+	const hi = Number(match[2]) + 1;
+	const size = hi - lo;
+	if (size < 2 || (size & (size - 1)) !== 0 || lo % size !== 0) throw new Error(`${id} is not a block. Blocks are aligned powers of two, like 0-7 or 8-15.`);
+	return [lo, hi];
+}
+
+const MERGE_SYSTEM =
+	"Merge the numbered lines into one line. Keep what has lasting effect: names, dates, numbers, decisions, promises, rules. " +
+	"Drop what does not. Invent nothing. Answer with the one line only.";
+
+/** The source a block's summary is made from: its raw lines while small, else its two halves' summaries. */
+function mergeInput(tree: Tree, block: Block): string | undefined {
+	const [lo, hi] = block;
+	if (hi - lo <= RAW_MAX) return tree.lines.slice(lo, hi).map((line, i) => `#${lo + i} ${line.at} ${line.text}`).join("\n");
+	const parts = halves(block)!;
+	const texts = parts.map((part) => tree.blocks[blockKey(part)]);
+	if (texts.some((text) => text === undefined)) return undefined;
+	return parts.map((part, i) => `#${part[0]}-${part[1] - 1} ${texts[i]}`).join("\n");
+}
+
+async function merge(fast: FastCompletion, input: string, context: Context): Promise<string> {
+	const text = await fast({ system: MERGE_SYSTEM, prompt: input }, context);
+	return text.replace(/\s+/g, " ").trim();
+}
+
+function turnLine(entries: readonly EntryRecord[]): string | undefined {
+	const parts: string[] = [];
+	for (const entry of entries) {
+		const message = entry.model?.[0];
+		if (message === undefined) continue;
+		const text = messageText(message).replace(/\s+/g, " ").trim();
+		if (text === "") continue;
+		if (UserEntry.is(entry)) parts.push(`owner: ${text}`);
+		else if (AssistantEntry.is(entry)) parts.push(`mochi: ${text}`);
 	}
-	const note: Note = { ...draft, body: draft.body.trim(), writtenBy: "mochi", updated: today, ...(source === undefined ? {} : { source }) };
-	memory.notes[note.slug] = note;
-	await memoryChanged(tx, memory, note, key);
-	return note;
+	return parts.length === 0 ? undefined : parts.join(" | ");
 }
 
-export async function forgetNote(tx: Tx, slug: string, key?: string): Promise<Note | undefined> {
-	const receipt = await replayed(tx, key);
-	if (receipt !== undefined) return receipt.note === null ? undefined : { ...receipt.note };
-	const memory = await tx.doc(MemoryDoc, ROOT_CONVERSATION_ID);
-	const existing = Object.hasOwn(memory.notes, slug) ? memory.notes[slug] : undefined;
-	if (existing?.writtenBy === "owner") throw new Error(`Note "${slug}" was written by the owner and cannot be removed by mochi.`);
-	delete memory.notes[slug];
-	if (existing !== undefined || key !== undefined) await memoryChanged(tx, memory, existing, key);
-	return existing;
+const stamp = (message: Message | undefined): string => new Date(message?.timestamp ?? Date.now()).toISOString().slice(0, 16).replace("T", " ");
+
+/**
+ * Folds every turn committed after `upTo` into the conversation's turn log, one line per user message and what
+ * followed it. Turns are digested by the fast model, so a long turn is one line too.
+ */
+async function foldTurns(harness: Harness, fast: FastCompletion, conversation: ConversationId, context: Context): Promise<void> {
+	const log = (await harness.snapshot(TurnLog, conversation, context)) ?? { ...empty(), upTo: 0 };
+	const fresh = await harness.commit(async (tx) => {
+		const found: EntryRecord[] = [];
+		let cursor;
+		do {
+			const page = await tx.scanEntries({ conversationId: conversation, minEntryId: (log.upTo + 1) as EntryRecord["id"] }, 200, cursor);
+			found.push(...page.items);
+			cursor = page.next;
+		} while (cursor !== undefined);
+		return found.reverse();
+	}, context);
+	const turns: EntryRecord[][] = [];
+	for (const entry of fresh) {
+		if (UserEntry.is(entry) || turns.length === 0) turns.push([]);
+		turns.at(-1)!.push(entry);
+	}
+	const busy = (await harness.snapshot(LiveDoc, conversation, context))?.run !== undefined;
+	if (busy) turns.pop();
+	for (const turn of turns) {
+		const raw = turnLine(turn);
+		const upTo = turn.at(-1)!.id;
+		const line = raw === undefined ? undefined : raw.length <= 280 ? raw : await merge(fast, raw, context);
+		await harness.commit(async (tx) => {
+			const doc = await tx.doc(TurnLog, conversation);
+			if (doc.upTo >= upTo) return;
+			if (line !== undefined) doc.lines.push({ at: stamp(turn[0]!.model?.[0]), text: line });
+			(doc as { upTo: number }).upTo = upTo;
+		}, context);
+	}
 }
 
-async function sourceOf(api: Pick<ToolExecutionApi, "getTask" | "taskId" | "conversationId">, context: Context): Promise<Note["source"]> {
-	let input = (await api.getTask(api.taskId, context))?.input as ToolTaskInput | undefined;
-	if (input?.kind === "nested") input = (await api.getTask(input.parent, context))?.input as ToolTaskInput | undefined;
-	if (input?.kind !== "model") return undefined;
-	return { conversation: api.conversationId, entry: input.assistant };
+/** Builds every block that is due, smallest first, one commit each, so a crash resumes at the next missing block. */
+async function buildBlocks(read: () => Promise<Tree>, write: (key: string, summary: string) => Promise<void>, fast: FastCompletion, context: Context): Promise<void> {
+	for (;;) {
+		const tree = await read();
+		const next = pending(tree.lines.length, (block) => tree.blocks[blockKey(block)] !== undefined)[0];
+		if (next === undefined) return;
+		const input = mergeInput(tree, next);
+		if (input === undefined) return;
+		await write(blockKey(next), await merge(fast, input, context));
+	}
+}
+
+/** Copies the notes of the retired note document into the memory log once, oldest first. */
+export async function importOldNotes(tx: Tx): Promise<void> {
+	const log = await tx.doc(MemoryLog);
+	if (log.lines.length > 0) return;
+	const old = await tx.doc(OldMemoryDoc, ROOT_CONVERSATION_ID);
+	const notes = Object.values(old.notes).sort((a, b) => a.updated.localeCompare(b.updated));
+	for (const note of notes) log.lines.push({ at: note.updated, text: `${note.subject} (${note.kind}): ${note.body.replace(/\s+/g, " ").trim()}` });
+}
+
+/** One pass over memory: fold new turns, then build due blocks. The feed runs it after commits. */
+export async function maintain(harness: Harness, fast: FastCompletion, conversations: readonly ConversationId[], context: Context): Promise<void> {
+	await buildBlocks(
+		async () => (await harness.snapshot(MemoryLog, context)) ?? empty(),
+		(key, summary) => harness.commit(async (tx) => void ((await tx.doc(MemoryLog)).blocks[key] = summary), context),
+		fast,
+		context,
+	);
+	for (const conversation of conversations) {
+		await foldTurns(harness, fast, conversation, context);
+		await buildBlocks(
+			async () => (await harness.snapshot(TurnLog, conversation, context)) ?? empty(),
+			(key, summary) => harness.commit(async (tx) => void ((await tx.doc(TurnLog, conversation)).blocks[key] = summary), context),
+			fast,
+			context,
+		);
+	}
 }
 
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 
-export function noteTool(deps: { readonly index: SearchIndex; readonly today: () => string }) {
-	const { index, today } = deps;
+export function noteTool(index: SearchIndex) {
 	return defineTool({
 		name: "note",
 		description:
-			"Save a lasting fact about the owner, their people, projects, preferences or standing rules. The note shows in your " +
-			"prompt from the next request. user and rule notes are always visible and share 4,000 characters, so merge them " +
-			"before you add one. An empty body forgets a note you wrote. Never store a credential.",
-		parameters: Type.Object({ slug: SlugSchema, kind: NoteKindSchema, subject: Type.String({ maxLength: 200 }), body: Type.String({ maxLength: 4000 }) }),
+			"Keep one line in memory for good: a fact about the owner, their people or projects, a preference, a standing rule, a decision, " +
+			"or an event of lasting effect. It shows in the memory section of every prompt from the next request. Do not repeat what memory already holds.",
+		parameters: Type.Object({ line: Type.String({ minLength: 1 }) }),
 		replay: "safe",
-		execute: async (args, api, context) => {
-			if (args.body.trim() === "") {
-				const gone = await api.commit((tx) => forgetNote(tx, args.slug, `tool:${api.taskId}`), context);
-				index.replaceNotes(sortedNotes(await readMemory(api, context)));
-				const status = await publicationStatus(api, context);
-				return text((gone === undefined ? `No note ${args.slug}; nothing to forget.` : `Forgot note ${args.slug}.`) + status);
+		execute: async ({ line }, api, context) => {
+			const at = new Date().toISOString().slice(0, 10);
+			const one = line.replace(/\s+/g, " ").trim();
+			let position = await api.memo<number>("note.position", context);
+			if (position === undefined) {
+				const appended = await api.commit(async (tx) => {
+					const log = await tx.doc(MemoryLog);
+					log.lines.push({ at, text: one });
+					return log.lines.length - 1;
+				}, context);
+				position = await api.memo("note.position", appended, context);
 			}
-			const source = await sourceOf(api, context);
-			const note = await api.commit((tx) => writeNote(tx, args, source, today(), `tool:${api.taskId}`), context);
-			index.replaceNotes(sortedNotes(await readMemory(api, context)));
-			return text(`Saved note ${note.slug}.` + await publicationStatus(api, context));
+			index.addMemory(position, at, one);
+			return text(`Kept as #${position}.`);
 		},
 	});
 }
 
-async function publicationStatus(read: DocumentReader, context: Context): Promise<string> {
-	const repo = await read.snapshot(RepoDoc, context);
-	if (repo?.repo == null) return "";
-	return repo.queue.length === 0 ? " Durably saved; local Git published." : ` Durably saved; local Git pending (${repo.queue.length} revisions).${repo.blocked === null ? "" : ` ${repo.blocked}`}`;
+export function zoomTool() {
+	return defineTool({
+		name: "zoom",
+		description: "Open one block of memory, or of this conversation's earlier turns, into its two halves, down to the raw lines. Pass the id as the view prints it, like 0-7.",
+		parameters: Type.Object({ block: Type.String(), turns: Type.Optional(Type.Boolean()) }),
+		replay: "safe",
+		execute: async (args, api, context) => {
+			const block = parseBlock(args.block);
+			const tree = args.turns === true ? await api.snapshot(TurnLog, api.conversationId, context) : await api.snapshot(MemoryLog, context);
+			if (tree === undefined || block[0] >= tree.lines.length) throw new Error(`#${args.block} is past the end of the log.`);
+			return text(zoom(tree, block));
+		},
+	});
 }
 
 export function recallTool(index: SearchIndex) {
 	return defineTool({
 		name: "recall",
 		description:
-			"Search past chats and notes by words, the owner's chat first. Search before you say the owner never told you " +
-			"something. Pass entry instead of query to read the messages around one hit. asOf (a date) reads memory as it was on that date.",
+			"Search memory and past chats by words, the owner's chat first. Search before you say the owner never told you something. " +
+			"Pass entry instead of query to read the messages around one chat hit.",
 		parameters: Type.Object({
 			query: Type.Optional(Type.String()),
 			entry: Type.Optional(Type.Integer({ minimum: 1 })),
 			after: Type.Optional(Type.String()),
 			before: Type.Optional(Type.String()),
-			asOf: Type.Optional(Type.String()),
-			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 })),
+			limit: Type.Optional(Type.Integer({ minimum: 1 })),
 		}),
 		replay: "safe",
 		execute: async (args, api, context) => {
 			if (args.entry !== undefined) {
 				const rows = index.scroll(args.entry, 5);
 				if (rows === undefined) throw new Error(`Entry ${args.entry} is not in the chat index.`);
-				return text(rows.map((row) => `--- entry ${row.ref} ${row.kind} ${row.at}\n${row.text.length > MAX_ROW_CHARS ? `${row.text.slice(0, MAX_ROW_CHARS)}…` : row.text}`).join("\n"));
+				return text(rows.map((row) => `--- entry ${row.ref} ${row.kind} ${row.at}\n${row.text}`).join("\n"));
 			}
-			if (args.asOf !== undefined) {
-				const notes = sortedNotes(await memoryAsOf(api, args.asOf, context));
-				return text(notes.length === 0 ? `No notes as of ${args.asOf}.` : notes.map((note) => `${note.slug}: ${note.subject} (${note.kind})\n${note.body}`).join("\n\n"));
-			}
-			if (args.query === undefined) throw new Error("Pass query, entry or asOf.");
-			// The caller's context runs from its newest reset or compaction head; hits it already sees are left out.
+			if (args.query === undefined) throw new Error("Pass query or entry.");
 			const marker = await api.commit((tx) => tx.latestHeadMarker(api.conversationId), context);
 			const hits = index.search({
 				query: args.query,
@@ -176,52 +265,59 @@ export function recallTool(index: SearchIndex) {
 				...(args.after === undefined ? {} : { after: args.after }),
 				...(args.before === undefined ? {} : { before: args.before }),
 			});
-			const notes = (await readMemory(api, context)).notes;
-			const lines = hits.map((hit) => {
-				if (hit.kind !== "note") return `${hit.at} ${hit.kind} entry ${hit.ref}: ${hit.snippet}`;
-				const found = notes[hit.ref.slice("note:".length)];
-				return found === undefined ? `${hit.at} ${hit.ref}: ${hit.snippet}` : `${hit.at} ${hit.ref}: ${found.subject} (${found.kind})\n${found.body}`;
-			});
+			const lines = hits.map((hit) => (hit.kind === "memory" ? `${hit.at} memory ${hit.ref}: ${hit.snippet}` : `${hit.at} ${hit.kind} entry ${hit.ref}: ${hit.snippet}`));
 			return text(lines.length === 0 ? "No matches." : lines.join("\n"));
 		},
 	});
 }
-
-const HISTORY_LIMIT = 2000;
 
 export function historyTool(index: SearchIndex) {
 	return defineTool({
 		name: "history",
 		description:
 			"Past chat as rows { at, kind, entry, conversation, text }, oldest first, for a script to filter, chunk and hand to llm; " +
-			"print only the result. after/before are ISO times. everywhere also reads trigger and agent runs. Up to 2000 rows; page with after.",
+			"print only the result. after/before are ISO times. everywhere also reads trigger and agent runs. Page with after.",
 		parameters: Type.Object({
 			after: Type.Optional(Type.String()),
 			before: Type.Optional(Type.String()),
 			everywhere: Type.Optional(Type.Boolean()),
-			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: HISTORY_LIMIT })),
+			limit: Type.Optional(Type.Integer({ minimum: 1 })),
 		}),
 		structuredOutputSchema: Type.Array(Type.Object({ at: Type.String(), kind: Type.String(), entry: Type.Integer(), conversation: Type.Integer(), text: Type.String() })),
 		replay: "safe",
 		execute: async (args) => {
-			const rows = index.range({ ...(args.after === undefined ? {} : { after: args.after }), ...(args.before === undefined ? {} : { before: args.before }), everywhere: args.everywhere ?? false, limit: args.limit ?? HISTORY_LIMIT });
+			const rows = index.range({ ...(args.after === undefined ? {} : { after: args.after }), ...(args.before === undefined ? {} : { before: args.before }), everywhere: args.everywhere ?? false, limit: args.limit ?? 2000 });
 			return { structuredOutput: rows.map((row) => ({ at: row.at, kind: row.kind, entry: Number(row.ref), conversation: row.conversation, text: row.text })) };
 		},
 	});
 }
 
-export function notesExtension(): Extension {
-	const notes = async (read: DocumentReader, context: Context, owner: boolean): Promise<Note[]> =>
-		sortedNotes(await readMemory(read, context)).filter((note) => OWNER_KINDS.has(note.kind) === owner);
+/**
+ * The memory section: the wake view of the memory log. It always renders, so the section set never changes. The
+ * extension keeps the name the stored conversations already select.
+ */
+export function memoryExtension(): Extension {
 	return defineExtension({
 		name: "notes",
-		sections: [
-			section("owner", async (input, context) =>
-				(await notes(input.read, context, true)).map((note) => `## ${note.subject} (${note.kind})\n${note.body}`).join("\n\n") || OWNER_EMPTY,
-			),
-			section("notes-index", async (input, context) =>
-				(await notes(input.read, context, false)).map((note) => `${note.slug}: ${note.subject} (${note.kind})`).join("\n") || INDEX_EMPTY,
-			),
-		],
+		sections: [section("memory", async (input, context) => wake((await input.read.snapshot(MemoryLog, context)) ?? empty()) || "Nothing kept yet. Keep the first line with tools.note.")],
 	});
 }
+
+/**
+ * Compaction keeps the newest turns verbatim and replaces the rest with the cover of this conversation's turn log, as
+ * of the first kept entry. Blocks the feed has not built yet show as raw lines, so compaction never waits on a model.
+ */
+export function windowExtension(): Extension {
+	return defineExtension({
+		name: "fast-compaction",
+		hooks: [hook(CompactionTask, {
+			beforeCompact: async (input, api, context) => {
+				const log = await api.snapshot(TurnLog, api.conversationId, context);
+				if (log === undefined || log.lines.length === 0) return undefined;
+				const view = wake(log);
+				return { summary: `Earlier turns of this conversation, oldest first. Each #lo-hi line merges turns; open one with tools.zoom({ block, turns: true }).\n${view}` };
+			},
+		})],
+	});
+}
+

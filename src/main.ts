@@ -27,6 +27,7 @@ import { AUTH_COMMAND, authFile, loginExecutor, storedTokenConnector } from "./a
 import { connectApps } from "./apps/apps.ts";
 import { InboundCursorDoc, ingest } from "./turn/turn.ts";
 import { runFeed } from "./memory/feed.ts";
+import { fastCompletion } from "./turn/lifecycle.ts";
 
 /** Only iMessage serves users; the other adapters stay owner-only. */
 const ADAPTERS: Readonly<Record<ChatChannelId, (env: Env, users: readonly ChatUser[]) => Setup<Channel>>> = {
@@ -159,9 +160,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			firecrawlKey: config.firecrawlKey,
 			...(config.env.FIRECRAWL_PROFILE?.trim() ? { firecrawlProfile: config.env.FIRECRAWL_PROFILE.trim() } : {}),
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env } }),
-			...(config.file.idleResetMinutes === undefined ? {} : { idleResetMinutes: config.file.idleResetMinutes }),
 			...(apps === undefined ? {} : { apps }),
-			memory: { repo: resolve(config.file.memory?.repo ?? join(config.dataDir, "memory")), ...(config.file.memory?.reflect === undefined ? {} : { reflect: config.file.memory.reflect }) },
 			index,
 			skillsDir: join(REPO, "skills"),
 			agents: await AgentCatalog.load(join(REPO, "agents"), config.home.agentsDir, config.modelSetup.ref),
@@ -173,7 +172,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			timeZone: config.timeZone,
 			publicUrl: config.env.MOCHI_PUBLIC_URL,
 			scheduling: channelSet === "terminal" ? "local" : "daemon",
-			today: () => new Intl.DateTimeFormat("en-CA", { timeZone: config.timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()),
 			log,
 			...(await readInstructions(config.home)),
 		},
@@ -183,7 +181,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	await listenAttach(socketPath(config.dataDir), { line: mochi.line, models, log }, running);
 
 	const background = [
-		runFeed(mochi.harness, index, running, (error) => log("index.failed", { error: String(error) })),
+		runFeed(mochi.harness, index, fastCompletion(models, config.modelSetup.fast), running, (error) => log("memory.failed", { error: String(error) })),
 		...(apps === undefined ? [] : [apps.run(running)]),
 		// A terminal-only daemon (chat, print) serves one script; triggers wait for the real daemon.
 		...(channelSet === "terminal" ? [] : [triggersComponent(mochi, config, running), a2aComponent(mochi, config, a2a, running)]),

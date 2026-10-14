@@ -7,7 +7,7 @@ import { createModels, createProvider, type MutableModels } from "@earendil-work
 import { getBuiltinClassifierModel, getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { type Static, Type } from "typebox";
-import type { Env } from "../notes/secrets.ts";
+import type { Env } from "../channels/types.ts";
 import { JEV } from "./classifier.ts";
 
 /**

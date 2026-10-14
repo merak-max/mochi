@@ -14,7 +14,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { messageText } from "../text.ts";
 
-export type FastCompletion = (request: { readonly system: string; readonly prompt: string; readonly maxTokens: number }, context: Context) => Promise<string>;
+export type FastCompletion = (request: { readonly system: string; readonly prompt: string; readonly maxTokens?: number }, context: Context) => Promise<string>;
 
 export function fastCompletion(models: Models, fast: ModelRef): FastCompletion {
 	return async ({ system, prompt, maxTokens }, context) => {
@@ -23,8 +23,8 @@ export function fastCompletion(models: Models, fast: ModelRef): FastCompletion {
 		const response = await models.completeSimple(model, {
 			systemPrompt: system,
 			messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-		}, { ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }), reasoning: "low", cacheRetention: "none", maxTokens: Math.min(model.maxTokens, maxTokens) });
-		if (response.stopReason !== "stop" || response.content.some((part) => part.type === "toolCall")) throw new Error("Fast summary did not finish.");
+		}, { ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }), reasoning: "low", cacheRetention: "none", maxTokens: Math.min(model.maxTokens, maxTokens ?? model.maxTokens) });
+		if (response.stopReason !== "stop" || response.content.some((part) => part.type === "toolCall")) throw new Error(`Fast model did not finish: ${response.stopReason}${response.errorMessage === undefined ? "" : ` (${response.errorMessage})`}.`);
 		const text = messageText(response).trim();
 		if (text === "") throw new Error("Fast summary was empty.");
 		return text;

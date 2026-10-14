@@ -4,24 +4,18 @@ import type { IndexDoc, SearchIndex } from "../index/fts.ts";
 import { allPages } from "../pages.ts";
 import { pause } from "../pause.ts";
 import { messageText } from "../text.ts";
-import { readMemory, sortedNotes } from "./memory.ts";
+import type { FastCompletion } from "../turn/lifecycle.ts";
+import { maintain, MemoryLog } from "./memory.ts";
 
 const PAGE = 200;
 const RETRY_MS = 5000;
 
-/** Catch-up: every conversation's committed user and assistant text past its stored entry cursor. */
-export async function indexOnce(harness: Harness, index: SearchIndex, context: Context): Promise<number> {
-	let added = 0;
-	for (const conversation of await allConversations(harness, context)) added += await indexConversation(harness, index, conversation, context);
-	index.replaceNotes(sortedNotes(await readMemory(harness, context)));
-	return added;
-}
-
 /**
- * Subscribes to commits, then catches up, then indexes each conversation a commit appended entries to, until `context`
- * aborts. Subscribing first means no commit falls between the catch-up and the live feed.
+ * Subscribes to commits, then catches up, then for each conversation a commit appended entries to: indexes its chat text
+ * and folds its turns into memory, until `context` aborts. Subscribing first means no commit falls between the catch-up
+ * and the live feed.
  */
-export async function runFeed(harness: Harness, index: SearchIndex, context: Context, onError: (error: unknown) => void): Promise<void> {
+export async function runFeed(harness: Harness, index: SearchIndex, fast: FastCompletion, context: Context, onError: (error: unknown) => void): Promise<void> {
 	const signal = context.abortSignal;
 	const aborted = (): boolean => signal?.aborted === true;
 	const dirty = new Set<ConversationId>();
@@ -38,8 +32,10 @@ export async function runFeed(harness: Harness, index: SearchIndex, context: Con
 			const marked = [...dirty];
 			dirty.clear();
 			try {
-				for (const conversation of all ? await allConversations(harness, context) : marked) await indexConversation(harness, index, conversation, context);
-				index.replaceNotes(sortedNotes(await readMemory(harness, context)));
+				const conversations = all ? await allConversations(harness, context) : marked;
+				for (const conversation of conversations) await indexConversation(harness, index, conversation, context);
+				await maintain(harness, fast, conversations, context);
+				index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
 				all = false;
 			} catch (error) {
 				if (aborted()) return;

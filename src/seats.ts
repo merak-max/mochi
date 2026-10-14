@@ -39,12 +39,6 @@ export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 	handoff: ["agent", "user"],
 };
 
-/** Caps, in characters, on each seat's tool schemas and each prompt section. A description that grows past one fails the build. */
-export const BUDGET: { readonly tools: Readonly<Record<Seat, number>>; readonly sections: Readonly<Record<string, number>> } = {
-	tools: { agent: 3600, trigger: 3000, peer: 2600, user: 3000 },
-	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000, codemode: 9700 },
-};
-
 /** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. */
 export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readonly inline: boolean }>> = {
 	read: { seats: ALL, inline: true },
@@ -54,6 +48,7 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	recall: { seats: ALL, inline: true },
 	history: { seats: NOT_USER, inline: false },
 	note: { seats: AGENT, inline: true },
+	zoom: { seats: NOT_USER, inline: true },
 	react: { seats: AGENT, inline: true },
 	web_search: { seats: ALL, inline: true },
 	web_fetch: { seats: ALL, inline: true },

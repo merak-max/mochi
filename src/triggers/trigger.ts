@@ -213,7 +213,7 @@ function checkRecipients(notify: readonly string[], users: readonly ChatUser[]):
 }
 
 export function parseSeeds(file: Readonly<Record<string, unknown>>, users: readonly ChatUser[]): Trigger[] {
-	const seeds = parseWith(Type.Array(TriggerSchema), file.triggers ?? [], "triggers in data/config.json").map(validateTrigger);
+	const seeds = parseWith(Type.Array(TriggerSchema), file.triggers ?? [], "triggers in config.toml").map(validateTrigger);
 	for (const seed of seeds) {
 		if (seed.notify !== undefined) checkRecipients(seed.notify, users);
 	}

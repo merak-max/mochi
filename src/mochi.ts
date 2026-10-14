@@ -21,7 +21,7 @@ import type { Log } from "./log.ts";
 import type { AgentCatalog } from "./agents/catalog.ts";
 import { agentFns, AgentTask } from "./agents/subagent.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
-import { noteTool, notesExtension, readMemory, historyTool, recallTool, sortedNotes } from "./memory/memory.ts";
+import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
 import { defaultSelection, seatExtensions, SCRIPT_DEADLINE_MS } from "./seats.ts";
@@ -33,21 +33,17 @@ import { type MediaDeps, mediaFns } from "./media/media.ts";
 import { gifFns } from "./media/gif.ts";
 import { defineProcWatch, PROC_POLL_MS, procFns } from "./procs/procs.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
-import { compactionExtension, fastCompletion, handoffTool, idleResetIfStale } from "./turn/lifecycle.ts";
+import { fastCompletion, handoffTool } from "./turn/lifecycle.ts";
 import type { Classify } from "./brain/classifier.ts";
 import type { ChatUser } from "./config.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
-import { bindRepo, PublisherTask } from "./memory/publication.ts";
 import { type A2APeers, a2aFns } from "./a2a/tools.ts";
 import { boardFns, defineSweep, ensureSweep, SWEEP_EVERY_MS } from "./board/board.ts";
-import { defineSettle, ensureSettle, LOOK_EVERY_MS, SETTLE_MIN_TOKENS } from "./turn/settle.ts";
 import { profileFns } from "./profiles/profiles.ts";
 import { type Home, homeAt } from "./home.ts";
 
 export interface MochiOptions {
-	/** `reflect`: a fork of root saves notes before root is compacted. Default on; needs daemon scheduling. */
-	readonly memory?: { repo?: string; reflect?: boolean };
 	readonly storage: Storage;
 	readonly models: Models;
 	readonly brain: ModelRef;
@@ -60,7 +56,6 @@ export interface MochiOptions {
 	/** Image, video and speech providers; absent, the media functions say they are not configured. */
 	readonly media?: Omit<MediaDeps, "workDir">;
 	/** Minutes of silence after which an owner message starts a fresh root; 0 never resets. */
-	readonly idleResetMinutes?: number;
 	/** Executor; absent, the apps functions say it is not connected. */
 	readonly apps?: Apps;
 	/** Wall-clock limit of one `code` script. */
@@ -69,10 +64,6 @@ export interface MochiOptions {
 	readonly triggerDeadlineMs?: number;
 	/** How often a background process's watcher reads its files. */
 	readonly procPollMs?: number;
-	/** How often the settle task looks for a quiet thread to compact. */
-	readonly settleLookMs?: number;
-	/** A quiet thread smaller than this many prompt tokens is not compacted. */
-	readonly settleMinTokens?: number;
 	/** How often the board sweep looks for due tasks. */
 	readonly sweepEveryMs?: number;
 	readonly index: SearchIndex;
@@ -88,7 +79,6 @@ export interface MochiOptions {
 	/** `daemon` installs the Turn task kind; `local` (a terminal with no daemon) leaves Turns waiting for one. */
 	readonly scheduling: "daemon" | "local";
 	readonly retry?: Retry;
-	readonly today: () => string;
 	readonly now?: () => Date;
 	readonly log: Log;
 	/** Root's own instructions (`<home>/instructions.md`), rendered after every section; absent leaves root's as they are. */
@@ -136,7 +126,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
 	const library: ToolRegistration[] = [
 		...(await codingTools()),
-		noteTool({ index, today: options.today }),
+		noteTool(index),
+		zoomTool(),
 		recallTool(index),
 		historyTool(index),
 		reactTool(options.channels),
@@ -156,12 +147,11 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),
-		notesExtension(),
+		memoryExtension(),
 		skillsExtension(options.skillsDir),
-		compactionExtension(fast),
+		windowExtension(),
 		defineExtension({ name: "agents", tasks: [AgentTask] }),
 		defineExtension({ name: "procs", tasks: [procWatch] }),
-		defineExtension({ name: "memory-maintenance", tasks: [PublisherTask] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
 		...seatExtensions(modelTools, library, options.scriptDeadlineMs ?? SCRIPT_DEADLINE_MS),
@@ -206,15 +196,10 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
 	if (options.scheduling === "daemon") {
-		const cacheMs = (options.models.getModel(options.brain.provider, options.brain.modelId)?.promptCache?.short ?? 300) * 1000;
-		const settle = defineSettle({ harness: () => harness, handles: users.map((user) => user.handle), cacheMs, lookEveryMs: options.settleLookMs ?? LOOK_EVERY_MS, minTokens: options.settleMinTokens ?? SETTLE_MIN_TOKENS, reflect: options.memory?.reflect ?? true, log });
-		registry.install(defineExtension({ name: "settle", tasks: [settle] }));
-		await ensureSettle(harness, settle, lineId, context);
 		const sweep = defineSweep({ harness: () => harness, everyMs: options.sweepEveryMs ?? SWEEP_EVERY_MS, log });
 		registry.install(defineExtension({ name: "board", tasks: [sweep] }));
 		await ensureSweep(harness, sweep, context);
 	}
-	const idleResetMinutes = options.idleResetMinutes ?? 60;
 	line = {
 		harness,
 		root,
@@ -226,10 +211,9 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		media,
 		users,
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
-		...(idleResetMinutes > 0 ? { idleReset: (conversation: Conversation, key: string, context: Context) => idleResetIfStale({ harness, fast, idleResetMinutes, now: () => now().getTime() }, conversation, key, context) } : {}),
 	};
-	await bindRepo(harness, options.memory?.repo, context);
-	index.replaceNotes(sortedNotes(await readMemory(harness, context)));
+	await harness.commit(importOldNotes, context);
+	index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
 	return { harness, root, registry, classify: options.classify, line, trigger, catalog: options.agents };
 }
 
