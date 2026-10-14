@@ -84,6 +84,7 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	board_add: { seats: AGENT, inline: true },
 	board_list: { seats: AGENT, inline: false },
 	board_update: { seats: AGENT, inline: false },
+	board_claim: { seats: AGENT, inline: false },
 	profile_list: { seats: AGENT, inline: false },
 	profile_send: { seats: AGENT, inline: true },
 	profile_update: { seats: AGENT, inline: false },

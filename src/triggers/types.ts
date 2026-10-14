@@ -10,6 +10,8 @@ export type WebhookAuth = Static<typeof WebhookAuthSchema>;
 
 const Thinking = Type.Union(["off", "low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level)));
 
+const GateSchema = Type.Object({ question: Type.String(), yes: Type.String(), no: Type.String(), threshold: Type.Optional(Type.Number()) });
+
 /** Stops the chain unless the classifier's P(yes) reaches `threshold` (default 0.5). `on: "output"` judges the notify text. */
 const ClassifyStepSchema = Type.Object({
 	classify: Type.Object({
@@ -36,6 +38,9 @@ const RUN_FIELDS = {
 	profile: Type.Optional(Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" })),
 	/** The older name of `profile`, kept so stored triggers load unchanged. */
 	role: Type.Optional(Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" })),
+	/** The older gates, kept so stored triggers load unchanged; `stepsOf` reads them as classify steps. */
+	notifyWhen: Type.Optional(GateSchema),
+	admitWhen: Type.Optional(GateSchema),
 	thinking: Type.Optional(Thinking),
 };
 
@@ -45,4 +50,12 @@ export const TriggerSchema = Type.Union([
 ]);
 export type Trigger = Static<typeof TriggerSchema>;
 
-export const stepsOf = (trigger: Trigger): readonly Step[] => trigger.steps ?? [{ model: {} }];
+/** The trigger's chain. A trigger stored before steps is one model step, with its old gates as classify steps around it. */
+export function stepsOf(trigger: Trigger): readonly Step[] {
+	if (trigger.steps !== undefined) return trigger.steps;
+	const steps: Step[] = [];
+	if (trigger.admitWhen !== undefined) steps.push({ classify: trigger.admitWhen });
+	steps.push({ model: {} });
+	if (trigger.notifyWhen !== undefined) steps.push({ classify: { ...trigger.notifyWhen, on: "output" } });
+	return steps;
+}
