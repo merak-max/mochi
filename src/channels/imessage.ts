@@ -78,8 +78,10 @@ export function judge(health: { readonly lastSignalAt: number; readonly failedPr
 	return now - health.lastSignalAt >= config.silentProbeMs ? "probe" : "none";
 }
 
+type Credentials = { readonly projectId: string; readonly projectSecret: string };
+
 export interface IMessageDeps {
-	readonly connect?: (credentials: { readonly projectId: string; readonly projectSecret: string }) => Promise<IMessageApp>;
+	readonly connect?: (credentials: Credentials) => Promise<IMessageApp>;
 	readonly link?: typeof LINK;
 	readonly log?: Log;
 	/** Normalized handles of the users who may write besides the owner. */
@@ -90,8 +92,6 @@ export function normalizeHandle(handle: string): string {
 	const trimmed = handle.trim().toLowerCase();
 	return trimmed.includes("@") ? trimmed : trimmed.replace(/[^\d+]/g, "");
 }
-
-const IMESSAGE_ENV = ["PHOTON_PROJECT_ID", "PHOTON_PROJECT_SECRET", "IMESSAGE_OWNER"] as const;
 
 interface Collected {
 	readonly text: string[];
@@ -156,9 +156,8 @@ type ParsedIMessage = { readonly kind: "message"; readonly message: Inbound } | 
 export async function toInbound(message: IMessageMessage, owner: string, users: readonly string[] = []): Promise<ParsedIMessage> {
 	if (message.direction === "outbound") return { kind: "ignored", reason: "outbound" };
 	const sender = message.sender?.id === undefined ? "" : normalizeHandle(message.sender.id);
-	const isUser = sender !== "" && sender !== owner && users.includes(sender);
-	if (sender === "" || (sender !== owner && !isUser)) return { kind: "ignored", reason: "not-owner" };
-	const person = isUser ? { person: sender } : {};
+	if (sender === "" || (sender !== owner && !users.includes(sender))) return { kind: "ignored", reason: "not-owner" };
+	const person = sender === owner ? {} : { person: sender };
 	const sequence = message.sequence === undefined ? {} : { sequence: message.sequence };
 	const content = message.content;
 	if (content.type === "reaction") {
@@ -195,14 +194,14 @@ const GRPC_CLASS: Readonly<Record<number, new (message: string, options: ErrorOp
 	9: SendRejected,
 };
 
-export function classifyIMessageError(error: unknown): DeliveryError {
+function classifyIMessageError(error: unknown): DeliveryError {
 	if (error instanceof DeliveryError) return error;
 	const code = typeof error === "object" && error !== null && "grpcCode" in error && typeof error.grpcCode === "number" ? error.grpcCode : undefined;
 	const Class = (code === undefined ? undefined : GRPC_CLASS[code]) ?? SendUnknown;
 	return new Class(`iMessage send failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
 }
 
-async function connectPhoton(credentials: { readonly projectId: string; readonly projectSecret: string }): Promise<IMessageApp> {
+async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
 	const { Spectrum, attachment, reply, richlink } = await import("spectrum-ts");
 	const { imessage } = await import("spectrum-ts/providers/imessage");
 	// @ts-expect-error spectrum-ts 12.10.1 provider types do not resolve under exactOptionalPropertyTypes; runtime accepts an empty config.
@@ -231,13 +230,13 @@ async function connectPhoton(credentials: { readonly projectId: string; readonly
 }
 
 export function createIMessageChannel(env: Env, deps: IMessageDeps = {}): Setup<Channel> {
-	return channelSetup(env, IMESSAGE_ENV, (values) => {
+	return channelSetup(env, ["PHOTON_PROJECT_ID", "PHOTON_PROJECT_SECRET", "IMESSAGE_OWNER"], (values) => {
 		const credentials = { projectId: values.PHOTON_PROJECT_ID, projectSecret: values.PHOTON_PROJECT_SECRET };
 		return iMessageChannel(credentials, normalizeHandle(values.IMESSAGE_OWNER), deps);
 	});
 }
 
-function iMessageChannel(credentials: { readonly projectId: string; readonly projectSecret: string }, owner: string, deps: IMessageDeps): Channel {
+function iMessageChannel(credentials: Credentials, owner: string, deps: IMessageDeps): Channel {
 	const connect = deps.connect ?? connectPhoton;
 	const log = deps.log ?? defaultLog;
 	const link = deps.link ?? LINK;

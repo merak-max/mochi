@@ -5,6 +5,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, type EntryRecord, Harness } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { allPages } from "../src/pages.ts";
+import { clip, messageText } from "../src/text.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -75,9 +76,8 @@ function items(entry: EntryRecord): Item[] {
 }
 
 function text(message: Message): string {
-	if (message.role === "system") return typeof message.content === "string" ? message.content : message.content.map((part) => part.text).join("");
-	if (typeof message.content === "string") return message.content;
-	return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+	if (message.role !== "system") return messageText(message);
+	return typeof message.content === "string" ? message.content : message.content.map((part) => part.text).join("");
 }
 
 /** A transcript as the owner and a reviewer read it. */
@@ -115,8 +115,6 @@ export function render(transcript: Transcript): string {
 	lines.push(`usage: in ${u.input} out ${u.output} cacheRead ${u.cacheRead} cacheWrite ${u.cacheWrite} cost $${u.cost.toFixed(4)}`);
 	return lines.join("\n");
 }
-
-const clip = (value: string, max: number) => (value.length <= max ? value : `${value.slice(0, max)}…`);
 
 if (import.meta.main) {
 	const dir = process.argv[2];

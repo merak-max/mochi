@@ -13,7 +13,7 @@ async function serve(t: TestContext, mochi: TestMochi, tokens: Record<string, st
 	const stop = new AbortController();
 	t.after(() => stop.abort());
 	const settings: A2AServerSettings = { tokens: new Map(Object.entries(tokens)), host: "127.0.0.1", port: 0, publicUrl: "", agentName: "mochi", replyTimeoutMs: 30_000 };
-	const { address } = await startA2AServer({ harness: mochi.harness, settings, timeZone: "Asia/Kolkata", log: () => {} }, withAbortSignal(stop.signal, context));
+	const address = await startA2AServer({ harness: mochi.harness, settings, timeZone: "Asia/Kolkata", log: () => {} }, withAbortSignal(stop.signal, context));
 	return `http://127.0.0.1:${address.port}`;
 }
 

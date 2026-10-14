@@ -6,21 +6,15 @@ import type { Log } from "../log.ts";
 import { forkPoint } from "../seats.ts";
 import { UserDoc } from "./turn.ts";
 
-// Compact a quiet thread while the provider's prompt cache is still warm. Without this, the first message after a
-// break of more than the cache's lifetime rewrites the whole context to the cache; with it, that message rewrites
-// only the summary. The summary itself is written by the fast model (`fast-compaction`).
-//
-// Reflect: before root is compacted, a background fork of it saves what is worth keeping with `note`. The fork holds
-// the whole context the summary is about to drop, and its first request reads the still-warm cache.
+// Compact a quiet thread while the provider's prompt cache is still warm, so the first message after a long break
+// rewrites only the summary to the cache. Before root is compacted, a background fork of it saves what is worth
+// keeping with `note`; its first request reads the still-warm cache.
 
-/** How long a thread stays quiet before it is compacted: inside Anthropic's five-minute cache lifetime. */
 export const SETTLE_AFTER_MS = 4 * 60_000;
-/** A thread whose last request was smaller than this is cheap to rewrite and left alone. */
 export const SETTLE_MIN_TOKENS = 30_000;
-/** How often the task looks for a thread that went quiet. */
 export const LOOK_EVERY_MS = 30_000;
 
-export const REFLECT_BRIEF =
+const REFLECT_BRIEF =
 	"This conversation is about to be compacted, and its detail will be lost. Look back over it and save what is worth keeping with tools.note: " +
 	"lasting facts about the owner, their people, projects and preferences, standing rules they gave, and corrections to notes that are now wrong. " +
 	"Also put every open promise on the board with tools.board_add and a due: anything you or the owner said would happen later that board_list does not already show. " +
@@ -29,7 +23,6 @@ export const REFLECT_BRIEF =
 
 type Thread = { readonly conversation: ConversationId; readonly lastAt: number; readonly tokens: number; readonly busy: boolean };
 
-/** The newest model request's prompt size and time, from the newest assistant entry that carries usage. */
 async function threadOf(tx: Tx, conversation: ConversationId): Promise<Thread | undefined> {
 	const recent = (await tx.scanEntries({ conversationId: conversation }, 16)).items;
 	for (const entry of recent) {
@@ -43,23 +36,12 @@ async function threadOf(tx: Tx, conversation: ConversationId): Promise<Thread | 
 	return undefined;
 }
 
-/** Root and every configured user's thread: the conversations people wait on. */
-async function humanThreads(tx: Tx, handles: readonly string[]): Promise<ConversationId[]> {
-	const threads = [ROOT_CONVERSATION_ID];
-	for (const handle of handles) {
-		const { conversation } = await tx.doc(UserDoc, handle, null);
-		if (conversation !== null) threads.push(conversation);
-	}
-	return threads;
-}
-
-/** A thread to compact now: quiet past `SETTLE_AFTER_MS`, inside the cache's lifetime, large, idle, and not already compacted since its last turn. */
 export function due(thread: Thread, settled: number | undefined, now: number, cacheMs: number, minTokens = SETTLE_MIN_TOKENS): boolean {
 	const quiet = now - thread.lastAt;
 	return !thread.busy && thread.tokens >= minTokens && quiet >= SETTLE_AFTER_MS && quiet < cacheMs && settled !== thread.lastAt;
 }
 
-/** `settled`: per thread, the turn time it was last compacted after, so one quiet spell compacts once. `next`: when to look again. */
+// `settled`: per thread, the turn time it was last compacted after, so one quiet spell compacts once.
 type SettleState = { readonly phase: "settle"; readonly settled: Readonly<Record<string, number>>; readonly next: number };
 
 export function defineSettle(deps: { readonly harness: () => Harness; readonly handles: readonly string[]; readonly cacheMs: number; readonly lookEveryMs: number; readonly minTokens: number; readonly reflect: boolean; readonly log: Log }) {
@@ -72,8 +54,13 @@ export function defineSettle(deps: { readonly harness: () => Harness; readonly h
 				await runtime.sleep(task.state.checkpoint.next, context);
 				const harness = deps.harness();
 				const threads = await harness.commit(async (tx) => {
+					const ids = [ROOT_CONVERSATION_ID];
+					for (const handle of deps.handles) {
+						const { conversation } = await tx.doc(UserDoc, handle, null);
+						if (conversation !== null) ids.push(conversation);
+					}
 					const found: Thread[] = [];
-					for (const id of await humanThreads(tx, deps.handles)) {
+					for (const id of ids) {
 						const thread = await threadOf(tx, id);
 						if (thread !== undefined) found.push(thread);
 					}
@@ -102,7 +89,7 @@ export function defineSettle(deps: { readonly harness: () => Harness; readonly h
 	});
 }
 
-/** One live settle task, a background task of the line, so no /stop reaches it. Idempotent across boots. */
+// A background task of the line, so no /stop reaches it.
 export async function ensureSettle(harness: Harness, task: ReturnType<typeof defineSettle>, line: ConversationId, context: Context): Promise<void> {
 	await harness.commit(async (tx) => {
 		const live = (await tx.scanTasks({ kind: "mochi.settle" }, 8)).items.some((each) => each.state.status !== "terminal" && !each.abortRequested);

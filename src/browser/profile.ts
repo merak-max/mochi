@@ -31,7 +31,7 @@ export async function acquireProfile(key: string, signal?: AbortSignal): Promise
 	return new ProfileLease(abandon);
 }
 
-export class ProfileLease {
+class ProfileLease {
 	readonly #release: () => void;
 
 	constructor(release: () => void) {
@@ -43,8 +43,7 @@ export class ProfileLease {
 			await stop();
 			this.#release();
 		} catch (error) {
-			const timer = setTimeout(this.#release, TTL_MS);
-			timer.unref();
+			this.uncertain();
 			throw error;
 		}
 	}

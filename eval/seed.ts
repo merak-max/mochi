@@ -15,7 +15,7 @@ export function skewFor(at: string, now = Date.now()): number {
 	return Date.parse(`${at.replace(" ", "T")}:00+05:30`) - now;
 }
 
-export function agoMs(ago: Ago): number {
+function agoMs(ago: Ago): number {
 	const amount = Number(ago.slice(0, -1));
 	const unit = ago.slice(-1);
 	return amount * (unit === "d" ? 86_400_000 : unit === "h" ? 3_600_000 : 60_000);

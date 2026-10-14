@@ -1,12 +1,6 @@
 import { createInterface } from "node:readline";
 import type { AttachClient } from "./client.ts";
 
-/**
- * Chat and print modes for scripts: each stdin line (or the one prompt) goes to root through `ingest` as channel
- * `cli`, one at a time, and its answer prints as `mochi> ...`. With `id`, line n is message `<id>:<n>`, so rerunning
- * the same script after a crash finds the same submissions and prints their answers instead of asking again. With
- * `json`, the root view's value and ops print as JSON lines instead, like pi-durable's example 19.
- */
 export async function runLines(client: AttachClient, prompt: string | undefined, options: { readonly json: boolean; readonly id?: string }): Promise<void> {
 	const print = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
 	const root = (await client.request({ op: "conversations" })).find((summary) => summary.label === "main");

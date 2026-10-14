@@ -39,11 +39,6 @@ export function resolveHome(env: Readonly<Record<string, string | undefined>>, p
 	return homeAt(profile === undefined ? base : join(base, "profiles", profile));
 }
 
-/** Loads the home's `.env` into `process.env`. Variables the process already has are kept. */
-export function loadHomeEnv(home: Home): void {
-	if (existsSync(home.envFile)) process.loadEnvFile(home.envFile);
-}
-
 /** A home from before 2026-10-14 keeps root's instructions in `persona.md`. Renames it once; a no-op after. */
 export function adoptInstructions(home: Home): void {
 	const old = join(home.dir, "persona.md");

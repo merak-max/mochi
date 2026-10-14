@@ -1,8 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 
-// A2A v1.0 over JSON-RPC 2.0, the subset mochi serves and calls: the agent card, SendMessage and GetTask.
-
 export const PROTOCOL_VERSION = "1.0";
 
 export const TASK_WORKING = "TASK_STATE_WORKING";
@@ -16,7 +14,6 @@ export const INVALID_PARAMS = -32602;
 export const TASK_NOT_FOUND = -32001;
 export const UNAUTHORIZED = -32050;
 
-/** A v1.0 part is told apart by the member it has: text, url, raw or data. A v0.3 part also carries `kind`. */
 const PartSchema = Type.Object({
 	text: Type.Optional(Type.String()),
 	url: Type.Optional(Type.String()),
@@ -25,7 +22,7 @@ const PartSchema = Type.Object({
 	filename: Type.Optional(Type.String()),
 	mediaType: Type.Optional(Type.String()),
 });
-export type Part = Static<typeof PartSchema>;
+type Part = Static<typeof PartSchema>;
 
 const MessageSchema = Type.Object({
 	messageId: Type.String({ minLength: 1 }),
@@ -42,7 +39,6 @@ export const RequestSchema = Type.Object({
 });
 export type RpcId = string | number | null;
 
-/** `contextId` at the top level is the pre-1.0 place for it. */
 export const SendMessageParamsSchema = Type.Object({
 	message: MessageSchema,
 	contextId: Type.Optional(Type.String({ minLength: 1 })),
@@ -55,7 +51,6 @@ const ResponseSchema = Type.Object({
 	result: Type.Optional(Type.Unknown()),
 	error: Type.Optional(Type.Object({ code: Type.Number(), message: Type.String() })),
 });
-export type RpcResponse = Static<typeof ResponseSchema>;
 
 const TaskOrMessageSchema = Type.Object({
 	id: Type.Optional(Type.String()),
@@ -73,7 +68,7 @@ export function rpcError(id: RpcId, code: number, message: string): object {
 	return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
-export function parseResponse(value: unknown): RpcResponse | undefined {
+export function parseResponse(value: unknown): Static<typeof ResponseSchema> | undefined {
 	return Value.Check(ResponseSchema, value) ? value : undefined;
 }
 
@@ -82,7 +77,6 @@ function fileNote(filename: string | undefined, body: string, mediaType: string 
 	return mediaType ? `${label} ${body} (${mediaType})` : `${label} ${body}`;
 }
 
-/** The text parts joined; a file part becomes a one-line note and a data part its JSON. */
 export function partsText(parts: readonly Part[]): string {
 	const chunks: string[] = [];
 	for (const part of parts) {
@@ -94,13 +88,7 @@ export function partsText(parts: readonly Part[]): string {
 	return chunks.join("\n").trim();
 }
 
-export interface AgentCardInput {
-	readonly name: string;
-	readonly description: string;
-	readonly url: string;
-}
-
-export function agentCard({ name, description, url }: AgentCardInput): object {
+export function agentCard(name: string, description: string, url: string): object {
 	return {
 		name,
 		description,
@@ -120,11 +108,9 @@ export interface TaskView {
 	readonly id: string;
 	readonly contextId: string;
 	readonly state: typeof TASK_WORKING | typeof TASK_COMPLETED | typeof TASK_FAILED;
-	/** The answer of a completed task, or the reason of a failed one. */
 	readonly text?: string;
 }
 
-/** A v1.0 Task. A completed task carries its answer as an artifact and as the status message. */
 export function taskJson(view: TaskView): object {
 	const status = {
 		state: view.state,
@@ -143,10 +129,6 @@ export interface ReadResult {
 	readonly reply: string;
 }
 
-/**
- * A peer's SendMessage or GetTask result: the task or message unwrapped, its state, and its reply text from the
- * artifacts first, then the status message. A bare message is a finished reply, so it reads as completed.
- */
 export function readResult(result: unknown): ReadResult | undefined {
 	let value = result;
 	if (typeof value === "object" && value !== null) {

@@ -7,7 +7,7 @@ const MEDIA_HOST = "media.tenor.com";
 const BROWSER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36";
 const MAX_GIF_BYTES = 8_000_000;
 
-export type GifHit = { url: string; description: string };
+type GifHit = { url: string; description: string };
 
 const ENTITIES: Readonly<Record<string, string>> = { "&quot;": '"', "&amp;": "&", "&lt;": "<", "&gt;": ">" };
 
@@ -15,7 +15,6 @@ function decode(text: string): string {
 	return text.replace(/&(?:quot|amp|lt|gt|#(\d+));/g, (entity, code: string | undefined) => (code === undefined ? ENTITIES[entity]! : String.fromCodePoint(Number(code))));
 }
 
-/** Tenor's public search page lists each result as a figure whose img has the GIF URL and a description in alt. */
 export function parseTenorPage(html: string): GifHit[] {
 	const hits: GifHit[] = [];
 	const seen = new Set<string>();

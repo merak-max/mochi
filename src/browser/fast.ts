@@ -11,7 +11,7 @@ import { PageSnapshot, elementTable, type Action } from "./elements.ts";
 import { acquireProfile } from "./profile.ts";
 import { SNAPSHOT } from "./snapshot.ts";
 
-export interface FastDeps extends BrowserDeps {
+interface FastDeps extends BrowserDeps {
 	readonly models: Models;
 	readonly fast: ModelRef;
 	readonly classify: Classify;
@@ -35,7 +35,7 @@ export function choice(answer: ClassifierAnswer | undefined, question: Classifie
 	return answer.choice;
 }
 
-export async function browseFast(deps: FastDeps, args: { url: string; task: string }, context: Context): Promise<{ output: string; steps: number; success: boolean; evidence: string }> {
+async function browseFast(deps: FastDeps, args: { url: string; task: string }, context: Context): Promise<{ output: string; steps: number; success: boolean; evidence: string }> {
 	const url = new URL(args.url);
 	if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) throw new Error("browse_fast needs an HTTP(S) URL without credentials.");
 	const client = new BrowserClient(deps);
@@ -101,7 +101,6 @@ async function act(cdp: Cdp, sessionId: string, page: PageSnapshot, action: Acti
 		await cdp.call("Input.dispatchMouseEvent", { type: "mouseWheel", x: 550, y: 650, deltaX: 0, deltaY: action.delta ?? 0 }, sessionId);
 		return;
 	}
-	if (!("node" in action)) throw new Error("Missing observed node.");
 	const target = parseWith(Type.Union([Type.Null(), Type.Object({ x: Type.Number(), y: Type.Number() })]), await cdp.evaluate(`(action => {
 		const e = window.__jevFast?.nodes.get(action.node);
 		if (!e?.isConnected || e.matches(':disabled') || e.closest('[aria-disabled="true"],[inert]') || !e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return null;

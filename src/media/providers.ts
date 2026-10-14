@@ -7,7 +7,7 @@ const Connection = {
 	model: Type.String({ minLength: 1 }),
 };
 
-export const ImageProviderSchema = Type.Object({
+const ImageProviderSchema = Type.Object({
 	...Connection,
 	name: Type.String({ minLength: 1 }),
 	sizeStyle: Type.Optional(Type.Union([Type.Literal("size"), Type.Literal("width-height")])),

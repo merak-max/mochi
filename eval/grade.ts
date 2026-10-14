@@ -20,7 +20,7 @@ export type Grade = {
 };
 
 /** Voice-spec bans that code can see. The judge and a human reread cover the rest. */
-export const BANNED: readonly string[] = [
+const BANNED: readonly string[] = [
 	"great question",
 	"happy to help",
 	"i'd be happy to",

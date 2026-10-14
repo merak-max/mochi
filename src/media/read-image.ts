@@ -10,10 +10,8 @@ import { createBashTool, createEditTool, createReadTool, createWriteTool } from 
 
 const execute = promisify(execFile);
 
-/** Image types pi-durable's `read` does not detect. ffmpeg turns the first frame into a JPEG that it does. */
 const FFMPEG_EXTENSIONS = new Set([".heic", ".heif", ".avif", ".tif", ".tiff"]);
 
-/** What a script gets from `tools.read`, as in pi's coding agent: the text, or an image block that `image()` shows. */
 const ReadOutput = Type.Union([Type.String(), Type.Object({ type: Type.Literal("image"), data: Type.String(), mimeType: Type.String(), note: Type.String() })]);
 
 function withScriptOutput(result: ToolExecutionResult): ToolExecutionResult {
@@ -27,8 +25,7 @@ function withScriptOutput(result: ToolExecutionResult): ToolExecutionResult {
 	return { ...result, structuredOutput: note === "" ? text : `${text}\n\n[${note}]` };
 }
 
-/** pi-durable's `read` with its Photon image processor, plus an ffmpeg step for HEIC, HEIF, AVIF and TIFF. */
-export async function createImageReadTool(): Promise<ToolRegistration> {
+async function createImageReadTool(): Promise<ToolRegistration> {
 	const base = createReadTool({ images: await createNodePhotonImages() }) as unknown as ToolRegistration;
 	return {
 		...base,
@@ -52,7 +49,6 @@ export async function createImageReadTool(): Promise<ToolRegistration> {
 	};
 }
 
-/** read, write, edit and bash, with a read that shows images. */
 export async function codingTools(): Promise<ToolRegistration[]> {
 	return [await createImageReadTool(), createWriteTool(), createEditTool(), createBashTool()] as unknown as ToolRegistration[];
 }

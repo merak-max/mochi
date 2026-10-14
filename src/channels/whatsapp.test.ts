@@ -89,16 +89,6 @@ const post = (base: string, body: string, signature: string | undefined): Promis
 		body,
 	});
 
-describe("whatsapp config", () => {
-	it("is off with no variable and broken naming every missing one", () => {
-		assert.deepEqual(createWhatsAppChannel({}), { kind: "off" });
-		assert.deepEqual(createWhatsAppChannel({ WHATSAPP_TOKEN: "t" }), {
-			kind: "broken",
-			fix: "WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_OWNER are not set. Fix: export them where mochi starts",
-		});
-	});
-});
-
 describe("whatsapp payload parsing", () => {
 	it("extracts text, sender and a stable messageId from the messages change", () => {
 		const [raw] = extractMessages(JSON.parse(fixture("whatsapp-text.json")));

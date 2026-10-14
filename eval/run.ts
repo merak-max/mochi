@@ -53,7 +53,7 @@ async function main(): Promise<void> {
 	process.stdout.write(await readFile(join(out, "summary.md"), "utf8"));
 }
 
-export async function runScenario(scenario: Scenario, dir: string, repo: string): Promise<Grade> {
+async function runScenario(scenario: Scenario, dir: string, repo: string): Promise<Grade> {
 	await rm(dir, { recursive: true, force: true });
 	const dataDir = join(dir, "data");
 	await mkdir(dataDir, { recursive: true });
@@ -75,7 +75,7 @@ export async function runScenario(scenario: Scenario, dir: string, repo: string)
 }
 
 /** Grade a finished scenario directory from its transcript.json, sent.jsonl and work files; rewrites transcript.md and grade.json. */
-export async function gradeDir(scenario: Scenario, dir: string): Promise<Grade> {
+async function gradeDir(scenario: Scenario, dir: string): Promise<Grade> {
 	const dataDir = join(dir, "data");
 	const transcript = JSON.parse(await readFile(join(dir, "transcript.json"), "utf8")) as Transcript;
 	const sent = existsSync(join(dir, "sent.jsonl"))

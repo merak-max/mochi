@@ -1,11 +1,9 @@
-/** A parsed 5-field cron expression: the allowed values of each field. */
-export interface Cron {
+interface Cron {
 	readonly minutes: ReadonlySet<number>;
 	readonly hours: ReadonlySet<number>;
 	readonly days: ReadonlySet<number>;
 	readonly months: ReadonlySet<number>;
 	readonly weekdays: ReadonlySet<number>;
-	/** Vixie cron: when both day fields are restricted, a slot matches either of them. */
 	readonly dayOr: boolean;
 }
 
@@ -24,14 +22,10 @@ const FIELDS: readonly Field[] = [
 	{ name: "day of week", min: 0, max: 7, names: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] },
 ];
 
-/** Parses `m h dom mon dow` with `*`, ranges, steps and lists. Throws an error naming the bad field. */
 export function parseCron(expression: string): Cron {
 	const parts = expression.trim().split(/\s+/);
 	if (parts.length !== 5) throw new Error(`Cron needs 5 fields (minute hour day month weekday), got ${parts.length}: "${expression}"`);
-	const [minutes, hours, days, months, weekdays] = FIELDS.map((field, index) => parseField(parts[index] ?? "", field));
-	if (minutes === undefined || hours === undefined || days === undefined || months === undefined || weekdays === undefined) {
-		throw new Error(`Invalid cron "${expression}"`);
-	}
+	const [minutes, hours, days, months, weekdays] = FIELDS.map((field, index) => parseField(parts[index] ?? "", field)) as [Set<number>, Set<number>, Set<number>, Set<number>, Set<number>];
 	if (weekdays.has(7)) weekdays.add(0);
 	weekdays.delete(7);
 	return { minutes, hours, days, months, weekdays, dayOr: !parts[2]?.startsWith("*") && !parts[4]?.startsWith("*") };
@@ -69,38 +63,17 @@ function value(text: string, field: Field): number {
 	return parsed;
 }
 
-/** Wall-clock fields of an instant in an IANA zone. */
-export interface LocalTime {
-	readonly year: number;
-	readonly month: number;
-	readonly day: number;
-	readonly hour: number;
-	readonly minute: number;
-	readonly weekday: number;
-}
-
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const formats = new Map<string, Intl.DateTimeFormat>();
 
-/** Throws a RangeError for an unknown zone. */
-export function localTime(date: Date, timeZone: string): LocalTime {
+function localTime(date: Date, timeZone: string) {
 	let format = formats.get(timeZone);
 	if (format === undefined) {
-		format = new Intl.DateTimeFormat("en-US", {
-			timeZone,
-			hourCycle: "h23",
-			year: "numeric",
-			month: "numeric",
-			day: "numeric",
-			hour: "numeric",
-			minute: "numeric",
-			weekday: "short",
-		});
+		format = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", weekday: "short" });
 		formats.set(timeZone, format);
 	}
 	const parts = Object.fromEntries(format.formatToParts(date).map((part) => [part.type, part.value]));
 	return {
-		year: Number(parts.year),
 		month: Number(parts.month),
 		day: Number(parts.day),
 		hour: Number(parts.hour),
@@ -120,7 +93,6 @@ export function assertTimeZone(timeZone: string): void {
 const MINUTE = 60_000;
 const SEARCH_LIMIT = 5 * 366 * 24 * 60 * MINUTE;
 
-/** The first slot strictly after `after`, on a whole minute; undefined when none falls within five years. */
 export function nextCronSlot(cron: Cron, timeZone: string, after: Date): Date | undefined {
 	let t = Math.floor(after.getTime() / MINUTE) * MINUTE + MINUTE;
 	const end = t + SEARCH_LIMIT;
@@ -130,7 +102,6 @@ export function nextCronSlot(cron: Cron, timeZone: string, after: Date): Date | 
 			? cron.days.has(local.day) || cron.weekdays.has(local.weekday)
 			: cron.days.has(local.day) && cron.weekdays.has(local.weekday);
 		if (!cron.months.has(local.month) || !dayMatches || !cron.hours.has(local.hour)) {
-			// Hour steps stay correct across offset changes: the next candidate is re-read in local time.
 			t += (60 - local.minute) * MINUTE;
 			continue;
 		}
@@ -139,4 +110,3 @@ export function nextCronSlot(cron: Cron, timeZone: string, after: Date): Date | 
 	}
 	return undefined;
 }
-

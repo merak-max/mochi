@@ -3,7 +3,6 @@ import { applyImmutable } from "@earendil-works/chord/delta";
 import type { ConversationView, TaskGraph } from "@earendil-works/pi-durable";
 import { readLines, type Request, type Results, type ServerMessage, writeLine } from "./protocol.ts";
 
-/** The terminal side of attach: the shown conversation and task graph as plain values, and typed requests. */
 export class AttachClient {
 	readonly #socket: Socket;
 	readonly #waiting = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
@@ -11,7 +10,6 @@ export class AttachClient {
 	#sequence = 0;
 	view: ConversationView | undefined;
 	tasks: TaskGraph | undefined;
-	/** Called with each view frame as received: the value, then one batch of ops per commit. */
 	onViewFrame: (frame: Extract<ServerMessage, { t: "view" | "view-ops" }>) => void = () => {};
 	readonly closed: Promise<void>;
 
@@ -25,7 +23,6 @@ export class AttachClient {
 		readLines(socket, (raw) => this.#receive(raw as ServerMessage));
 	}
 
-	/** Connects to the daemon's socket; rejects when no daemon listens there. */
 	static connect(path: string): Promise<AttachClient> {
 		return new Promise((resolve, reject) => {
 			const socket = connect(path);

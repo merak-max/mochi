@@ -13,7 +13,7 @@ import {
 	type ChannelProfile,
 	channelSetup,
 	chunkText,
-	DeliveryError,
+	type DeliveryError,
 	type Env,
 	type InboundSink,
 	SendRejected,
@@ -22,6 +22,7 @@ import {
 
 export const GRAPH_API = "https://graph.facebook.com/v25.0";
 const TEXT_LIMIT = 4096;
+const UNREACHABLE = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH"]);
 const SEND_TIMEOUT_MS = 30_000;
 
 export const WHATSAPP_PROFILE: ChannelProfile = {
@@ -106,16 +107,11 @@ type ParsedMessage =
 	| { readonly kind: "message"; readonly message: WhatsAppInbound }
 	| { readonly kind: "ignored"; readonly reason: "invalid" | "not-owner" | "unsupported-type"; readonly id?: string };
 
-const WHATSAPP_ENV = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_OWNER"] as const;
-
-const UNREACHABLE = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH"]);
-
 /**
  * Graph answers 401, 429 and 503 before taking the message, other 5xx may have taken it, and any other 4xx refuses it.
  * A fetch that fails to connect never left; one that times out or breaks after may have.
  */
-export function classifyWhatsAppError(error: unknown, status?: number): DeliveryError {
-	if (error instanceof DeliveryError) return error;
+function classifyWhatsAppError(error: unknown, status?: number): DeliveryError {
 	const message = `WhatsApp send failed: ${error instanceof Error ? error.message : String(error)}`;
 	if (status !== undefined) {
 		if (status === 401 || status === 429 || status === 503) return new ChannelDown(message, { cause: error });
@@ -164,7 +160,7 @@ export function parseWhatsAppMessage(raw: unknown, owner: string): ParsedMessage
 }
 
 export function createWhatsAppChannel(env: Env, deps: WhatsAppDeps = {}): Setup<Channel> {
-	return channelSetup(env, WHATSAPP_ENV, (values) => {
+	return channelSetup(env, ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_OWNER"], (values) => {
 		const owner = values.WHATSAPP_OWNER.replace(/\D/g, "");
 		if (owner === "") throw new Error("WHATSAPP_OWNER must be a phone number");
 		const port = env.WHATSAPP_PORT ? Number(env.WHATSAPP_PORT) : DEFAULT_PORT;
@@ -190,7 +186,6 @@ function whatsAppChannel(config: WhatsAppConfig, deps: WhatsAppDeps): Channel {
 	const auth = { authorization: `Bearer ${config.token}` };
 	let lastInbound: string | undefined;
 
-	/** One Graph call, every failure a DeliveryError. */
 	async function graph(path: string, body: FormData | Record<string, unknown>): Promise<unknown> {
 		let res: Response;
 		try {
@@ -209,7 +204,6 @@ function whatsAppChannel(config: WhatsAppConfig, deps: WhatsAppDeps): Channel {
 
 	const postMessage = (payload: Record<string, unknown>) => graph("messages", { recipient_type: "individual", to: config.owner, ...payload });
 
-	/** Graph sends a file by the id of an upload. */
 	async function sendFile(file: Extract<Bubble, { kind: "file" }>): Promise<void> {
 		const form = new FormData();
 		form.set("messaging_product", "whatsapp");

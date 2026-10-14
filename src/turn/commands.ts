@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import { type AssistantMessage, Type } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	type Conversation,
 	type ConversationId,
@@ -17,8 +17,7 @@ import { allPages } from "../pages.ts";
 import { plan, scanTriggers } from "../triggers/trigger.ts";
 import { keyedReset, threadHandoff, type FastCompletion } from "./lifecycle.ts";
 
-export const CommandSchema = Type.Union([Type.Literal("new"), Type.Literal("stop"), Type.Literal("status")]);
-export type Command = "new" | "stop" | "status";
+type Command = "new" | "stop" | "status";
 export const commandOf = (text: string): Command | undefined => {
 	switch (text.trim().toLowerCase()) {
 		case "/new": return "new";
@@ -28,7 +27,6 @@ export const commandOf = (text: string): Command | undefined => {
 	}
 };
 
-/** `conversation` and `person` are set for a user's command, which acts on the user's own conversation. */
 export type CommandInput = { readonly key: string; readonly command: Command; readonly channel: ChatChannelId; readonly conversation?: ConversationId; readonly person?: string };
 export type CommandTurn = { readonly source: "command"; readonly key: string; readonly channel: ChatChannelId; readonly text: string; readonly person?: string };
 export type CommandReply = { readonly submission: SubmissionId; readonly text: string };
@@ -38,7 +36,7 @@ type State =
 	| { readonly phase: "reset"; readonly handoff: string | null }
 	| { readonly phase: "reply"; readonly text: string; readonly submission: SubmissionId | null };
 
-export const CommandDoc = defineDocFamily<{ task: TaskId<CommandReply> | null }, null>({
+const CommandDoc = defineDocFamily<{ task: TaskId<CommandReply> | null }, null>({
 	kind: "mochi.command",
 	version: 1,
 	scope: "session",
@@ -46,7 +44,7 @@ export const CommandDoc = defineDocFamily<{ task: TaskId<CommandReply> | null },
 	initial: () => ({ task: null }),
 });
 
-export interface CommandDeps {
+interface CommandDeps {
 	readonly harness: Harness;
 	readonly root: Conversation;
 	readonly lineId: () => Conversation["id"];
@@ -58,7 +56,7 @@ export interface CommandDeps {
 }
 
 const plain = (text: string): string => text.toLowerCase().replace(/[\u2014\u2013*_#`]/g, "").replace(/\s+/g, " ").trim();
-export function relativeTime(at: number, now: number): string {
+function relativeTime(at: number, now: number): string {
 	const minutes = Math.max(1, Math.round(Math.abs(at - now) / 60_000));
 	const span = minutes < 60 ? `${minutes} min` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`;
 	return Math.abs(at - now) < 30_000 ? "now" : at > now ? `in ${span}` : `${span} ago`;
@@ -104,7 +102,7 @@ export async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "n
 	].join("\n");
 }
 
-/** What a command aborts in the target and the conversations its work owns. /new keeps background work: processes and background agents. */
+// /new keeps background work: processes and background agents.
 async function abortTargets(deps: CommandDeps, target: Conversation, command: Command, context: Context) {
 	const graph = await deps.harness.taskGraph(context);
 	try {
@@ -153,7 +151,6 @@ export function commandTask(deps: CommandDeps) {
 			},
 			abort: async (task, runtime, context) => {
 				const targets = task.state.checkpoint;
-				// Snapshot IDs make a replay abort only the work the command originally saw.
 				for (const id of targets.submissions) await deps.harness.abortSubmission(id, context);
 				for (const id of targets.tasks) await deps.harness.abortTask(id, context);
 				for (const id of targets.tasks) await deps.harness.waitForTask(id, context);

@@ -21,7 +21,6 @@ interface WebhookDeps {
 	readonly harness: Pick<Harness, "commit" | "conversation">;
 	readonly classify: Classify;
 	readonly log: Log;
-	/** How long an admitted run may take before it is aborted, so one hung run cannot answer every later delivery 503. */
 	readonly deadlineMs?: number;
 }
 
@@ -54,7 +53,6 @@ export function webhookContent(id: string, prompt: string, body: Buffer): string
 
 const single = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
 
-/** Serves `POST /hooks/<id>` until `context` aborts. Resolves with the bound address once listening. */
 export async function startWebhookServer(
 	deps: WebhookDeps,
 	listen: { readonly host: string; readonly port: number },
@@ -92,7 +90,6 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	const delivery = deliveryId(request.headers, body);
 	const requestId = `webhook:${id}:${delivery}`;
 	if (trigger.admitWhen !== undefined) {
-		// The classifier sees the trigger's own prompt for context, and the payload.
 		const verdict = await checkGate(deps.classify, trigger.admitWhen, { webhook: id, purpose: trigger.prompt, payload: payloadText(body) }, context);
 		if (!admits(verdict)) {
 			deps.log("webhook.filtered", { id, delivery, probability: verdict.probability });
@@ -111,7 +108,6 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 			await conversation!.abort(context);
 			deps.log("webhook.timed_out", { id, delivery });
 		}
-		return;
 	} catch (error) {
 		if (!(error instanceof ConversationBusy)) throw error;
 		return reply(response, 503, "busy");
@@ -123,7 +119,6 @@ function reply(response: ServerResponse, status: number, text: string): void {
 	response.end(`${text}\n`);
 }
 
-/** The daemon's triggers component: reconcile the config seeds, then serve webhooks. Trigger tasks run on their own. */
 export async function triggersComponent({ harness, trigger, classify, catalog }: Mochi, config: Config, context: Context): Promise<void> {
 	const seeds = parseSeeds(config.file, config.users);
 	await reconcileSeeds(harness, trigger, seeds, catalog, context);

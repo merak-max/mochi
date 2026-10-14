@@ -37,7 +37,7 @@ const HEADER = "# mochi config. Keys live in .env next to this file. See config.
  * The pre-home config used a fixed Bifrost gateway: Claude ids as `anthropic/<id>` and the OpenAI route as
  * `azure/<id>`. Those become two providers on the same gateway, and model names gain their provider prefix.
  */
-export function upgradeConfig(config: Readonly<Record<string, unknown>>): Record<string, unknown> {
+function upgradeConfig(config: Readonly<Record<string, unknown>>): Record<string, unknown> {
 	const url = process.env.BIFROST_URL;
 	if (url === undefined) throw new Error("Set BIFROST_URL to the gateway the old config used, then migrate.");
 	const model = (id: string): string => (id.startsWith("anthropic/") ? `bifrost/${id.slice("anthropic/".length)}` : id.startsWith("azure/") ? `bifrost-gpt/${id}` : id);

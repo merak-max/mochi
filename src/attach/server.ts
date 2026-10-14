@@ -16,18 +16,7 @@ import { messageText } from "../text.ts";
 import { answerText, ingest, type Line } from "../turn/turn.ts";
 import { type Answer, type ClientMessage, type ConversationSummary, type Request, type Results, readLines, type ServerMessage, writeLine } from "./protocol.ts";
 
-export interface AttachDeps {
-	readonly line: Line;
-	readonly models: Models;
-	readonly log: Log;
-}
-
-/**
- * The daemon side of terminal attach, listening at `path` (a stale socket from a dead daemon is removed: the caller holds
- * the lock). A line typed into root enters through `ingest` as `cli`, and nothing is delivered for it: the TUI renders
- * the transcript, and a script prints the answer of its own submission from `wait`.
- */
-export async function listenAttach(path: string, { line, models, log }: AttachDeps, context: Context): Promise<Server> {
+export async function listenAttach(path: string, { line, models, log }: { readonly line: Line; readonly models: Models; readonly log: Log }, context: Context): Promise<Server> {
 	const { harness, root } = line;
 	const sockets = new Set<Socket>();
 	let sequence = 0;
@@ -37,7 +26,7 @@ export async function listenAttach(path: string, { line, models, log }: AttachDe
 		return found;
 	};
 
-	const handle = async (request: Request, show: (id: ConversationId) => Promise<void>): Promise<Results[keyof Results] | undefined> => {
+	const handle = async (request: Request, show: (id: ConversationId) => Promise<void>): Promise<Results[keyof Results]> => {
 		switch (request.op) {
 			case "show":
 				await show(request.conversationId as ConversationId);
@@ -105,7 +94,7 @@ export async function listenAttach(path: string, { line, models, log }: AttachDe
 		readLines(socket, (raw) => {
 			const message = raw as ClientMessage;
 			void handle(message.request, show)
-				.then((value) => send({ t: "reply", id: message.id, ok: true, value: value ?? null }))
+				.then((value) => send({ t: "reply", id: message.id, ok: true, value }))
 				.catch((error: unknown) => send({ t: "reply", id: message.id, ok: false, error: error instanceof Error ? error.message : String(error) }));
 		});
 		socket.on("close", () => {
@@ -142,7 +131,6 @@ async function answerOf(harness: Harness, id: SubmissionId, context: Context): P
 	return { status: "done", text: await harness.commit((tx) => answerText(tx, settled.answer), context) };
 }
 
-/** Every conversation but the line, labelled by its first input. */
 async function summaries(harness: Harness, rootId: ConversationId, lineId: ConversationId, context: Context): Promise<ConversationSummary[]> {
 	const result: ConversationSummary[] = [];
 	for (const { id } of await allPages((cursor) => harness.commit((tx) => tx.scanConversations({}, 256, cursor), context))) {

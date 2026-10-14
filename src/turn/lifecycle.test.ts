@@ -1,18 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, defineExtension, Harness, ResetEntry, wrapTool } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, Harness, ResetEntry } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createSeatConversation } from "../seats.ts";
-import { fixedClassify, newFaux, openTestMochi, recordingChannel } from "../test-support.ts";
-import { notifyTool } from "../triggers/trigger.ts";
+import { newFaux, openTestMochi, recordingChannel, tempDir } from "../test-support.ts";
 import { MemoryDoc, notesExtension } from "../memory/memory.ts";
-import { compactionExtension, fastCompletion, handoffTool, idleResetIfStale, SUMMARIZATION_PROMPT, SUMMARIZATION_SYSTEM_PROMPT } from "./lifecycle.ts";
+import { compactionExtension, fastCompletion, handoffTool, idleResetIfStale, SUMMARIZATION_SYSTEM_PROMPT } from "./lifecycle.ts";
 
 async function open(dir: string, now: () => number, compact = false) {
 	const faux = fauxProvider();
@@ -30,27 +27,15 @@ async function open(dir: string, now: () => number, compact = false) {
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" }, tools: [] } });
 	return { harness, root, fast, faux, registry, now };
 }
-const temp = () => mkdtemp(join(tmpdir(), "mochi-lifecycle-"));
 
-test("the proposed notify return terminates after queueing without a narration request", async () => {
+test("notify terminates the run after queueing, without a narration request", async () => {
 	const faux = newFaux();
 	const channel = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await temp(), faux, new Map([["whatsapp", channel.channel]]));
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", channel.channel]]));
 	try {
-		const base = notifyTool({ line: () => mochi.line, channels: ["whatsapp"], classify: fixedClassify(1), log: () => {}, users: [] });
-		const patched = wrapTool(base, (tool) => ({
-			...tool,
-			execute: async (args, api, context) => {
-				const result = await tool.execute!(args, api, context);
-				const held = result.output?.some((part) => part.type === "text" && part.text.startsWith("Not sent:"));
-				return held ? result : { ...result, control: { terminate: true } };
-			},
-		}));
-		mochi.registry.install(defineExtension({ name: "notify-terminate-test", wraps: [patched] }));
 		const run = await mochi.harness.commit((tx) => createSeatConversation(tx, "trigger", { kind: "ownerless" }), context);
 		const conversation = await mochi.harness.conversation(run, context);
 		assert.ok(conversation);
-		await conversation.configure({ extensions: [...(await conversation.agent(context)).extensions, defineExtension({ name: "notify-terminate-test" })] }, context);
 		faux.setResponses([fauxAssistantMessage(fauxToolCall("notify", { text: "build failed" }), { stopReason: "toolUse" }), fauxAssistantMessage("unneeded narration")]);
 		await (await conversation.submit({ type: "input", content: "check build" }, context)).wait(context);
 		assert.equal(faux.state.callCount, 1);
@@ -60,7 +45,7 @@ test("the proposed notify return terminates after queueing without a narration r
 });
 
 test("idle reset fires once across reopen, keeps notes in the prompt, and never resets recent or disabled threads", async () => {
-	const dir = await temp();
+	const dir = await tempDir();
 	let now = Date.now();
 	const first = await open(dir, () => now);
 	await first.harness.commit(async (tx) => {
@@ -90,7 +75,7 @@ test("idle reset fires once across reopen, keeps notes in the prompt, and never 
 });
 
 test("busy root is never idle-reset", async () => {
-	const mochi = await open(await temp(), Date.now);
+	const mochi = await open(await tempDir(), Date.now);
 	let started!: () => void;
 	const seen = new Promise<void>((resolve) => { started = resolve; });
 	mochi.faux.setResponses([async (_request, options) => {
@@ -107,7 +92,7 @@ test("busy root is never idle-reset", async () => {
 });
 
 test("beforeCompact uses the pinned prompt, memoizes the fast summary, and falls back on errors", async () => {
-	const mochi = await open(await temp(), Date.now, true);
+	const mochi = await open(await tempDir(), Date.now, true);
 	try {
 		const old = "old conversation ".repeat(100);
 		await mochi.root.submit({ type: "write", entry: { kind: "old", model: [{ role: "user", content: old, timestamp: Date.now() }] } }, context);
@@ -128,12 +113,11 @@ test("beforeCompact uses the pinned prompt, memoizes the fast summary, and falls
 		await mochi.harness.waitForTask(await mochi.root.compact(undefined, context), context);
 		assert.ok(JSON.stringify((await mochi.root.context(context)).messages).includes("built in summary"));
 		assert.equal(mochi.faux.state.callCount, 3);
-		assert.ok(SUMMARIZATION_PROMPT.endsWith("error messages."));
 	} finally { await mochi.harness.close(context); }
 });
 
 test("handoff queues Continue exactly once and starts its request from the note", async () => {
-	const mochi = await open(await temp(), Date.now);
+	const mochi = await open(await tempDir(), Date.now);
 	try {
 		await mochi.root.configure({ tools: [handoffTool()] }, context);
 		mochi.faux.setResponses([fauxAssistantMessage(fauxToolCall("handoff", { note: "finish the booking" }), { stopReason: "toolUse" }), (request) => {

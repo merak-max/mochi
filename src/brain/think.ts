@@ -6,10 +6,9 @@ import type { Classify } from "./classifier.ts";
 
 const LLM_MAX_TOKENS = 16_000;
 /** `llm` calls in flight at once across every script; a Promise.all over hundreds of slices waits its turn. */
-export const LLM_CONCURRENCY = 8;
+const LLM_CONCURRENCY = 8;
 
-/** A counting gate: `run` waits for a free slot, then runs `work`. */
-export function limiter(slots: number): <T>(work: () => Promise<T>) => Promise<T> {
+function limiter(slots: number): <T>(work: () => Promise<T>) => Promise<T> {
 	let free = slots;
 	const waiting: (() => void)[] = [];
 	return async (work) => {

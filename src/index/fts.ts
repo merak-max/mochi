@@ -2,29 +2,23 @@ import { DatabaseSync } from "node:sqlite";
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import type { Note } from "../notes/schema.ts";
 
-export type DocKind = "user" | "assistant" | "note";
+type DocKind = "user" | "assistant" | "note";
 
 export interface IndexDoc {
 	readonly text: string;
 	readonly kind: DocKind;
 	/** Entry id for chat text, `note:<slug>` for notes. */
 	readonly ref: string;
-	/** ISO timestamp. */
 	readonly at: string;
 }
 
-export interface SearchQuery {
+interface SearchQuery {
 	readonly query: string;
 	readonly after?: string;
 	readonly before?: string;
 	readonly limit: number;
 	/** Chat entries the caller already sees: this conversation's entries from `fromEntry` on are left out. */
-	readonly hidden?: VisibleRange;
-}
-
-export interface VisibleRange {
-	readonly conversation: number;
-	readonly fromEntry: number;
+	readonly hidden?: { readonly conversation: number; readonly fromEntry: number };
 }
 
 export interface SearchHit {
@@ -35,7 +29,7 @@ export interface SearchHit {
 	readonly snippet: string;
 }
 
-export interface ScrollRow {
+interface ScrollRow {
 	readonly kind: DocKind;
 	readonly ref: string;
 	readonly at: string;
@@ -58,7 +52,6 @@ export class SearchIndex {
 		`);
 	}
 
-	/** Insert chat docs and advance the conversation's cursor in one transaction. */
 	addEntries(conversation: number, docs: readonly IndexDoc[], cursor: number): void {
 		const insert = this.#db.prepare("INSERT INTO docs (text, kind, ref, conversation, at) VALUES (?, ?, ?, ?, ?)");
 		this.#transaction(() => {
@@ -77,19 +70,9 @@ export class SearchIndex {
 	replaceNotes(notes: readonly Note[]): void {
 		this.#transaction(() => {
 			this.#db.exec("DELETE FROM docs WHERE kind = 'note'");
-			for (const note of notes) this.#insertNote(note);
+			const insert = this.#db.prepare("INSERT INTO docs (text, kind, ref, conversation, at) VALUES (?, 'note', ?, NULL, ?)");
+			for (const note of notes) insert.run(`${note.subject} (${note.kind})\n${note.body}`, `note:${note.slug}`, note.updated);
 		});
-	}
-
-	replaceNote(note: Note): void {
-		this.#transaction(() => {
-			this.#db.prepare("DELETE FROM docs WHERE ref = ?").run(`note:${note.slug}`);
-			this.#insertNote(note);
-		});
-	}
-
-	removeNote(slug: string): void {
-		this.#db.prepare("DELETE FROM docs WHERE ref = ?").run(`note:${slug}`);
 	}
 
 	search(query: SearchQuery): SearchHit[] {
@@ -151,12 +134,6 @@ export class SearchIndex {
 
 	close(): void {
 		this.#db.close();
-	}
-
-	#insertNote(note: Note): void {
-		this.#db
-			.prepare("INSERT INTO docs (text, kind, ref, conversation, at) VALUES (?, 'note', ?, NULL, ?)")
-			.run(`${note.subject} (${note.kind})\n${note.body}`, `note:${note.slug}`, note.updated);
 	}
 
 	#transaction(work: () => void): void {

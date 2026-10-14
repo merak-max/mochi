@@ -45,7 +45,7 @@ type Mode =
 
 const USAGE = "Usage: mochi [--headless] | mochi chat [--json] [--id <key>] | mochi -p <prompt> [--json] [--id <key>] | " + AUTH_COMMAND;
 
-export function parseMode(all: readonly string[], interactive: boolean): Mode {
+function parseMode(all: readonly string[], interactive: boolean): Mode {
 	const idAt = all.indexOf("--id");
 	const id = idAt < 0 ? undefined : all[idAt + 1];
 	if (idAt >= 0 && (id === undefined || !/^[A-Za-z0-9._-]+$/.test(id))) throw new Error(`--id needs a key of letters, digits, dot, dash or underscore. ${USAGE}`);
@@ -62,7 +62,6 @@ export function parseMode(all: readonly string[], interactive: boolean): Mode {
 
 async function main(args: readonly string[]): Promise<void> {
 	if (args[0] === "service" && args[1] === "install") {
-		// Linux: a systemd user service for this home, started now and at login.
 		const home = resolveHome(process.env);
 		if (process.platform !== "linux") throw new Error("service install writes a systemd user unit, which needs Linux. Run node src/main.ts --headless under your own supervisor.");
 		const unit = [
@@ -95,7 +94,6 @@ async function main(args: readonly string[]): Promise<void> {
 		return;
 	}
 	if (args[0] === "migrate") {
-		// mochi migrate <old data dir> [old env file]: once, with the daemon stopped.
 		const [from, envFile] = args.slice(1);
 		if (from === undefined) throw new Error("Usage: mochi migrate <old data dir> [old env file]");
 		const home = resolveHome(process.env);
@@ -137,7 +135,7 @@ async function main(args: readonly string[]): Promise<void> {
 	}
 	try {
 		if (mode.kind === "tui") await runTui(client, config.dataDir);
-		else await runLines(client, mode.prompt, { json: mode.json, ...(mode.id === undefined ? {} : { id: mode.id }) });
+		else await runLines(client, mode.prompt, mode);
 	} finally {
 		client.close();
 		await local?.stop("terminal closed");
@@ -239,12 +237,11 @@ function socketPath(dataDir: string): string {
 
 /** The outside services mochi calls. Models and the web need a key; without OpenRouter the trigger gates pass. */
 export function services(config: Pick<Config, "modelSetup" | "openRouterKey" | "firecrawlKey" | "dataDir" | "executorUrl">): readonly (readonly [string, Setup<void>])[] {
-	const key = (value: string | undefined, name: string) => (value === undefined ? broken(`${name} is not set. Fix: put it in ~/.mochi/.env`) : ready(undefined));
 	const missing = config.modelSetup.missing;
 	return [
 		["models", missing.length === 0 ? ready(undefined) : broken(`${missing.join("; ")}. Fix: put the key in ~/.mochi/.env`)],
 		["classifier", config.openRouterKey === undefined ? off : ready(undefined)],
-		["firecrawl", key(config.firecrawlKey, "FIRECRAWL_API_KEY")],
+		["firecrawl", config.firecrawlKey === undefined ? broken("FIRECRAWL_API_KEY is not set. Fix: put it in ~/.mochi/.env") : ready(undefined)],
 		["executor", config.executorUrl === undefined ? off : existsSync(authFile(config.dataDir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
 	];
 }

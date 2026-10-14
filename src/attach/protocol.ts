@@ -2,35 +2,25 @@ import type { Socket } from "node:net";
 import type { Op } from "@earendil-works/chord/delta";
 import type { ConversationView, ModelRef, TaskGraph, UsageState } from "@earendil-works/pi-durable";
 
-// A terminal attaches to the daemon over a Unix socket, one JSON object per line. The daemon streams the shown
-// conversation's view and the task graph as pi-durable watch frames (a value, then Chord ops per commit), and answers
-// requests by id. The client never touches storage.
-
 export type ConversationSummary = { readonly id: number; readonly label: string; readonly title?: string };
 export type ModelSummary = ModelRef & { readonly name: string; readonly contextWindow: number };
 
 export type Request =
-	/** Show this conversation: the view stream switches to it. */
 	| { readonly op: "show"; readonly conversationId: number }
-	/** Root input goes through `ingest` as channel `cli`; another conversation is submitted to directly. */
 	| {
 			readonly op: "submit";
 			readonly conversationId: number;
 			readonly text: string;
 			readonly whenBusy: "steer" | "followUp";
-			/** Root only: the `cli` message id, so a retry after a crash finds the same submission. Default: a fresh one. */
 			readonly messageId?: string;
 	  }
-	/** Esc: abort the conversation's current work. `everything` also stops its background agents and tasks. */
 	| { readonly op: "abort"; readonly conversationId: number; readonly everything: boolean }
 	| { readonly op: "compact"; readonly conversationId: number; readonly instructions?: string }
-	/** /new: start a fresh context; the transcript keeps a `pi.reset` marker. */
 	| { readonly op: "reset"; readonly conversationId: number }
 	| { readonly op: "configure"; readonly conversationId: number; readonly model?: ModelRef; readonly thinkingLevel?: string }
 	| { readonly op: "conversations" }
 	| { readonly op: "models" }
 	| { readonly op: "usage" }
-	/** Resolve once the submission settles, with its answer text. */
 	| { readonly op: "wait"; readonly submissionId: number };
 
 export type Answer =
@@ -60,7 +50,6 @@ export type ServerMessage =
 	| { readonly t: "tasks"; readonly value: TaskGraph }
 	| { readonly t: "tasks-ops"; readonly ops: readonly Op[] };
 
-/** Calls `onMessage` with each parsed line of `socket`. */
 export function readLines(socket: Socket, onMessage: (message: unknown) => void): void {
 	let buffer = "";
 	socket.setEncoding("utf8");

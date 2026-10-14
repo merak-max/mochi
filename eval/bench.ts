@@ -7,8 +7,6 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import type { FauxProviderHandle } from "@earendil-works/pi-ai/providers/faux";
-import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import type { Apps } from "../src/apps/apps.ts";
 import { createSeatConversation } from "../src/seats.ts";
 import { messageText } from "../src/text.ts";
@@ -58,7 +56,7 @@ interface Sample { readonly open: number; readonly turn: number; readonly tool: 
 
 async function sample(s: Scenario): Promise<Sample> {
 	const dir = await tempDir();
-	const faux: FauxProviderHandle = newFaux();
+	const faux = newFaux();
 	const { channel } = recordingChannel("imessage");
 	const t0 = performance.now();
 	const mochi = await openTestMochi(dir, faux, new Map([["imessage", channel]]), undefined, [], { apps });
@@ -92,7 +90,6 @@ async function sample(s: Scenario): Promise<Sample> {
 		if (!ok) why = `${isError ? "error: " : "unexpected: "}${text.slice(0, 160)}`;
 	}
 	await mochi.close();
-	void ROOT_CONVERSATION_ID;
 	return { open: opened - t0, turn: end - start, tool: answered - called, ok, ...(why === undefined ? {} : { why }) };
 }
 

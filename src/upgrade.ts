@@ -1,6 +1,5 @@
-import type { Context } from "@earendil-works/chord";
-import type { JsonValue } from "@earendil-works/chord";
-import { AgentDoc, configure, type ConversationId, defineDoc, defineDocFamily, LiveDoc, ROOT_CONVERSATION_ID, type Storage, type SubmissionId } from "@earendil-works/pi-durable";
+import type { Context, JsonValue } from "@earendil-works/chord";
+import { AgentDoc, configure, type ConversationId, defineDoc, defineDocFamily, type Harness, LiveDoc, ROOT_CONVERSATION_ID, type Storage, type SubmissionId } from "@earendil-works/pi-durable";
 import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
 import type { ChannelId } from "./channels/types.ts";
 import { allPages } from "./pages.ts";
@@ -14,11 +13,25 @@ import { type Line, openTurn } from "./turn/turn.ts";
 // Boot steps that convert live data written by older code. Each runs before `harness.resume()` and is idempotent: the
 // old form retires in the commit that writes the new one, so a second boot finds nothing to do.
 
-export interface UpgradeStep {
+interface UpgradeStep {
 	readonly unit: string;
 	readonly name: string;
 	run(host: { readonly storage: Storage; readonly line: Line; readonly trigger: TriggerTask; readonly catalog: AgentCatalog; readonly log: Log }, context: Context): Promise<{ readonly changed: number }>;
 }
+
+/** Aborts every live task of `kind`; a kind with no definition now settles `orphaned`. */
+async function abortLive(harness: Harness, kind: string, context: Context): Promise<number> {
+	const tasks = await allPages((cursor) => harness.commit((tx) => tx.scanTasks({ kind }, 256, cursor), context));
+	let aborted = 0;
+	for (const task of tasks) {
+		if (task.state.status === "terminal") continue;
+		await harness.abortTask(task.id, context);
+		aborted++;
+	}
+	return aborted;
+}
+
+const conversations = (storage: Storage, context: Context) => allPages((cursor) => storage.scanConversations({}, 256, cursor, context));
 
 type Route = { submissionId: SubmissionId; channel: ChannelId; messageId: string; recorded: boolean };
 const RouteDoc = defineDocFamily<Route, Route>({ kind: "mochi.route", version: 1, scope: "session", family: true, initial: (seed) => seed });
@@ -29,7 +42,7 @@ const OutboxDoc = defineDoc<{ pending: SubmissionId[] }>({ kind: "mochi.outbox",
  * stored request key, so admission returns the original submission and the Turn delivers its answer. Then the outbox
  * and every `mochi.route` member retire.
  */
-export const outboxToTurns: UpgradeStep = {
+const outboxToTurns: UpgradeStep = {
 	unit: "U5",
 	name: "outbox-to-turns",
 	async run({ storage, line }, context) {
@@ -59,8 +72,7 @@ export const outboxToTurns: UpgradeStep = {
 	},
 };
 
-/** Root predates seats; this runs every boot and changes nothing once root holds the owner seat. */
-export const rootSeat: UpgradeStep = {
+const rootSeat: UpgradeStep = {
 	unit: "U6",
 	name: "root-seat",
 	run: ({ line }, context) => line.harness.commit(async (tx) => ({ changed: (await seatRoot(tx)) ? 1 : 0 }), context),
@@ -80,7 +92,7 @@ export const TriggersDoc = defineDoc<{ items: Record<string, LegacyTrigger> }>({
  * Each trigger in `mochi.triggers` becomes a trigger task with its origin, in its conversation when it had one; a once
  * trigger that already fired is spent. The document retires in the same commit.
  */
-export const triggersToTasks: UpgradeStep = {
+const triggersToTasks: UpgradeStep = {
 	unit: "U8",
 	name: "triggers-to-tasks",
 	async run({ line, trigger, catalog }, context) {
@@ -106,19 +118,12 @@ const AGENT_DOCS = [legacy("mochi.agents"), legacy("mochi.agent-depth")];
  * Anchor and Reporter tasks have no definition now, so a live one would stay blocked forever; `abortTask` settles each
  * `orphaned`. Then every conversation's `mochi.agents` and `mochi.agent-depth` retire.
  */
-export const drainAgentKinds: UpgradeStep = {
+const drainAgentKinds: UpgradeStep = {
 	unit: "U9",
 	name: "drain-agent-kinds",
 	async run({ storage, line: { harness } }, context) {
-		let changed = 0;
-		for (const kind of ["mochi.agent-anchor", "mochi.agent-reporter"]) {
-			const tasks = await allPages((cursor) => harness.commit((tx) => tx.scanTasks({ kind }, 256, cursor), context));
-			for (const task of tasks.filter((task) => task.state.status !== "terminal")) {
-				await harness.abortTask(task.id, context);
-				changed++;
-			}
-		}
-		for (const { id } of await allPages((cursor) => storage.scanConversations({}, 256, cursor, context))) {
+		let changed = (await abortLive(harness, "mochi.agent-anchor", context)) + (await abortLive(harness, "mochi.agent-reporter", context));
+		for (const { id } of await conversations(storage, context)) {
 			for (const doc of AGENT_DOCS) {
 				if ((await harness.snapshot(doc, id, context)) === undefined) continue;
 				await harness.commit((tx) => tx.retireDoc(doc, id), context);
@@ -130,7 +135,7 @@ export const drainAgentKinds: UpgradeStep = {
 };
 
 /** A nightly checkpoint turn of the deleted rollover would resume and answer into root; its run is aborted instead. */
-export const retireRollover: UpgradeStep = {
+const retireRollover: UpgradeStep = {
 	unit: "U10",
 	name: "retire-rollover",
 	async run({ line: { harness, root } }, context) {
@@ -152,18 +157,12 @@ const OldStoreDoc = defineDoc<{ values: { [key: string]: JsonValue } }>({ kind: 
  * `abortTask` settles it `orphaned`. Each conversation's `mochi.codemode-store` values move to `pi.codemode.store`,
  * and the old document retires in the same commit.
  */
-export const codeToCodemode: UpgradeStep = {
+const codeToCodemode: UpgradeStep = {
 	unit: "U13",
 	name: "code-to-codemode",
 	async run({ storage, line: { harness } }, context) {
-		let changed = 0;
-		const calls = await allPages((cursor) => harness.commit((tx) => tx.scanTasks({ kind: "mochi.call" }, 256, cursor), context));
-		for (const task of calls) {
-			if (task.state.status === "terminal") continue;
-			await harness.abortTask(task.id, context);
-			changed++;
-		}
-		for (const { id } of await allPages((cursor) => storage.scanConversations({}, 256, cursor, context))) {
+		let changed = await abortLive(harness, "mochi.call", context);
+		for (const { id } of await conversations(storage, context)) {
 			const old = await harness.snapshot(OldStoreDoc, id, context);
 			if (old === undefined) continue;
 			await harness.commit(async (tx) => {
@@ -183,7 +182,7 @@ export const codeToCodemode: UpgradeStep = {
  * Each live trigger's conversation runs with the model and instructions its definition gives now (`runAgent`): its
  * role, else the fast tier. Runs on every boot, so an edited role file or the new defaults reach model-made triggers too.
  */
-export const triggerAgents: UpgradeStep = {
+const triggerAgents: UpgradeStep = {
 	unit: "U14",
 	name: "trigger-agents",
 	async run({ line: { harness }, catalog, log }, context) {
@@ -211,14 +210,13 @@ export const triggerAgents: UpgradeStep = {
 	},
 };
 
-/** In unit order. */
 /** The owner, run and worker seats became one agent seat. Every conversation that names a retired seat moves to it. */
-export const oneAgentSeat: UpgradeStep = {
+const oneAgentSeat: UpgradeStep = {
 	unit: "U11",
 	name: "one-agent-seat",
 	async run({ storage, line: { harness } }, context) {
 		let changed = 0;
-		for (const { id } of await allPages((cursor) => storage.scanConversations({}, 256, cursor, context))) {
+		for (const { id } of await conversations(storage, context)) {
 			if (await harness.commit((tx) => reseat(tx, id), context)) changed++;
 		}
 		return { changed };
@@ -231,16 +229,11 @@ const DreamDoc = defineDoc({ kind: "mochi.dream", version: 1, scope: "session", 
  * Nightly Dreaming became reflect, a fork of root before it is compacted. The `mochi.dream` task has no definition
  * now, so `abortTask` settles a live one `orphaned`, aborting a review conversation it owns; then its document retires.
  */
-export const retireDreaming: UpgradeStep = {
+const retireDreaming: UpgradeStep = {
 	unit: "U12",
 	name: "retire-dreaming",
 	async run({ line: { harness } }, context) {
-		let changed = 0;
-		const tasks = await allPages((cursor) => harness.commit((tx) => tx.scanTasks({ kind: "mochi.dream" }, 256, cursor), context));
-		for (const task of tasks.filter((task) => task.state.status !== "terminal")) {
-			await harness.abortTask(task.id, context);
-			changed++;
-		}
+		let changed = await abortLive(harness, "mochi.dream", context);
 		if ((await harness.snapshot(DreamDoc, context)) !== undefined) {
 			await harness.commit((tx) => tx.retireDoc(DreamDoc), context);
 			changed++;

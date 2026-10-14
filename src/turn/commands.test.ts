@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
@@ -9,6 +7,7 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/provid
 import { createRegistry, defineDoc, defineExtension, defineTask, Harness, ResetEntry, type ConversationId, type Tx } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createSeatConversation } from "../seats.ts";
+import { tempDir } from "../test-support.ts";
 import { commandOf, commandTask, runCommand, statusText } from "./commands.ts";
 import { ensureLine } from "./turn.ts";
 import { fastCompletion } from "./lifecycle.ts";
@@ -51,7 +50,6 @@ async function open(dir: string, options: { pauseReply?: () => void } = {}) {
 	return { ...deps, task, faux };
 }
 
-const temp = () => mkdtemp(join(tmpdir(), "mochi-command-"));
 
 test("whole-text owner commands are trimmed and case-insensitive, not prefixes", () => {
 	assert.equal(commandOf(" /NeW \n"), "new");
@@ -62,7 +60,7 @@ test("whole-text owner commands are trimmed and case-insensitive, not prefixes",
 });
 
 test("commands dedupe across reopen and a crash after execution before opening the reply Turn", async () => {
-	const dir = await temp();
+	const dir = await tempDir();
 	let reached!: () => void;
 	const blocked = new Promise<void>((resolve) => { reached = resolve; });
 	const first = await open(dir, { pauseReply: reached });
@@ -89,7 +87,7 @@ test("commands dedupe across reopen and a crash after execution before opening t
 });
 
 test("/stop aborts root background work, not ownerless triggers or line tasks", async () => {
-	const mochi = await open(await temp());
+	const mochi = await open(await tempDir());
 	try {
 		const trigger = { id: await mochi.harness.commit((tx) => createSeatConversation(tx, "trigger", { kind: "ownerless" }), context) };
 		const ids = await mochi.harness.commit(async (tx) => ({
@@ -107,7 +105,7 @@ test("/stop aborts root background work, not ownerless triggers or line tasks", 
 });
 
 test("/new keeps root background work running", async () => {
-	const mochi = await open(await temp());
+	const mochi = await open(await tempDir());
 	try {
 		const id = await mochi.harness.commit((tx) => tx.createTask(Sleeper, null, { ownership: { kind: "conversation" }, conversationId: mochi.root.id, background: true }), context);
 		await runCommand(mochi, { key: "w:n0", channel: "whatsapp", command: "new" }, context);
@@ -116,7 +114,7 @@ test("/new keeps root background work running", async () => {
 });
 
 test("/new starts the next request from its handoff and fallback resets without it", async () => {
-	const mochi = await open(await temp());
+	const mochi = await open(await tempDir());
 	try {
 		await mochi.root.submit({ type: "write", entry: { kind: "old", model: [{ role: "user", content: "old thread", timestamp: Date.now() }] } }, context);
 		mochi.faux.setResponses([fauxAssistantMessage("pending booking"), (request) => {
@@ -134,7 +132,7 @@ test("/new starts the next request from its handoff and fallback resets without 
 });
 
 test("/status is deterministic lowercase plain text with relative times and cache tokens", async () => {
-	const mochi = await open(await temp());
+	const mochi = await open(await tempDir());
 	try {
 		const answer = structuredClone(fauxAssistantMessage("done"));
 		answer.usage.input = 100;

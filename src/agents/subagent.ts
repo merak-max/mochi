@@ -1,30 +1,27 @@
 import type { Context } from "@earendil-works/chord";
 import { type Static, Type } from "@earendil-works/pi-ai";
-import { type ConversationId, defineTask, defineTool, type EntryId, type TaskId, type TaskRecord, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { type ConversationId, defineTask, defineTool, type EntryId, type TaskId, type TaskOptions, type TaskRecord, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { journaled } from "../journal.ts";
 import { allPages } from "../pages.ts";
 import { createSeatConversation, forkPoint, forkSeatConversation } from "../seats.ts";
 import { answerText } from "../turn/turn.ts";
 import { type AgentCatalog, THINKING } from "./catalog.ts";
 
-// One task kind for every mode. `agent` and `fork` are owned by the calling tool task, so Esc cascades to the child and
-// the call resolves to the answer. `agent_start` and `fork_start` are background tasks of the calling conversation: only
-// /stop reaches them, and they post nothing back; the child may notify the owner itself. Every agent conversation has
-// these functions, so an agent can start or fork agents at any depth.
-//
-// `agent` starts a fresh conversation from a brief. `fork` copies the calling conversation: its history, its agent and
-// its code-mode state, as of the call. The fork's first request repeats the parent's prompt, so it reads the parent's
-// cache instead of paying for the context again.
-
-export type AgentInput = { readonly name: string; readonly brief: string };
-export type AgentResult = { readonly answer: string } | { readonly failure: string };
+type AgentInput = { readonly name: string; readonly brief: string };
+type AgentResult = { readonly answer: string } | { readonly failure: string };
 type AgentRecord = TaskRecord<AgentInput, { readonly phase: "run" }, AgentResult>;
 
 const KIND = "mochi.agent";
 
-/** Inside one commit, after `forkPoint` was read: a background agent task on a fork of `parent` at `at`. */
-export async function startFork(tx: Tx, parent: ConversationId, at: EntryId, input: AgentInput): Promise<TaskId<AgentResult>> {
-	const id = await tx.createTask(AgentTask, input, { ownership: { kind: "conversation" }, conversationId: parent, background: true });
+/** Call inside the commit that read `forkPoint`. */
+export async function startFork(
+	tx: Tx,
+	parent: ConversationId,
+	at: EntryId,
+	input: AgentInput,
+	options: TaskOptions = { ownership: { kind: "conversation" }, conversationId: parent, background: true },
+): Promise<TaskId<AgentResult>> {
+	const id = await tx.createTask(AgentTask, input, options);
 	await forkSeatConversation(tx, parent, at, { kind: "task", taskId: id });
 	return id;
 }
@@ -55,7 +52,7 @@ const scanAgents = async (tx: Pick<Tx, "scanTasks">, conversationId: Conversatio
 
 const Name = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 40 });
 
-export interface AgentFnDeps {
+interface AgentFnDeps {
 	readonly catalog: AgentCatalog;
 	readonly read: <T>(read: (tx: Tx) => Promise<T>, context: Context) => Promise<T>;
 	readonly abortTask: (id: TaskId, context: Context) => Promise<unknown>;
@@ -76,19 +73,18 @@ export function agentFns({ catalog, read, abortTask }: AgentFnDeps): ToolRegistr
 		return found;
 	};
 	const ForkParams = Type.Object({ name: Name, brief: Type.String({ minLength: 1 }) });
+	const taskOptions = (background: boolean, api: ToolExecutionApi): TaskOptions =>
+		background ? { ownership: { kind: "conversation" }, background: true } : { ownership: { kind: "task", taskId: api.taskId } };
 	const fork = async (background: boolean, args: Static<typeof ForkParams>, api: ToolExecutionApi, context: Context) => {
-		let id: TaskId<AgentResult> | undefined;
-		await api.commit(async (tx) => {
+		const { id } = await api.commit(async (tx) => {
 			const at = await forkPoint(tx, api.conversationId);
-			({ id } = await journaled(tx, api.taskId, "fork", async () => {
+			return journaled(tx, api.taskId, "fork", async () => {
 				const reply = background ? "You run in the background: nothing reads your answer, so call notify if the owner needs the result." : "Your answer goes back to that script, not to the owner.";
 				const brief = `You are ${args.name}, a fork of this conversation made by the script above. ${reply}\n\n${args.brief}`;
-				const id = await tx.createTask(AgentTask, { name: args.name, brief }, background ? { ownership: { kind: "conversation" }, background: true } : { ownership: { kind: "task", taskId: api.taskId } });
-				await forkSeatConversation(tx, api.conversationId, at, { kind: "task", taskId: id });
-				return id;
-			}));
+				return startFork(tx, api.conversationId, at, { name: args.name, brief }, taskOptions(background, api));
+			});
 		}, context);
-		return settle(background, args.name, id!, api, context);
+		return settle(background, args.name, id, api, context);
 	};
 	const settle = async (background: boolean, name: string, id: TaskId<AgentResult>, api: ToolExecutionApi, context: Context) => {
 		if (background) return { structuredOutput: { name } };
@@ -102,20 +98,20 @@ export function agentFns({ catalog, read, abortTask }: AgentFnDeps): ToolRegistr
 		if (type === undefined) throw new Error(`Unknown type "${args.type}". Use ${types}.`);
 		const [modelName, thinking] = [args.model ?? type.model, args.thinking ?? type.thinking];
 		const model = modelName === undefined ? undefined : catalog.model(modelName);
-		let id: TaskId<AgentResult> | undefined;
-		await api.commit(async (tx) => {
-			({ id } = await journaled(tx, api.taskId, "agent", async () => {
-				const options = background ? ({ ownership: { kind: "conversation" }, background: true } as const) : { ownership: { kind: "task", taskId: api.taskId } as const };
-				const id = await tx.createTask(AgentTask, { name: args.name, brief: args.brief }, options);
-				await createSeatConversation(tx, "agent", { kind: "task", taskId: id }, {
-					...(model === undefined ? {} : { model }),
-					...(thinking === undefined ? {} : { thinkingLevel: thinking }),
-					...(type.instructions === "" ? {} : { instructions: type.instructions }),
-				});
-				return id;
-			}));
-		}, context);
-		return settle(background, args.name, id!, api, context);
+		const { id } = await api.commit(
+			(tx) =>
+				journaled(tx, api.taskId, "agent", async () => {
+					const id = await tx.createTask(AgentTask, { name: args.name, brief: args.brief }, taskOptions(background, api));
+					await createSeatConversation(tx, "agent", { kind: "task", taskId: id }, {
+						...(model === undefined ? {} : { model }),
+						...(thinking === undefined ? {} : { thinkingLevel: thinking }),
+						...(type.instructions === "" ? {} : { instructions: type.instructions }),
+					});
+					return id;
+				}),
+			context,
+		);
+		return settle(background, args.name, id, api, context);
 	};
 	return [
 		defineTool({

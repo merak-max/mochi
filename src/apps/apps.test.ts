@@ -7,7 +7,6 @@ import { type Connect, connectApps, searchProgram, toolExpression } from "./apps
 
 const context = BACKGROUND_CONTEXT;
 
-/** A scripted Executor on the in-memory transport: each tools/call goes to `onCall`, which may ask mochi for approval. */
 function fakeExecutor(onCall: (name: string, args: Record<string, unknown>, ask: (message: string) => Promise<unknown>) => Promise<unknown>) {
 	const { client, server } = createInMemoryTransportPair();
 	const capabilities: unknown[] = [];

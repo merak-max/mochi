@@ -8,11 +8,11 @@ import type { TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { messageText } from "../text.ts";
 import { ingest } from "../turn/turn.ts";
+import type { Channels } from "../channels/types.ts";
 import { newFaux, openTestMochi, recordingChannel, tempDir, type TestMochi, turnsSettled } from "../test-support.ts";
 
 const DEMO = "sh -c 'echo ready; sleep 0.2; exit 3'";
 
-/** Root runs `go` as one code call, then answers "ok" to every later input, wake-ups included. */
 function scripted(code: string) {
 	const faux = newFaux();
 	const results: string[] = [];
@@ -28,6 +28,8 @@ function scripted(code: string) {
 	faux.setResponses(Array.from({ length: 20 }, () => step));
 	return { faux, results };
 }
+
+const openFast = (dir: string, faux: ReturnType<typeof newFaux>, channels: Channels = new Map()) => openTestMochi(dir, faux, channels, undefined, [], { procPollMs: 20 });
 
 const userTexts = async (mochi: TestMochi): Promise<string[]> =>
 	(await mochi.root.entries({}, 200, undefined, context)).items.filter((entry) => entry.kind === "pi.user").map((entry) => messageText(entry.model![0]!)).reverse();
@@ -65,7 +67,7 @@ const [row] = await tools.proc_status({ name: "demo" });
 return JSON.stringify({ ms, state: row.state, pid: proc.pid });`;
 	const { faux, results } = scripted(code);
 	const dir = await tempDir();
-	const mochi = await openTestMochi(dir, faux, new Map(), undefined, [], { procPollMs: 20 });
+	const mochi = await openFast(dir, faux);
 	await (await mochi.root.submit({ type: "input", content: "go" }, context)).wait(context);
 	const started = JSON.parse(results[0]!.split("\n").at(-1)!) as { ms: number; state: string; pid: number };
 	assert.equal(started.state, "running");
@@ -95,7 +97,7 @@ return JSON.stringify({ ms, state: row.state, pid: proc.pid });`;
 test("after the owner wrote on a chat channel, an exit wake reaches them there through a Turn", async () => {
 	const { faux } = scripted(`return await tools.proc_start({ name: "chat", command: "echo built; exit 0" });`);
 	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]), undefined, [], { procPollMs: 20 });
+	const mochi = await openFast(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
 	await ingest(mochi.line, { kind: "message", channel: "whatsapp", messageId: "w1", text: "go", at: new Date("2026-10-05T08:32:00Z"), attachments: [] }, context);
 	await turnsSettled(mochi.harness);
 	await watchersDone(mochi);
@@ -108,7 +110,7 @@ test("after the owner wrote on a chat channel, an exit wake reaches them there t
 test("a watch regex wakes once even when later lines match again", async () => {
 	const command = "echo ready; sleep 0.3; echo ready again; sleep 0.2; exit 0";
 	const { faux } = scripted(`return await tools.proc_start({ name: "twice", command: ${JSON.stringify(command)}, watch: "ready" });`);
-	const mochi = await openTestMochi(await tempDir(), faux, new Map(), undefined, [], { procPollMs: 20 });
+	const mochi = await openFast(await tempDir(), faux);
 	await (await mochi.root.submit({ type: "input", content: "go" }, context)).wait(context);
 	await watchersDone(mochi);
 	await rootIdle(mochi, 3);
@@ -120,21 +122,21 @@ test("a watch regex wakes once even when later lines match again", async () => {
 test("an exit while the daemon is down wakes root once on the next boot", async () => {
 	const dir = await tempDir();
 	const first = scripted(`return await tools.proc_start({ name: "late", command: "echo working; sleep 0.4; exit 5" });`);
-	const mochi = await openTestMochi(dir, first.faux, new Map(), undefined, [], { procPollMs: 20 });
+	const mochi = await openFast(dir, first.faux);
 	await (await mochi.root.submit({ type: "input", content: "go" }, context)).wait(context);
 	await mochi.close();
 	await sleep(800);
 	assert.equal(await readFile(join(dir, "work", ".procs", "late.exit"), "utf8"), "5\n", "the process ran to its end with no daemon");
 
 	const second = scripted("");
-	const again = await openTestMochi(dir, second.faux, new Map(), undefined, [], { procPollMs: 20 });
+	const again = await openFast(dir, second.faux);
 	again.harness.resume();
 	await watchersDone(again);
 	await rootIdle(again, 2);
 	assert.deepEqual(await wakes(again), ["[process late exited code=5]\nworking"]);
 	await again.close();
 
-	const third = await openTestMochi(dir, scripted("").faux, new Map(), undefined, [], { procPollMs: 20 });
+	const third = await openFast(dir, scripted("").faux);
 	third.harness.resume();
 	await sleep(200);
 	assert.equal((await wakes(third)).length, 1, "a later boot does not wake again");
@@ -146,7 +148,7 @@ test("proc_stop kills the whole process group and no wake follows", async () => 
 	const command = "sleep 30 & echo $! > child.pid; echo up; sleep 30";
 	const { faux, results } = scripted(`await tools.proc_start({ name: "long", command: ${JSON.stringify(command)} });
 return "started";`);
-	const mochi = await openTestMochi(dir, faux, new Map(), undefined, [], { procPollMs: 20 });
+	const mochi = await openFast(dir, faux);
 	await (await mochi.root.submit({ type: "input", content: "go" }, context)).wait(context);
 	assert.match(results[0]!, /started/);
 	let childPid = "";

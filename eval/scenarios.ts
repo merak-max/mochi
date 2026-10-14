@@ -5,12 +5,12 @@ export const TIME_ZONE = "Asia/Kolkata";
 /** How long before the live run, such as `8d`, `2h` or `5m`. */
 export type Ago = `${number}${"d" | "h" | "m"}`;
 
-export type SeedNote = { readonly slug: string; readonly kind: "user" | "rule" | "fact" | "person" | "project" | "preference"; readonly subject: string; readonly body: string };
+type SeedNote = { readonly slug: string; readonly kind: "user" | "rule" | "fact" | "person" | "project" | "preference"; readonly subject: string; readonly body: string };
 
 /** A past exchange replayed on a scripted model before the live run, so the transcript, memory and index look lived in. */
-export type SeedTurn = { readonly ago: Ago; readonly owner: string; readonly mochi: string; readonly notes?: readonly SeedNote[] };
+type SeedTurn = { readonly ago: Ago; readonly owner: string; readonly mochi: string; readonly notes?: readonly SeedNote[] };
 
-export type Expect = {
+type Expect = {
 	/** A reply longer than this fails. Defaults per channel. */
 	readonly maxChars?: number;
 	/** Each regex must match the joined replies (case-insensitive). */
