@@ -158,8 +158,10 @@ export async function scanTriggers(tx: Pick<Tx, "scanTasks">, conversationId?: C
 export const liveTrigger = async (tx: Pick<Tx, "scanTasks">, id: string): Promise<TriggerRecord | undefined> =>
 	(await scanTriggers(tx)).findLast((task) => live(task) && task.input.trigger.id === id);
 
+/** How every trigger run's instructions start, so other code can tell a run's conversation apart. */
+export const TRIGGER_RUN = "This conversation is an unattended trigger run";
 const INSTRUCTIONS =
-	"This conversation is an unattended trigger run, not a chat with the owner. Nobody reads your answers here. " +
+	`${TRIGGER_RUN}, not a chat with the owner. Nobody reads your answers here. ` +
 	"The only way to reach the owner is the notify tool; call it only when something needs the owner's attention, " +
 	"and otherwise finish with a short note of what you checked and what you already reported. Each run starts fresh " +
 	"from the last run's note; use recall for anything older. End a trigger that has served its purpose with tools.trigger_remove in code.";

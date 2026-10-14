@@ -8,7 +8,7 @@ import { findSecret, secretRejection } from "../notes/secrets.ts";
 import { allPages } from "../pages.ts";
 import { messageText } from "../text.ts";
 import { parseCron } from "../triggers/cron.ts";
-import { LATE_MS, plan } from "../triggers/trigger.ts";
+import { LATE_MS, plan, TRIGGER_RUN } from "../triggers/trigger.ts";
 import { forgetNote, type Memory, MemoryDoc, writeNote } from "./memory.ts";
 import { RepoDoc } from "./publication.ts";
 import type { Log } from "../log.ts";
@@ -82,6 +82,8 @@ async function pinMemory(tx: Tx, model: ModelRef, slot: number, task: TaskId): P
 		const agent = await tx.doc(AgentDoc, conversation.id);
 		if (marker.maintenance || agent.instructions === INSTRUCTIONS || agent.instructions === "Local memory publication. No model input.") continue;
 		if (JSON.stringify(agent.extensions) === userSelection) continue;
+		// A trigger run's routine output is no evidence about the owner.
+		if (agent.instructions?.startsWith(TRIGGER_RUN) === true) continue;
 		if (selected >= 64) break;
 		selected++;
 		const entries = await allPages((cursor) => tx.scanEntries({ conversationId: conversation.id, minEntryId: (since + 1) as EntryId }, 256, cursor));
@@ -144,14 +146,16 @@ async function narrow(
 		}
 	}))));
 	const keep = new Set(picked.flat());
-	const kept: Evidence[] = [];
+	// The owner's own chat first, then other conversations; newest first within each, in the evidence's order after.
+	const ranked = [...evidence].filter((item) => keep.has(item.entry)).sort((a, b) => Number(b.conversation === ROOT_CONVERSATION_ID) - Number(a.conversation === ROOT_CONVERSATION_ID) || b.entry - a.entry);
+	const chosen = new Set<Evidence>();
 	let size = 0;
-	for (const item of [...evidence].reverse()) {
-		if (!keep.has(item.entry) || size + item.text.length > REVIEW_CHARS) continue;
-		kept.unshift(item);
+	for (const item of ranked) {
+		if (size + item.text.length > REVIEW_CHARS) continue;
+		chosen.add(item);
 		size += item.text.length;
 	}
-	return kept;
+	return evidence.filter((item) => chosen.has(item));
 }
 
 export async function applyDreamBatch(tx: Tx, pin: Pick<Pin, "revision" | "memory" | "evidence" | "cutoff" | "requestId">, batch: Batch, today: string): Promise<void> {
