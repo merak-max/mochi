@@ -32,7 +32,8 @@ import { type Block, blockKey, cover, halves, pending, RAW_MAX } from "./tree.ts
 /** How many lines the wake view and a compacted window show. A reading size, not a storage limit. */
 const WAKE_LINES = 96;
 
-type Line = { readonly at: string; readonly text: string };
+/** `from`: in a turn log, the first entry of the turn. Memory lines have none. */
+type Line = { readonly at: string; readonly text: string; readonly from?: number };
 type Tree = { readonly lines: Line[]; readonly blocks: Record<string, string> };
 
 const empty = (): Tree => ({ lines: [], blocks: {} });
@@ -80,8 +81,8 @@ function render(tree: Tree, [lo, hi]: Block): string {
 	return tree.lines.slice(lo, hi).map((line, i) => `#${lo + i} ${line.at} ${line.text}`).join("\n");
 }
 
-function wake(tree: Tree): string {
-	return cover(tree.lines.length, WAKE_LINES).map((block) => render(tree, block)).join("\n");
+function wake(tree: Tree, upTo = tree.lines.length): string {
+	return cover(upTo, WAKE_LINES).map((block) => render(tree, block)).join("\n");
 }
 
 function zoom(tree: Tree, block: Block): string {
@@ -164,7 +165,7 @@ async function foldTurns(harness: Harness, fast: FastCompletion, conversation: C
 		await harness.commit(async (tx) => {
 			const doc = await tx.doc(TurnLog, conversation);
 			if (doc.upTo >= upTo) return;
-			if (line !== undefined) doc.lines.push({ at: stamp(turn[0]!.model?.[0]), text: line });
+			if (line !== undefined) doc.lines.push({ at: stamp(turn[0]!.model?.[0]), text: line, from: turn[0]!.id });
 			(doc as { upTo: number }).upTo = upTo;
 		}, context);
 	}
@@ -327,8 +328,9 @@ export function memoryExtension(ownerOf: (read: DocumentReader, conversation: Co
 }
 
 /**
- * Compaction keeps the newest turns verbatim and replaces the rest with the cover of this conversation's turn log, as
- * of the first kept entry. Blocks the feed has not built yet show as raw lines, so compaction never waits on a model.
+ * Compaction keeps the newest turns verbatim and replaces the rest with the cover of this conversation's turn log, up to
+ * the first kept entry. Blocks the feed has not built yet show as raw lines, so compaction never waits on a model. When
+ * the feed has not folded every replaced turn yet, the hook declines, and pi-durable's own summary covers the gap.
  */
 export function windowExtension(): Extension {
 	return defineExtension({
@@ -336,8 +338,11 @@ export function windowExtension(): Extension {
 		hooks: [hook(CompactionTask, {
 			beforeCompact: async (input, api, context) => {
 				const log = await api.snapshot(TurnLog, api.conversationId, context);
-				if (log === undefined || log.lines.length === 0) return undefined;
-				const view = wake(log);
+				if (log === undefined || log.upTo < input.firstKept - 1) return undefined;
+				let replaced = 0;
+				while (replaced < log.lines.length && (log.lines[replaced]!.from ?? 0) < input.firstKept) replaced++;
+				if (replaced === 0) return undefined;
+				const view = wake(log, replaced);
 				return { summary: `Earlier turns of this conversation, oldest first. Each #lo-hi line merges turns; open one with tools.zoom({ block, turns: true }).\n${view}` };
 			},
 		})],
