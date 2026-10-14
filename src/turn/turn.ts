@@ -43,7 +43,7 @@ import type { Log } from "../log.ts";
 import { formatStamp, messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { MediaDeps } from "../media/client.ts";
-import { loadAttachment, splitAttachments } from "../media/files.ts";
+import { loadOutgoing, splitAttachments } from "../media/files.ts";
 import { prepareInbound } from "../media/inbound.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
 
@@ -355,9 +355,9 @@ export function defineTurn(host: TurnHost): TurnTask {
 						let outgoingBubble = bubble;
 						if (bubble.kind === "file") {
 							try {
-								outgoingBubble = await loadAttachment(bubble.name, workDir);
-							} catch {
-								throw new SendRejected(`The attachment ${bubble.name} could not be read inside the work directory.`);
+								outgoingBubble = await loadOutgoing(bubble.name, workDir);
+							} catch (error) {
+								throw new SendRejected(`The attachment ${bubble.name} could not be sent: ${error instanceof Error ? error.message : String(error)}`);
 							}
 						}
 						const threadOn = task.input.source === "chat" ? task.input.threadOn : undefined;
