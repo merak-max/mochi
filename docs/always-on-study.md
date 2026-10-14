@@ -57,6 +57,20 @@ Inside mochi:
 
 Root cache writes, split by the gap since the previous call: 529 calls within 5 minutes wrote 0.99M tokens. 19 calls after a 5-60 minute gap wrote 1.15M tokens ($5.76). 15 calls after more than 1 hour wrote 0.41M. A 1-hour TTL writes at 2x input instead of 1.25x. A replay of root's real calls gives $19.54 of cache cost with a 1-hour TTL, against $18.27 actual. So for this traffic the 5-minute TTL is the cheaper choice. Do not switch root to the 1-hour cache.
 
+## Status, 2026-10-14
+
+Built and verified on the live daemon in the same session:
+
+- pi 1.2.0 from npm, tarballs and overrides dropped (`a300f55`).
+- Trigger runs start fresh from the last run's note, run on a role's model and instructions, default to the fast tier, and queue a busy slot (`403df0f`). A live probe's second run read 3,658 tokens from the cache and wrote 62.
+- Owner roles in `data/agents/` (relay, clock, kubera, researchy, projects); mail-watch runs as relay.
+- Burst batching (`24a12d6`).
+- `history` for scripts and an 8-call `llm` gate (`a7a772a`).
+- Dreaming over every entry since the last dream, narrowed by a fast-model map, and turned on (`d1af7f1`).
+- Settle: warm-cache compaction of quiet threads (`e1886c5`). Live: root at 74,910 tokens compacted 267 s after its last turn, once.
+
+Item 2 (secrets in bash) and item 8 (a reviewer) were left out on the owner's instruction.
+
 ## Findings, ranked for the primary goal
 
 Each item is small, has evidence behind it, and builds on what mochi has.
