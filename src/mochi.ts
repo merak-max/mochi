@@ -26,7 +26,6 @@ import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
 import { defaultSelection, seatExtensions, SCRIPT_DEADLINE_MS } from "./seats.ts";
 import { reactTool, defineTurn, ensureLine, type Line, openTurn, RETRY, type Retry } from "./turn/turn.ts";
-import { UPGRADES } from "./upgrade.ts";
 import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
 import { fastBrowserFns } from "./browser/fast.ts";
@@ -132,7 +131,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		handoffTool(),
 	];
 	const now = options.now ?? (() => new Date());
-	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness });
+	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.agents });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
 	const library: ToolRegistration[] = [
@@ -229,10 +228,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
 		...(idleResetMinutes > 0 ? { idleReset: (conversation: Conversation, key: string, context: Context) => idleResetIfStale({ harness, fast, idleResetMinutes, now: () => now().getTime() }, conversation, key, context) } : {}),
 	};
-	for (const step of UPGRADES) {
-		const { changed } = await step.run({ storage: options.storage, line, trigger, catalog: options.agents, log }, context);
-		if (changed > 0) log("upgrade", { unit: step.unit, name: step.name, changed });
-	}
 	await bindRepo(harness, options.memory?.repo, context);
 	index.replaceNotes(sortedNotes(await readMemory(harness, context)));
 	return { harness, root, registry, classify: options.classify, line, trigger, catalog: options.agents };

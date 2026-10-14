@@ -61,7 +61,7 @@ export type TriggerRecord = TaskRecord<TriggerInput, TriggerState, null>;
 
 const iso = (at: number): string => new Date(at).toISOString();
 
-export function defineTrigger({ timeZone, deadlineMs, log, harness }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit"> }): TriggerTask {
+export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit">; readonly catalog: AgentCatalog }): TriggerTask {
 	const wait = (last: LastSlot): NextTaskState<TriggerState, null> => ({ status: "running", checkpoint: { phase: "wait", last } });
 	const missed = (trigger: Trigger, slot: number): NextTaskState<TriggerState, null> => {
 		log("trigger.missed", { id: trigger.id, slot: iso(slot) });
@@ -113,6 +113,8 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness }: { readonly
 				}
 				const conversation = (await runtime.conversation(runtime.conversationId, context))!;
 				const requestId = `${trigger.kind}:${trigger.id}:${iso(slot)}`;
+				const { agent, instructions } = runAgent(trigger, catalog);
+				await harness().commit((tx) => configure(tx, conversation.id, { ...agent, instructions }), context);
 				await freshRun(harness(), conversation, requestId, runtime.now(), context);
 				const content = `[${trigger.kind} ${trigger.id}] Current time: ${formatStamp(new Date(slot), timeZone)}\n${trigger.prompt}${payload}`;
 				const submission = await conversation.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context);
