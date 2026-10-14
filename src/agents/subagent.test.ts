@@ -7,6 +7,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, defineDoc, defineExtension, defineTask, Harness, type JsonObject, ROOT_CONVERSATION_ID, type TaskId } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { createModelSetup } from "../brain/providers.ts";
 import { messageText } from "../text.ts";
 import { NOTIFY_ENTRY } from "../turn/turn.ts";
 import { FAUX, newFaux, openTestMochi, recordingChannel, tempDir, type TestMochi, turnsSettled } from "../test-support.ts";
@@ -47,12 +48,20 @@ function scripted(faux: ReturnType<typeof newFaux>, plays: Record<string, readon
 const agentTasks = async (mochi: TestMochi): Promise<TaskId[]> => (await mochi.harness.commit((tx) => tx.scanTasks({ kind: "mochi.agent" }, 64), context)).items.map((task) => task.id);
 const rootEntries = async (mochi: TestMochi) => (await mochi.root.entries({}, 100, undefined, context)).items;
 
-test("agent files give instructions, model and thinking; the real catalog resolves tiers onto Bifrost", async () => {
+test("agent files give instructions, model and thinking; the catalog resolves names through the configured providers", async () => {
 	assert.deepEqual(parseAgentFile("x", "---\nmodel: fast\nthinking: low\n---\n\n# X\nDo it.\n"), { name: "x", instructions: "# X\nDo it.", model: "fast", thinking: "low" });
 	assert.throws(() => parseAgentFile("y", "---\nthinking: huge\n---\nbody"), /thinking "huge"/);
-	const catalog = await AgentCatalog.load(new URL("../../agents", import.meta.url).pathname);
-	assert.deepEqual(catalog.model("fast"), { provider: "bifrost-openai", modelId: "azure/gpt-6-luna" });
-	assert.throws(() => catalog.model("panel"), /is a list/);
+	const setup = createModelSetup({
+		env: { GATEWAY_KEY: "k" },
+		providers: { gw: { api: "anthropic", url: "https://gw.example/anthropic", keyEnv: "GATEWAY_KEY" }, "gw-gpt": { api: "responses", url: "https://gw.example/openai/v1", keyEnv: "GATEWAY_KEY" } },
+		models: { brain: "gw/claude-opus-5-5", fast: "gw-gpt/azure/gpt-6-luna", aliases: { sonnet: "gw/claude-sonnet-5-5" } },
+	});
+	const catalog = await AgentCatalog.load(new URL("../../agents", import.meta.url).pathname, undefined, setup.ref);
+	assert.deepEqual(catalog.model("fast"), { provider: "gw-gpt", modelId: "azure/gpt-6-luna" });
+	assert.deepEqual(catalog.model("sonnet"), { provider: "gw", modelId: "claude-sonnet-5-5" });
+	assert.deepEqual(setup.missing, []);
+	assert.throws(() => catalog.model("panel"), /Unknown model "panel"/);
+	assert.throws(() => catalog.model("nowhere/x"), /provider "nowhere", which is not in \[providers\]/);
 });
 
 test("a foreground agent answers through the calling script, in seat worker with no agent functions", async () => {

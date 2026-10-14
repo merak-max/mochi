@@ -154,9 +154,10 @@ export function recordingChannel(id: ChatChannelId, options: { react: boolean } 
 /** Every tier and alias resolves to the faux model; `worker` is always there. */
 export function testCatalog(types: readonly AgentType[] = []): AgentCatalog {
 	const faux = `${FAUX.provider}/${FAUX.modelId}`;
-	return new AgentCatalog([{ name: "worker", instructions: "", thinking: "low" }, ...types], {
-		models: { opus: faux, sonnet: faux, fable: faux, haiku: faux },
-		tiers: { fast: "haiku", default: "opus", strongest: "fable", panel: ["opus", "fable", "sonnet"] },
+	const named = new Set(["brain", "default", "fast", "strongest", "opus", "sonnet", "fable", "haiku"]);
+	return new AgentCatalog([{ name: "worker", instructions: "", thinking: "low" }, ...types], (name) => {
+		if (named.has(name) || name === faux) return { ...FAUX };
+		throw new Error(`Unknown model "${name}".`);
 	});
 }
 

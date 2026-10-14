@@ -7,7 +7,6 @@ import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/conte
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { openMochi } from "./mochi.ts";
 import { createClassify } from "./brain/classifier.ts";
-import { createBifrostModels, FAST, OPUS } from "./brain/models.ts";
 import { createIMessageChannel } from "./channels/imessage.ts";
 import { createTelegramChannel } from "./channels/telegram.ts";
 import { createWhatsAppChannel } from "./channels/whatsapp.ts";
@@ -65,6 +64,7 @@ async function main(args: readonly string[]): Promise<void> {
 	if (args[0] === "auth") {
 		if (args[1] !== "executor") throw new Error(`Unknown auth target ${args[1] ?? "(none)"}. Usage: ${AUTH_COMMAND}`);
 		const config = await loadConfig(process.env);
+		if (config.executorUrl === undefined) throw new Error("Set executorUrl in config.toml (or EXECUTOR_URL) first.");
 		await mkdir(config.dataDir, { recursive: true });
 		await loginExecutor(config.executorUrl, authFile(config.dataDir), (line) => process.stdout.write(`${line}\n`));
 		return;
@@ -115,25 +115,25 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	await mkdir(workDir, { recursive: true });
 	const a2a = a2aServerSetup(config.env);
 	for (const line of [...setupReport([...services(config), ["a2a", a2a]]), ...channelReport]) log("setup", { line });
-	const models = createBifrostModels(config.bifrostKey ?? "", config.openRouterKey);
-	const apps = connectApps(storedTokenConnector(config.executorUrl, authFile(config.dataDir)), log);
+	const { models } = config.modelSetup;
+	const apps = config.executorUrl === undefined ? undefined : connectApps(storedTokenConnector(config.executorUrl, authFile(config.dataDir)), log);
 
 	const mochi = await openMochi(
 		{
 			storage: await openNodeSqliteStorage(join(config.dataDir, "mochi.sqlite")),
 			models,
-			brain: OPUS,
-			fast: FAST,
+			brain: config.modelSetup.brain,
+			fast: config.modelSetup.fast,
 			classify: createClassify(models),
 			firecrawlKey: config.firecrawlKey,
 			...(config.env.FIRECRAWL_PROFILE?.trim() ? { firecrawlProfile: config.env.FIRECRAWL_PROFILE.trim() } : {}),
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env } }),
 			...(config.file.idleResetMinutes === undefined ? {} : { idleResetMinutes: config.file.idleResetMinutes }),
-			apps,
+			...(apps === undefined ? {} : { apps }),
 			memory: { repo: resolve(config.file.memory?.repo ?? join(config.dataDir, "memory")), ...(config.file.memory?.dreaming === undefined ? {} : { dreaming: config.file.memory.dreaming }) },
 			index,
 			skillsDir: join(REPO, "skills"),
-			agents: await AgentCatalog.load(join(REPO, "agents"), join(config.dataDir, "agents")),
+			agents: await AgentCatalog.load(join(REPO, "agents"), config.home.agentsDir, config.modelSetup.ref),
 			workDir,
 			channels,
 			users: config.users,
@@ -152,7 +152,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 
 	const background = [
 		runFeed(mochi.harness, index, running, (error) => log("index.failed", { error: String(error) })),
-		apps.run(running),
+		...(apps === undefined ? [] : [apps.run(running)]),
 		// A terminal-only daemon (chat, print) serves one script; triggers wait for the real daemon.
 		...(channelSet === "terminal" ? [] : [triggersComponent(mochi, config, running), a2aComponent(mochi, config, a2a, running)]),
 	];
@@ -195,13 +195,14 @@ function socketPath(dataDir: string): string {
 }
 
 /** The outside services mochi calls. Models and the web need a key; without OpenRouter the trigger gates pass. */
-export function services(config: Pick<Config, "bifrostKey" | "openRouterKey" | "firecrawlKey" | "dataDir">): readonly (readonly [string, Setup<void>])[] {
-	const key = (value: string | undefined, name: string) => (value === undefined ? broken(`${name} is not set. Fix: export it where mochi starts`) : ready(undefined));
+export function services(config: Pick<Config, "modelSetup" | "openRouterKey" | "firecrawlKey" | "dataDir" | "executorUrl">): readonly (readonly [string, Setup<void>])[] {
+	const key = (value: string | undefined, name: string) => (value === undefined ? broken(`${name} is not set. Fix: put it in ~/.mochi/.env`) : ready(undefined));
+	const missing = config.modelSetup.missing;
 	return [
-		["models", key(config.bifrostKey, "BIFROST_VIRTUAL_KEY")],
+		["models", missing.length === 0 ? ready(undefined) : broken(`${missing.join("; ")}. Fix: put the key in ~/.mochi/.env`)],
 		["classifier", config.openRouterKey === undefined ? off : ready(undefined)],
 		["firecrawl", key(config.firecrawlKey, "FIRECRAWL_API_KEY")],
-		["executor", existsSync(authFile(config.dataDir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
+		["executor", config.executorUrl === undefined ? off : existsSync(authFile(config.dataDir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
 	];
 }
 

@@ -7,7 +7,7 @@ import type { Message, SystemMessage, Tool } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import { createSeatConversation, type Seat, SEATS } from "../src/seats.ts";
 import { AgentCatalog } from "../src/agents/catalog.ts";
-import { fixedClassify, newFaux, openTestMochi, recordingChannel, tempDir } from "../src/test-support.ts";
+import { fixedClassify, newFaux, openTestMochi, recordingChannel, tempDir, testCatalog } from "../src/test-support.ts";
 
 const REPO = join(import.meta.dirname, "..");
 
@@ -31,7 +31,7 @@ export async function measureSurface(seat: Seat = "owner"): Promise<Surface> {
 	const channels = new Map([["whatsapp", recordingChannel("whatsapp").channel]] as const);
 	const mochi = await openTestMochi(dir, faux, channels, fixedClassify(1), [], {
 		skillsDir: join(REPO, "skills"),
-		agents: await AgentCatalog.load(join(REPO, "agents")),
+		agents: await AgentCatalog.load(join(REPO, "agents"), undefined, (name) => testCatalog().model(name)),
 	});
 	const id = seat === "owner" ? mochi.root.id : await mochi.harness.commit((tx) => createSeatConversation(tx, seat, { kind: "ownerless" }), BACKGROUND_CONTEXT);
 	const conversation = (await mochi.harness.conversation(id, BACKGROUND_CONTEXT))!;

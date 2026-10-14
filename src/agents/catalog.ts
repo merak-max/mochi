@@ -2,7 +2,6 @@ import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { type ModelThinkingLevel, type Static, Type } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
-import { bifrostRef } from "../brain/models.ts";
 import { parseWith } from "../parse.ts";
 
 export const THINKING = ["low", "medium", "high", "xhigh", "max"] as const satisfies readonly ModelThinkingLevel[];
@@ -16,44 +15,29 @@ export interface AgentType {
 	readonly thinking?: Thinking;
 }
 
-const ModelsFileSchema = Type.Object({
-	models: Type.Record(Type.String(), Type.String()),
-	tiers: Type.Record(Type.String(), Type.Union([Type.String(), Type.Array(Type.String())])),
-});
-type ModelsFile = Static<typeof ModelsFileSchema>;
-
-/** agents/: the agent types by file name, and agents/models.json, which names models by alias and tier. */
+/** The agent types by file name, and how a model name in one (a tier, an alias, or provider/id) becomes a model. */
 export class AgentCatalog {
 	readonly types: ReadonlyMap<string, AgentType>;
-	readonly #models: ModelsFile;
+	readonly #ref: (name: string) => ModelRef;
 
-	constructor(types: readonly AgentType[], models: ModelsFile) {
+	constructor(types: readonly AgentType[], ref: (name: string) => ModelRef) {
 		this.types = new Map(types.map((type) => [type.name, type]));
-		this.#models = models;
+		this.#ref = ref;
 	}
 
-	/** `dir` holds the bundled types and models.json; each `<own>/<name>.md` adds a type or replaces the bundled one of that name. */
-	static async load(dir: string, own?: string): Promise<AgentCatalog> {
+	/** `dir` holds the bundled types; each `<own>/<name>.md` adds a type or replaces the bundled one of that name. */
+	static async load(dir: string, own: string | undefined, ref: (name: string) => ModelRef): Promise<AgentCatalog> {
 		const types = new Map<string, AgentType>();
 		for (const from of own === undefined ? [dir] : [dir, own]) {
 			const files = (await readdir(from).catch(() => [] as string[])).filter((file) => file.endsWith(".md")).sort();
 			for (const file of files) types.set(basename(file, ".md"), parseAgentFile(basename(file, ".md"), await readFile(join(from, file), "utf8")));
 		}
-		const models = parseWith(ModelsFileSchema, JSON.parse(await readFile(join(dir, "models.json"), "utf8")), "agents/models.json");
-		return new AgentCatalog([...types.values()], models);
+		return new AgentCatalog([...types.values()], ref);
 	}
 
-	/** A tier (fast, default, strongest), an alias (opus, sonnet, fable, haiku), or a full provider/id. */
+	/** `brain` (or `default`), `fast`, `strongest`, an alias from config.toml's [models.aliases], or provider/id. */
 	model(name: string): ModelRef {
-		const tier = Object.hasOwn(this.#models.tiers, name) ? this.#models.tiers[name] : undefined;
-		if (Array.isArray(tier)) throw new Error(`Tier ${name} is a list (${tier.join(", ")}); start one agent per model, naming each.`);
-		const alias = tier ?? name;
-		const id = Object.hasOwn(this.#models.models, alias) ? this.#models.models[alias] : alias.includes("/") ? alias : undefined;
-		if (id === undefined) {
-			const valid = [...Object.keys(this.#models.tiers), ...Object.keys(this.#models.models), "provider/id"];
-			throw new Error(`Unknown model "${name}". Use ${valid.join(", ")}.`);
-		}
-		return bifrostRef(id);
+		return this.#ref(name);
 	}
 }
 

@@ -2,16 +2,12 @@
 // Usage: node eval/judge.ts <baseline label> <candidate label> [scenario ids...]
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Api, Model } from "@earendil-works/pi-ai";
-import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
-import { createProvider } from "@earendil-works/pi-ai/models";
-import { createBifrostModels, OPUS } from "../src/brain/models.ts";
+import { loadConfig } from "../src/config.ts";
 import { messageText } from "../src/text.ts";
 import type { Transcript } from "./dump.ts";
 import { type Scenario, SCENARIOS, scenario as byId } from "./scenarios.ts";
 
 const EVAL = import.meta.dirname;
-const SOL = { provider: "bifrost-judge", modelId: "azure/gpt-6.1-sol" } as const;
 
 const RUBRIC = `You are judging two versions of a personal assistant called mochi. The owner, Sam, texts it from a phone. Read both exchanges as Sam would at 1am on a phone, then pick the one Sam would rather get.
 
@@ -25,31 +21,16 @@ Answer with JSON only: {"winner": "A" | "B" | "tie", "trust": [a, b], "competenc
 
 type Verdict = { winner: "A" | "B" | "tie"; trust: [number, number]; competence: [number, number]; voice: [number, number]; phone: [number, number]; cringe: string; reason: string };
 
-function judgeModels() {
-	const key = process.env.BIFROST_VIRTUAL_KEY ?? "";
-	const models = createBifrostModels(key);
-	const sol: Model<"openai-responses"> = {
-		id: SOL.modelId,
-		name: "GPT-6.1 Sol",
-		api: "openai-responses",
-		provider: SOL.provider,
-		baseUrl: "https://bifrost.shau.me/openai/v1",
-		reasoning: true,
-		input: ["text"],
-		cost: { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 },
-		contextWindow: 272_000,
-		maxTokens: 64_000,
-	};
-	models.setProvider(
-		createProvider<Api>({
-			id: SOL.provider,
-			name: "Bifrost judge",
-			auth: { apiKey: { name: "Bifrost virtual key", resolve: async () => ({ auth: { apiKey: "bifrost", headers: { "x-bf-vk": key } }, source: "BIFROST_VIRTUAL_KEY" }) } },
-			models: [sol],
-			api: openAIResponsesApi(),
-		}),
-	);
-	return models;
+/** The owner's models: the brain, and a second family as `[models.aliases] judge` when config names one. */
+async function judgeModels() {
+	const { modelSetup } = await loadConfig(process.env);
+	const judges = [modelSetup.brain];
+	try {
+		judges.push(modelSetup.ref("judge"));
+	} catch {
+		// One judge family only.
+	}
+	return { models: modelSetup.models, judges };
 }
 
 /** What Sam saw and what mochi did, without anything that names the version. */
@@ -68,7 +49,7 @@ function exchange(scenario: Scenario, transcript: Transcript): string {
 	return `${scenario.trigger === undefined ? "" : "This was an unattended scheduled check; only 'mochi texted Sam' lines reach Sam.\n"}${lines.join("\n")}`;
 }
 
-async function verdict(models: ReturnType<typeof judgeModels>, ref: { provider: string; modelId: string }, scenario: Scenario, a: string, b: string): Promise<Verdict> {
+async function verdict(models: Awaited<ReturnType<typeof judgeModels>>["models"], ref: { provider: string; modelId: string }, scenario: Scenario, a: string, b: string): Promise<Verdict> {
 	const model = models.getModel(ref.provider, ref.modelId);
 	if (model === undefined) throw new Error(`No judge model ${ref.modelId}`);
 	const prompt = `Situation: ${scenario.situation}\n\n<exchange_A>\n${a}\n</exchange_A>\n\n<exchange_B>\n${b}\n</exchange_B>`;
@@ -81,7 +62,7 @@ async function verdict(models: ReturnType<typeof judgeModels>, ref: { provider: 
 async function main(): Promise<void> {
 	const [baseline, candidate, ...ids] = process.argv.slice(2);
 	if (baseline === undefined || candidate === undefined) throw new Error("Usage: node eval/judge.ts <baseline> <candidate> [ids...]");
-	const models = judgeModels();
+	const { models, judges } = await judgeModels();
 	const chosen = ids.length === 0 ? SCENARIOS : ids.map(byId);
 	const rows: string[] = [];
 	const results: unknown[] = [];
@@ -99,7 +80,7 @@ async function main(): Promise<void> {
 			continue;
 		}
 		const votes: string[] = [];
-		for (const judge of [OPUS, SOL]) {
+		for (const judge of judges) {
 			for (const swapped of [false, true]) {
 				const v = await verdict(models, judge, scenario, swapped ? after : before, swapped ? before : after).catch((error: unknown) => {
 					process.stderr.write(`${scenario.id} ${judge.modelId}: ${String(error)}\n`);

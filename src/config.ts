@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import { type Static, Type } from "typebox";
+import { createModelSetup, type ModelSetup, ModelsSchema, ProviderSchema } from "./brain/providers.ts";
+import { type Home, loadHomeEnv, resolveHome } from "./home.ts";
 import { MediaConfigSchema } from "./media/media.ts";
 import { parseWith } from "./parse.ts";
 import { DreamConfigSchema, dreamConfig } from "./memory/dream.ts";
@@ -27,10 +30,15 @@ const A2APeerSchema = Type.Object(
 	{ additionalProperties: false },
 );
 
-/** data/config.json. Later units add their own keys, such as trigger seeds. */
+/** `<home>/config.toml` (or the older config.json). Later units add their own keys, such as trigger seeds. */
 const FileSchema = Type.Object(
 	{
 		timeZone: Type.Optional(Type.String({ minLength: 1 })),
+		/** How to reach models; see src/brain/providers.ts. Absent: ANTHROPIC_API_KEY or OPENAI_API_KEY decides. */
+		providers: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), ProviderSchema)),
+		models: Type.Optional(ModelsSchema),
+		/** The Executor MCP endpoint for app tools. Absent: the apps functions say they are not connected. */
+		executorUrl: Type.Optional(Type.String({ pattern: "^https?://" })),
 		memory: Type.Optional(Type.Object({ repo: Type.Optional(Type.String({ minLength: 1 })), dreaming: Type.Optional(DreamConfigSchema) }, { additionalProperties: false })),
 		/** Image, video and speech providers; see src/media/config.example.json. */
 		media: Type.Optional(MediaConfigSchema),
@@ -45,10 +53,11 @@ const FileSchema = Type.Object(
 export type FileConfig = Static<typeof FileSchema>;
 
 export interface Config {
+	readonly home: Home;
+	/** The home's directory: the store, the work directory, logs. */
 	readonly dataDir: string;
-	readonly executorUrl: string;
-	/** Absent: model calls fail with an auth error; the daemon still starts. */
-	readonly bifrostKey: string | undefined;
+	readonly executorUrl: string | undefined;
+	readonly modelSetup: ModelSetup;
 	/** Absent: the classifier is unavailable, so the `classify` tool errors and trigger gates pass. */
 	readonly openRouterKey: string | undefined;
 	/** Absent: the web functions in `code` fail with a clear error. */
@@ -62,17 +71,26 @@ export interface Config {
 	readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-export async function loadConfig(env: Readonly<Record<string, string | undefined>>): Promise<Config> {
-	const dataDir = resolve(env.MOCHI_DATA_DIR ?? "data");
-	const file = parseWith(FileSchema, await readJson(join(dataDir, "config.json")), "data/config.json");
-	const timeZone = file.timeZone ?? "Asia/Kolkata";
+/** The host's own time zone, so a fresh install needs no setting. */
+const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+/**
+ * Resolves the home, loads its `.env`, and reads its config. Pass `home` to read a profile or a test directory;
+ * otherwise `MOCHI_HOME` (or `MOCHI_DATA_DIR`) or `~/.mochi`.
+ */
+export async function loadConfig(env: Readonly<Record<string, string | undefined>>, home: Home = resolveHome(env)): Promise<Config> {
+	if (env === process.env) loadHomeEnv(home);
+	const file = parseWith(FileSchema, await readConfigFile(home), configName(home));
+	const timeZone = file.timeZone ?? hostTimeZone();
 	assertTimeZone(timeZone);
 	dreamConfig(file.memory?.dreaming, timeZone);
+	const openRouterKey = env.OPENROUTER_API_KEY || undefined;
 	return {
-		dataDir,
-		executorUrl: env.EXECUTOR_URL ?? "https://executor.shau.me/mcp",
-		bifrostKey: env.BIFROST_VIRTUAL_KEY || undefined,
-		openRouterKey: env.OPENROUTER_API_KEY || undefined,
+		home,
+		dataDir: home.dir,
+		executorUrl: env.EXECUTOR_URL ?? file.executorUrl,
+		modelSetup: createModelSetup({ ...(file.providers === undefined ? {} : { providers: file.providers }), ...(file.models === undefined ? {} : { models: file.models }), env, ...(openRouterKey === undefined ? {} : { openRouterKey }) }),
+		openRouterKey,
 		firecrawlKey: env.FIRECRAWL_API_KEY?.trim() || undefined,
 		timeZone,
 		users: chatUsers(file.users ?? []),
@@ -86,8 +104,8 @@ function chatUsers(users: readonly ChatUser[]): ChatUser[] {
 	const seen = new Set<string>([OWNER_ID]);
 	const normalized: ChatUser[] = [];
 	for (const user of users) {
-		if (user.id === OWNER_ID) throw new Error(`Invalid data/config.json: users id ${OWNER_ID} is the owner's.`);
-		if (seen.has(user.id)) throw new Error(`Invalid data/config.json: users id ${user.id} appears twice.`);
+		if (user.id === OWNER_ID) throw new Error(`Invalid config: users id ${OWNER_ID} is the owner's.`);
+		if (seen.has(user.id)) throw new Error(`Invalid config: users id ${user.id} appears twice.`);
 		seen.add(user.id);
 		normalized.push({ ...user, handle: normalizeHandle(user.handle) });
 	}
@@ -103,21 +121,29 @@ function a2aPeers(file: FileConfig, env: Readonly<Record<string, string | undefi
 	return peers;
 }
 
-async function readJson(path: string): Promise<unknown> {
-	let text: string;
+const configName = (home: Home): string => (home.configFile.endsWith(".toml") ? "config.toml" : "config.json");
+
+/** `config.toml`, else the older `config.json`, else nothing: every field has a default. */
+async function readConfigFile(home: Home): Promise<unknown> {
+	const toml = await readText(home.configFile);
+	if (toml !== undefined) return parseToml(toml);
+	const json = await readText(join(home.dir, "config.json"));
+	return json === undefined ? {} : JSON.parse(json);
+}
+
+async function readText(path: string): Promise<string | undefined> {
 	try {
-		text = await readFile(path, "utf8");
+		return await readFile(path, "utf8");
 	} catch (error) {
-		if (error instanceof Error && "code" in error && error.code === "ENOENT") return {};
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
 		throw error;
 	}
-	return JSON.parse(text);
 }
 
 function assertTimeZone(timeZone: string): void {
 	try {
 		new Intl.DateTimeFormat("en", { timeZone });
 	} catch {
-		throw new Error(`Invalid timeZone in data/config.json: ${timeZone}`);
+		throw new Error(`Invalid timeZone in config: ${timeZone}`);
 	}
 }

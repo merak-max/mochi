@@ -1,3 +1,4 @@
+import { createModelSetup } from "../brain/providers.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { configuredChannels, services } from "../main.ts";
@@ -11,10 +12,11 @@ test("attachmentKind sorts images, audio and everything else", () => {
 });
 
 test("each outside service reports one readiness line naming its fix", () => {
-	assert.deepEqual(setupReport(services({ dataDir: "/nonexistent", bifrostKey: "k", openRouterKey: undefined, firecrawlKey: undefined })), [
-		"ok   models",
+	const modelSetup = createModelSetup({ env: {} });
+	assert.deepEqual(setupReport(services({ dataDir: "/nonexistent", modelSetup, openRouterKey: undefined, firecrawlKey: undefined, executorUrl: "https://executor.example/mcp" })), [
+		"fix  models: anthropic: ANTHROPIC_API_KEY is not set. Fix: put the key in ~/.mochi/.env",
 		"off  classifier (not configured)",
-		"fix  firecrawl: FIRECRAWL_API_KEY is not set. Fix: export it where mochi starts",
+		"fix  firecrawl: FIRECRAWL_API_KEY is not set. Fix: put it in ~/.mochi/.env",
 		"fix  executor: not logged in. Fix: node src/main.ts auth executor",
 	]);
 	assert.deepEqual(configuredChannels({ PHOTON_PROJECT_ID: "p" }).report[0], "fix  imessage: PHOTON_PROJECT_SECRET, IMESSAGE_OWNER are not set. Fix: export them where mochi starts");

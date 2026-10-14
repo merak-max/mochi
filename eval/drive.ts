@@ -20,7 +20,7 @@ const scenario = byId(id);
 // The code under test comes from `repo`, so the same driver runs the baseline copy and the working tree.
 const { openMochi } = (await import(join(repo, "src/mochi.ts"))) as typeof import("../src/mochi.ts");
 const { createClassify } = (await import(join(repo, "src/brain/classifier.ts"))) as typeof import("../src/brain/classifier.ts");
-const { createBifrostModels, FAST, OPUS } = (await import(join(repo, "src/brain/models.ts"))) as typeof import("../src/brain/models.ts");
+const { loadConfig } = (await import(join(repo, "src/config.ts"))) as typeof import("../src/config.ts");
 const { ingest } = (await import(join(repo, "src/turn/turn.ts"))) as typeof import("../src/turn/turn.ts");
 const { PROFILES, turnsSettled } = (await import(join(repo, "src/test-support.ts"))) as typeof import("../src/test-support.ts");
 const { SearchIndex } = (await import(join(repo, "src/index/fts.ts"))) as typeof import("../src/index/fts.ts");
@@ -43,7 +43,9 @@ const channels = new Map([[scenario.channel, phone]]);
 
 const controller = new AbortController();
 const running = withAbortSignal(controller.signal, BACKGROUND_CONTEXT);
-const models = createBifrostModels(process.env.BIFROST_VIRTUAL_KEY ?? "", process.env.OPENROUTER_API_KEY || undefined);
+// The owner's providers and models from ~/.mochi/config.toml; the scenario's own store is `dataDir`.
+const { modelSetup } = await loadConfig(process.env);
+const { models } = modelSetup;
 const index = new SearchIndex(join(dataDir, "index.sqlite"));
 const workDir = join(dataDir, "work");
 await mkdir(workDir, { recursive: true });
@@ -51,13 +53,13 @@ const mochi = await openMochi(
 	{
 		storage: await openNodeSqliteStorage(join(dataDir, "mochi.sqlite")),
 		models,
-		brain: OPUS,
-		fast: FAST,
+		brain: modelSetup.brain,
+		fast: modelSetup.fast,
 		classify: createClassify(models),
 		firecrawlKey: process.env.FIRECRAWL_API_KEY?.trim() || undefined,
 		index,
 		skillsDir: join(repo, "skills"),
-		agents: await AgentCatalog.load(join(repo, "agents")),
+		agents: await AgentCatalog.load(join(repo, "agents"), undefined, modelSetup.ref),
 		workDir,
 		channels,
 		timeZone: TIME_ZONE,
