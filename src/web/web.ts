@@ -86,7 +86,8 @@ export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 				if (ask === "") return { structuredOutput: markdown };
 				if (markdown === "") throw new Error(`Firecrawl returned no page content for ${url}, so the instruction has nothing to answer from.`);
 				const extracted = await extractFirecrawlContent({ models: deps.models, model: deps.fast, url, markdown, instruction: ask, schema, signal });
-				return { structuredOutput: extracted.text, usage: extracted.usage };
+				const notice = extracted.cut ? "[The page was longer than the extraction model reads; this answer comes from its start and end. Call without instruction for the whole page.]\n" : "";
+				return { structuredOutput: `${notice}${extracted.text}`, usage: extracted.usage };
 			},
 		}),
 		defineTool({
