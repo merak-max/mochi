@@ -24,13 +24,13 @@ for (const [id, text] of Object.entries(credentials)) {
 }
 
 test("rejects the value of a secret-named env var without echoing it", () => {
-	const env = { DEEPGRAM_API_KEY: "dg-plain-words-value", HOME: "/home/ec2-user" };
+	const env = { DEEPGRAM_API_KEY: "dg-plain-words-value", HOME: "/home/user" };
 	const match = findSecret("my key is dg-plain-words-value", env);
 	assert.deepEqual(match, { kind: "env", name: "DEEPGRAM_API_KEY" });
 	const message = secretRejection(match!);
 	assert.match(message, /DEEPGRAM_API_KEY/);
 	assert.doesNotMatch(message, /dg-plain-words-value/);
-	assert.equal(findSecret("lives in /home/ec2-user", env), undefined, "a non-secret env name is ignored");
+	assert.equal(findSecret("lives in /home/user", env), undefined, "a non-secret env name is ignored");
 });
 
 test("passes git SHAs, UUIDs, ids, paths and prose", () => {
@@ -38,7 +38,7 @@ test("passes git SHAs, UUIDs, ids, paths and prose", () => {
 		"Fixed in commit 3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39",
 		"Order id 123e4567-e89b-12d3-a456-426614174000",
 		"Telegram message id 01J9ZK3M4N5P6Q7R8S9T0V1W2X",
-		"The repo is at /home/ec2-user/Developer/mochi/src/notes/secrets.ts",
+		"The repo is at /home/user/Developer/mochi/src/notes/secrets.ts",
 		"Owner prefers short answers and never wants markdown tables on WhatsApp.",
 		"deepgram key is in env DEEPGRAM_API_KEY",
 	]) {

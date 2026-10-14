@@ -11,10 +11,10 @@ These were decided with the owner. Do not reopen them in code review.
 | Area | Decision |
 |---|---|
 | Runtime | Node 24, TypeScript run directly with type stripping. Pinned exact `@earendil-works/*` 1.2.0 from npm. |
-| Brain | `anthropic/claude-opus-5-5` through Bifrost at `https://bifrost.shau.me/anthropic` with `x-bf-vk: $BIFROST_VIRTUAL_KEY`. Mochi holds no Anthropic credential and does no Claude Code impersonation. |
+| Brain | `anthropic/claude-opus-5-5` through Bifrost at `https://gateway.example.com/anthropic` with `x-bf-vk: $BIFROST_VIRTUAL_KEY`. Mochi holds no Anthropic credential and does no Claude Code impersonation. |
 | Fast model | `azure/gpt-6-luna` through Bifrost's OpenAI route, for subagents and summaries. |
 | Classifier | TypeSafe Jev (`typesafe/jev-1.13`) through OpenRouter directly with `OPENROUTER_API_KEY`, for yes/no and pick-one decisions before an Opus step. Not through Bifrost. |
-| Tools | Executor MCP (`https://executor.shau.me/mcp`) supplies the owner's app tools and the logged-in Firecrawl browser. pi-durable's `CodingTools` supply bash, read, edit and write, inside mochi's environment boundary (`src/env/`). Mochi builds notes, history search, and the library that pi-durable's `codemode` calls, which covers web search/fetch/map on its own Firecrawl key, the fast model, the classifier, the owner's apps, subagents and triggers. |
+| Tools | Executor MCP (`https://executor.example.com/mcp`) supplies the owner's app tools and the logged-in Firecrawl browser. pi-durable's `CodingTools` supply bash, read, edit and write, inside mochi's environment boundary (`src/env/`). Mochi builds notes, history search, and the library that pi-durable's `codemode` calls, which covers web search/fetch/map on its own Firecrawl key, the fast model, the classifier, the owner's apps, subagents and triggers. |
 | Approvals | None. |
 | Memory | Typed notes in one rewindable pi-durable document, `mochi.memory`, plus one SQLite FTS5 index over notes and past chats. No memory framework. No auto-generated skills. |
 | Browser | Plain web reading: mochi's own `web_*` tools inside `codemode` on `FIRECRAWL_API_KEY`, ported from `~/.pi/agent/extensions/firecrawl-web`. Logged-in browsing: Firecrawl through Executor; scrape with a persistent `profile` first, then interact. |
@@ -356,7 +356,7 @@ Environment variables. Names only here; values live in the owner's shell secrets
 - `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_OWNER`
 - `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET`, `IMESSAGE_OWNER`
 - `MOCHI_DATA_DIR` (default `./data`)
-- `EXECUTOR_URL` (default `https://executor.shau.me/mcp`)
+- `EXECUTOR_URL` (default `https://executor.example.com/mcp`)
 - `MOCHI_BIND_HOST` (default `127.0.0.1`; set `172.17.0.1` on this box so the Caddy container reaches mochi through the Docker host gateway, the same way it reaches t3)
 - `MOCHI_HOOKS_PORT` (default 8788), `MOCHI_PUBLIC_URL` (the Caddy origin, for webhook URLs)
 - `MOCHI_A2A_PEER_TOKENS` (`name:token,name2:token2`; unset keeps the A2A server off), `MOCHI_A2A_HOST` (default `127.0.0.1`), `MOCHI_A2A_PORT` (default 8789), `MOCHI_A2A_PUBLIC_URL`, `MOCHI_A2A_AGENT_NAME` (default `mochi`), `MOCHI_A2A_REPLY_TIMEOUT_SECONDS` (default 600)

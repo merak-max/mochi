@@ -5,7 +5,7 @@
       "providers": [
         {
           "name": "mai",
-          "baseUrl": "https://suzuka-ai-garage-si-32cbd92e.services.ai.azure.com/mai/v1",
+          "baseUrl": "https://your-resource-si.services.ai.azure.com/mai/v1",
           "keyEnv": "AZURE_SI_KEY",
           "model": "mai-image-2.6",
           "sizeStyle": "size",
@@ -14,7 +14,7 @@
       ]
     },
     "video": {
-      "baseUrl": "https://suzuka-ai-garage-32cbd92e.openai.azure.com/openai/v1",
+      "baseUrl": "https://your-resource.openai.azure.com/openai/v1",
       "keyEnv": "AZURE_MEDIA_KEY",
       "model": "sora-2"
     },

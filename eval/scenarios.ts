@@ -54,7 +54,7 @@ const SAM: SeedNote = {
 	slug: "owner",
 	kind: "user",
 	subject: "who sam is",
-	body: "Sam. Infra engineer at a payments startup. Works roughly 10:30 to 19:30, standup 10:30. Sister Riya in Pune. Moving flats this month. Texts lowercase, hates long replies.",
+	body: "Sam. Infra engineer at a payments startup. Works roughly 10:30 to 19:30, standup 10:30. Sister Maya in Pune. Moving flats this month. Texts lowercase, hates long replies.",
 };
 
 const FLAT: SeedNote = {
@@ -82,10 +82,10 @@ export const SCENARIOS: readonly Scenario[] = [
 		at: "2026-10-06 08:12",
 		situation: "Weekday morning, Sam is getting ready and fires three things at once.",
 		channel: "whatsapp",
-				history: [{ ago: "5d", owner: "riya's bday is oct 12 btw", mochi: "noted.", notes: [SAM, { slug: "riya", kind: "person", subject: "riya, sam's sister", body: "Sister, lives in Pune. Birthday Oct 12." }] }],
+				history: [{ ago: "5d", owner: "maya's bday is oct 12 btw", mochi: "noted.", notes: [SAM, { slug: "maya", kind: "person", subject: "maya, sam's sister", body: "Sister, lives in Pune. Birthday Oct 12." }] }],
 		handoff: "Quiet day. Nothing open.",
-		turns: ["morning. remind me to call riya at 6pm, whats the weather in blr today, and put 'renew bike insurance' on my list"],
-		expect: { maxChars: 600, tools: ["code"], mention: ["riya|6"] },
+		turns: ["morning. remind me to call maya at 6pm, whats the weather in blr today, and put 'renew bike insurance' on my list"],
+		expect: { maxChars: 600, tools: ["code"], mention: ["maya|6"] },
 	},
 	{
 		id: "terse-annoyed",

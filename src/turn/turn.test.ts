@@ -62,7 +62,7 @@ test("inbound becomes one tagged submission per channel message id, answered onc
 	await mochi.close();
 });
 
-const USER = { id: "user2", handle: "+918423152032", name: "Hemant Singh" };
+const USER = { id: "user2", handle: "+15550100002", name: "Alex Kim" };
 
 function userMessage(messageId: string, text: string, sequence?: number): Inbound {
 	return { kind: "message", channel: "imessage", messageId, text, at: new Date("2026-10-05T08:32:00Z"), attachments: [], person: USER.handle, ...(sequence === undefined ? {} : { sequence }) };
@@ -70,7 +70,7 @@ function userMessage(messageId: string, text: string, sequence?: number): Inboun
 
 test("a user message runs in the user's own conversation, once per redelivery, and the reply goes to the user", async () => {
 	const faux = newFaux();
-	faux.setResponses([fauxAssistantMessage("Hi Hemant!"), fauxAssistantMessage("Hi owner!")]);
+	faux.setResponses([fauxAssistantMessage("Hi Alex!"), fauxAssistantMessage("Hi owner!")]);
 	const imessage = recordingChannel("imessage");
 	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { users: [USER] });
 	const fromUser = userMessage("g1", "hey", 7);
@@ -89,8 +89,8 @@ test("a user message runs in the user's own conversation, once per redelivery, a
 	assert.deepEqual((await mochi.root.entries({}, 50, undefined, context)).items.filter((entry) => UserEntry.is(entry)), []);
 	const agent = await mochi.harness.snapshot(AgentDoc, userConversation!, context);
 	assert.deepEqual(agent?.extensions, ["identity", "skills", "fast-compaction", "seat-user"]);
-	assert.match(agent?.instructions ?? "", /^This conversation is with user2 \(Hemant Singh, iMessage \+918423152032\)\. They are a friend of the owner \(user1\), not the owner\./);
-	assert.deepEqual(imessage.sentTo, [{ person: USER.handle, text: "Hi Hemant!" }]);
+	assert.match(agent?.instructions ?? "", /^This conversation is with user2 \(Alex Kim, iMessage \+15550100002\)\. They are a friend of the owner \(user1\), not the owner\./);
+	assert.deepEqual(imessage.sentTo, [{ person: USER.handle, text: "Hi Alex!" }]);
 	assert.equal((await mochi.harness.snapshot(LastInboundDoc, context))?.last ?? null, null, "a user never becomes notify's or react's target");
 	assert.equal((await mochi.harness.snapshot(InboundCursorDoc, "imessage", context))?.sequence, 7);
 

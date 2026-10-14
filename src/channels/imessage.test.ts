@@ -9,8 +9,8 @@ import { createIMessageChannel, type IMessageApp, type IMessageDeps, type IMessa
 import type { Content } from "spectrum-ts";
 import { type Channel, ChannelDown, type Inbound, SendRejected, SendUnknown } from "./types.ts";
 
-const env = { PHOTON_PROJECT_ID: "proj", PHOTON_PROJECT_SECRET: "secret", IMESSAGE_OWNER: "+91 83539 32755" };
-const OWNER = "+918353932755";
+const env = { PHOTON_PROJECT_ID: "proj", PHOTON_PROJECT_SECRET: "secret", IMESSAGE_OWNER: "+1 555 010 0001" };
+const OWNER = "+15550100001";
 
 function channelWith(app: IMessageApp, deps: IMessageDeps = {}): Channel {
 	const setup = createIMessageChannel(env, { connect: async () => app, log: () => {}, ...deps });
@@ -49,8 +49,8 @@ describe("imessage message mapping", () => {
 	});
 
 	it("accepts a configured user with person set, still drops strangers, and never marks the owner a user", async () => {
-		const USER = "+918423152032";
-		const fromUser = fx.message(log, { id: "g", sender: "+91 84231 52032", content: fx.contents.text });
+		const USER = "+15550100002";
+		const fromUser = fx.message(log, { id: "g", sender: "+1 555 010 0002", content: fx.contents.text });
 		const parsed = await toInbound(fromUser, OWNER, [USER]);
 		assert.equal(parsed.kind === "message" && parsed.message.kind === "message" ? parsed.message.person : "dropped", USER);
 		assert.deepEqual(await toInbound(fx.message(log, { id: "x", sender: "+15551234567", content: fx.contents.text }), OWNER, [USER]), { kind: "ignored", reason: "not-owner" });
@@ -69,10 +69,10 @@ describe("imessage message mapping", () => {
 	});
 
 	it("maps a reaction from the owner or a user to a tapback and drops a stranger's", async () => {
-		const USER = "+918423152032";
+		const USER = "+15550100002";
 		const target = fx.message(log, { id: "GUID-A", direction: "outbound", content: { type: "text", text: "Dinner at 8?" } });
 		const reactionFrom = (sender: string, emoji: string) => fx.message(log, { id: `GUID-A:reaction:${emoji}`, sender, content: { type: "reaction", emoji, target } as unknown as Content });
-		assert.deepEqual(await toInbound(reactionFrom("+91 84231 52032", "👍"), OWNER, [USER]), {
+		assert.deepEqual(await toInbound(reactionFrom("+1 555 010 0002", "👍"), OWNER, [USER]), {
 			kind: "message",
 			message: { kind: "tapback", channel: "imessage", messageId: "GUID-A:reaction:👍", on: "GUID-A", emoji: "👍", onText: "Dinner at 8?", fromAgent: true, at: new Date("2026-10-05T08:32:00Z"), person: USER },
 		});
@@ -142,8 +142,8 @@ describe("imessage adapter", () => {
 	});
 
 	it("replies to a user in the user's own DM and to the owner in the owner's", async () => {
-		const USER = "+918423152032";
-		const USER_DM = "any;-;+918423152032";
+		const USER = "+15550100002";
+		const USER_DM = "any;-;+15550100002";
 		const log = fx.events();
 		const ownerSpace = fx.space(log, fx.OWNER_DM);
 		const userSpace = fx.space(log, USER_DM);

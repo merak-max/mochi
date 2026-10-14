@@ -26,25 +26,25 @@ test("a note write reaches the next request as one positional system patch of th
 	const faux = newFaux();
 	let seen: readonly Message[] = [];
 	faux.setResponses([
-		note("owner-name", "user", "name", "The owner is Shaurya."),
+		note("owner-name", "user", "name", "The owner is Sam."),
 		(transcript: TranscriptContext) => {
 			seen = transcript.messages;
 			return fauxAssistantMessage("Saved.");
 		},
 	]);
 	const mochi = await openTestMochi(await tempDir(), faux);
-	await ask(mochi, "My name is Shaurya.");
+	await ask(mochi, "My name is Sam.");
 
 	const [first, patch, ...more] = systems(seen);
 	assert.deepEqual(more, []);
 	assert.equal(first?.sections?.owner, `<owner>\n${OWNER_EMPTY}\n</owner>`);
 	assert.equal(first?.sections?.["notes-index"], `<notes-index>\n${INDEX_EMPTY}\n</notes-index>`);
-	assert.deepEqual(patch?.sections, { owner: "<owner>\n## name (user)\nThe owner is Shaurya.\n</owner>" });
+	assert.deepEqual(patch?.sections, { owner: "<owner>\n## name (user)\nThe owner is Sam.\n</owner>" });
 	assert.equal(seen.indexOf(patch!), seen.findIndex((message) => message.role === "toolResult") + 1, "the patch sits right after the tool result");
 	const saved = (await readMemory(mochi.harness, context)).notes["owner-name"];
 	const assistant = (await mochi.root.entries({}, 50, undefined, context)).items.filter((entry) => entry.kind === "pi.assistant").at(-1);
 	assert.deepEqual(saved?.source, { conversation: mochi.root.id, entry: assistant?.id });
-	assert.equal(mochi.index.search({ query: "Shaurya", limit: 5 })[0]?.ref, "note:owner-name");
+	assert.equal(mochi.index.search({ query: "Sam", limit: 5 })[0]?.ref, "note:owner-name");
 	await mochi.close();
 });
 
@@ -63,7 +63,7 @@ test("owner and notes-index keep their section keys whether memory is empty or n
 	faux.setResponses([capture]);
 	mochi = await openTestMochi(await tempDir(), faux);
 	await mochi.harness.commit((tx) => writeNote(tx, { slug: "dog", kind: "fact", subject: "dog", body: "Biscuit" }, undefined, "2026-10-05"), context);
-	await mochi.harness.commit((tx) => writeNote(tx, { slug: "me", kind: "user", subject: "me", body: "Shaurya" }, undefined, "2026-10-05"), context);
+	await mochi.harness.commit((tx) => writeNote(tx, { slug: "me", kind: "user", subject: "me", body: "Sam" }, undefined, "2026-10-05"), context);
 	await ask(mochi, "hi");
 	await mochi.close();
 	assert.equal(keys.length, 2);

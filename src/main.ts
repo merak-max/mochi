@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { mkdir, readFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -63,6 +63,39 @@ export function parseMode(all: readonly string[], interactive: boolean): Mode {
 }
 
 async function main(args: readonly string[]): Promise<void> {
+	if (args[0] === "service" && args[1] === "install") {
+		// Linux: a systemd user service for this home, started now and at login.
+		const home = resolveHome(process.env);
+		if (process.platform !== "linux") throw new Error("service install writes a systemd user unit, which needs Linux. Run node src/main.ts --headless under your own supervisor.");
+		const unit = [
+			"[Unit]",
+			"Description=mochi",
+			"After=network-online.target",
+			"StartLimitIntervalSec=0",
+			"",
+			"[Service]",
+			"Type=simple",
+			`WorkingDirectory=${REPO}`,
+			`Environment=MOCHI_HOME=${home.dir}`,
+			`Environment=PATH=${process.env.PATH ?? "/usr/bin:/bin"}`,
+			`ExecStart=${process.execPath} src/main.ts --headless`,
+			"Restart=always",
+			"RestartSec=5",
+			`StandardOutput=append:${home.logFile}`,
+			`StandardError=append:${home.logFile}`,
+			"UMask=0077",
+			"",
+			"[Install]",
+			"WantedBy=default.target",
+			"",
+		].join("\n");
+		const dir = join(homedir(), ".config", "systemd", "user");
+		await mkdir(dir, { recursive: true });
+		await mkdir(home.dir, { recursive: true });
+		await writeFile(join(dir, "mochi.service"), unit);
+		process.stdout.write(`Wrote ${join(dir, "mochi.service")}. Start it: systemctl --user daemon-reload && systemctl --user enable --now mochi\n`);
+		return;
+	}
 	if (args[0] === "migrate") {
 		// mochi migrate <old data dir> [old env file]: once, with the daemon stopped.
 		const [from, envFile] = args.slice(1);

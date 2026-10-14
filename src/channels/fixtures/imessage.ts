@@ -1,8 +1,8 @@
 import type { Content } from "spectrum-ts";
 import type { IMessageApp, IMessageMessage, IMessageSpace, ReactionHandle } from "../imessage.ts";
 
-export const OWNER = "+918353932755";
-export const OWNER_DM = "any;-;+918353932755";
+export const OWNER = "+15550100001";
+export const OWNER_DM = "any;-;+15550100001";
 
 const bytes = (value: string) => async () => Buffer.from(value);
 const noStream = async () => new ReadableStream();

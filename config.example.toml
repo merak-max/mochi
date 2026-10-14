@@ -1,0 +1,63 @@
+# mochi config. Copy to ~/.mochi/config.toml. Every key is optional.
+# Keys and tokens go in ~/.mochi/.env (see .env.example), never here.
+
+# Your time zone. Default: the machine's.
+timeZone = "America/New_York"
+
+# Minutes of silence after which your next message starts a fresh thread. 0 never resets.
+idleResetMinutes = 60
+
+# How mochi reaches models. Each provider is an endpoint, the protocol it speaks, and the
+# variable that holds its key:
+#   api = "anthropic"   Anthropic Messages
+#   api = "responses"   OpenAI Responses
+#   api = "chat"        OpenAI chat completions (OpenRouter, Ollama, vLLM, LiteLLM)
+# A gateway is one provider per protocol it serves. With no [providers], ANTHROPIC_API_KEY
+# (or OPENAI_API_KEY) decides.
+[providers.anthropic]
+api = "anthropic"
+keyEnv = "ANTHROPIC_API_KEY"
+
+# [providers.openrouter]
+# api = "chat"
+# url = "https://openrouter.ai/api/v1"
+# keyEnv = "OPENROUTER_API_KEY"
+
+# A model is <provider>/<model id>. The brain answers you; the fast model summarizes,
+# runs routines and reads data for scripts.
+[models]
+brain = "anthropic/claude-opus-5-5"
+fast = "anthropic/claude-haiku-5-5"
+
+[models.aliases]
+sonnet = "anthropic/claude-sonnet-5-5"
+
+# Routines. Each runs in its own conversation and reaches you only by notify.
+# role names an agent file (agents/*.md, or ~/.mochi/agents/*.md) whose model and
+# instructions the run uses.
+# [[triggers]]
+# kind = "cron"
+# id = "morning"
+# cron = "0 8 * * *"
+# tz = "America/New_York"
+# role = "worker"
+# prompt = "Check my calendar for today and tell me only what needs me."
+
+# Nightly memory review: reads new chat, keeps lasting facts as notes.
+[memory.dreaming]
+enabled = true
+cron = "30 4 * * *"
+
+# Other people who may text mochi on iMessage, each in a thread of their own.
+# [[users]]
+# id = "user2"
+# handle = "+15550100002"
+# name = "Alex"
+
+# Other agents mochi may call over A2A. The token lives in .env under tokenEnv.
+# [a2a.peers.hermes]
+# url = "http://127.0.0.1:9900"
+# tokenEnv = "HERMES_A2A_TOKEN"
+
+# App tools through an Executor MCP server. Log in with: mochi auth executor
+# executorUrl = "https://executor.example.com/mcp"

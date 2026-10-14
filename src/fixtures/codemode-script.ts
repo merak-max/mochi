@@ -16,7 +16,7 @@ const [dir, scenario, kill] = process.argv.slice(2) as [string, string, string];
 const SCRIPTS: Record<string, string> = {
 	chain: `const a = await tools.apps_search({ query: "mail" });
 const b = await tools.apps_search({ query: "mail" });
-const c = await tools.apps_call({ path: "gmail.send", args: { to: "riya" } });
+const c = await tools.apps_call({ path: "gmail.send", args: { to: "maya" } });
 return { a, b, c };`,
 	fanout: `return await Promise.all([0, 1, 2, 3, 4, 5].map((n) => tools.apps_call({ path: "gmail.send", args: { to: n % 3 } })));`,
 	agent: `return await tools.agent({ name: "primes", brief: "List the first three primes." });`,
