@@ -1,7 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Content } from "spectrum-ts";
 import { log } from "../log.ts";
-import { clip } from "../text.ts";
 import type { Setup } from "../setup.ts";
 import {
 	type Attachment,
@@ -32,8 +31,6 @@ const IMESSAGE_PROFILE: ChannelProfile = {
 	paragraphsAreBubbles: true,
 	typingMaxMs: 90_000,
 };
-
-const TAPBACK_TEXT_CHARS = 80;
 
 interface ReactionHandle {
 	unsend(): Promise<void>;
@@ -151,7 +148,7 @@ async function toInbound(message: IMessageMessage, owner: string, users: readonl
 	const content = message.content;
 	if (content.type === "reaction") {
 		const target = content.target;
-		const onText = clip(contentText(target.content), TAPBACK_TEXT_CHARS);
+		const onText = contentText(target.content);
 		return {
 			kind: "message",
 			message: { kind: "tapback", channel: "imessage", messageId: message.id, on: target.id, emoji: content.emoji, onText, fromAgent: target.direction === "outbound", at: message.timestamp, ...person },

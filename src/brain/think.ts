@@ -4,7 +4,6 @@ import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-work
 import { messageText } from "../text.ts";
 import type { Classify } from "./classifier.ts";
 
-const LLM_MAX_TOKENS = 16_000;
 /** `llm` calls in flight at once across every script; a Promise.all over hundreds of slices waits its turn. */
 const LLM_CONCURRENCY = 8;
 
@@ -53,7 +52,7 @@ export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRe
 					deps.models.completeSimple(
 						model,
 						{ ...(system === undefined ? {} : { systemPrompt: system }), messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
-						{ ...(signal === undefined ? {} : { signal }), reasoning: "low", maxTokens: Math.min(model.maxTokens, LLM_MAX_TOKENS) },
+						{ ...(signal === undefined ? {} : { signal }), reasoning: "low", maxTokens: model.maxTokens },
 					),
 				);
 				if (response.stopReason === "error" || response.stopReason === "aborted") throw new Error(`llm failed: ${response.errorMessage ?? response.stopReason}`);

@@ -391,7 +391,7 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 			"Send a message now to the owner, or in a trigger run to the trigger's recipients. In a trigger run this is the only way to reach " +
 			"them, so call it only when something needs their attention. channel applies to the owner and defaults to where the owner last wrote. Users always get iMessage.",
 		parameters: Type.Object({
-			text: Type.String({ minLength: 1, maxLength: 4000 }),
+			text: Type.String({ minLength: 1 }),
 			channel: Type.Optional(Type.Union(channelNames.map((id) => Type.Literal(id)))),
 		}),
 		replay: "safe",

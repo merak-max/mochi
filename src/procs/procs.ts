@@ -9,12 +9,10 @@ import { defineTask, defineTool, type NextTaskState, ROOT_CONVERSATION_ID, type 
 import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
-import { clip } from "../text.ts";
 import { LastInboundDoc, type Line, openTurn } from "../turn/turn.ts";
 
 export const PROC_POLL_MS = 1000;
 const WAKE_LINES = 30;
-const LINE_CHARS = 300;
 const TAIL_BYTES = 256 * 1024;
 const STOP_GRACE_MS = 3000;
 
@@ -160,7 +158,7 @@ export function defineProcWatch(deps: ProcWatchDeps): ProcTask {
 		const key = `proc:${task.id}:${event}`;
 		deps.log("proc.wake", { task: task.id, event, tag });
 		const lines = await tailLines(files.log, WAKE_LINES);
-		const body = lines.length === 0 ? "(no output)" : lines.map((line) => clip(line, LINE_CHARS)).join("\n");
+		const body = lines.length === 0 ? "(no output)" : lines.join("\n");
 		const last = runtime.conversationId === ROOT_CONVERSATION_ID ? (await runtime.snapshot(LastInboundDoc, context))?.last : undefined;
 		if (last !== undefined && last !== null) {
 			await runtime.commit(async (tx) => {
@@ -287,7 +285,7 @@ export function procFns(deps: ProcFnDeps): ToolRegistration[] {
 		defineTool({
 			name: "proc_logs",
 			description: "The last lines of a background process's output, stdout and stderr together.",
-			parameters: Type.Object({ name: Name, tail: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })) }),
+			parameters: Type.Object({ name: Name, tail: Type.Optional(Type.Integer({ minimum: 1 })) }),
 			structuredOutputSchema: Type.String(),
 			replay: "safe",
 			execute: async ({ name, tail }) => {

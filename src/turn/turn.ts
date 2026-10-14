@@ -39,7 +39,7 @@ import {
 } from "../channels/types.ts";
 import { type ChatUser, OWNER_ID } from "../config.ts";
 import type { Log } from "../log.ts";
-import { clip, formatStamp, messageText } from "../text.ts";
+import { formatStamp, messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import { loadAttachment, type MediaDeps, prepareInbound, splitAttachments } from "../media/media.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
@@ -190,15 +190,12 @@ export interface Line {
 type TurnHost = Pick<Line, "root" | "harness" | "users" | "channels" | "workDir" | "media"> & { readonly log: Log };
 
 const NOTIFY_ENTRY = "app.notify";
-const DELIVERED_RECORD_CHARS = 280;
 
 function deliveredRecord(input: RunTurn, recipient: string): string {
 	const from = input.from.kind === "trigger" ? `trigger ${input.from.id}` : `conversation ${input.from.id}`;
 	const where = input.channel === "cli" ? "in the terminal" : `on ${input.channel}`;
-	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${clip(input.text, DELIVERED_RECORD_CHARS)}`;
+	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${input.text}`;
 }
-
-const REPLY_TEXT_CHARS = 80;
 
 // The only builder of a chat Turn's input, so ingest and `run` submit identical content.
 async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "workDir">, signal?: AbortSignal): Promise<UserInput> {
@@ -206,7 +203,7 @@ async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "
 	const lines = [turn.tag];
 	if (turn.replyTo !== undefined) {
 		const whose = turn.replyTo.fromAgent ? "your" : "their";
-		const quoted = turn.replyTo.text === "" ? "(text not available; use recall)" : clip(turn.replyTo.text, REPLY_TEXT_CHARS);
+		const quoted = turn.replyTo.text === "" ? "(text not available; use recall)" : turn.replyTo.text;
 		lines.push(`[replying to ${whose} message id=${turn.replyTo.messageId}] ${quoted}`);
 	}
 	const text = [...lines, turn.text, ...notes].join("\n");

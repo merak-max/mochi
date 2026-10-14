@@ -80,7 +80,7 @@ function boardBrief(task: BoardTask): string {
 	const lines = [
 		`Board task #${task.id} is due: ${task.title}`,
 		`Due ${task.due}. Bots: ${task.bots.join(", ")} (the first leads).`,
-		...task.log.slice(-10).map((entry) => `- ${entry.at} ${entry.by}: ${entry.text}`),
+		...task.log.map((entry) => `- ${entry.at} ${entry.by}: ${entry.text}`),
 		"",
 		"The board woke you for this task. Claim it with tools.board_claim, then do what it needs now. " +
 			"Record what happened with tools.board_update: done when finished, waiting with a new due when it needs time, or a log line. " +

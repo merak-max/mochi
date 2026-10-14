@@ -33,7 +33,7 @@ async function call(peer: A2APeer & { readonly token: string }, method: string, 
 		signal: signalOf(peer.timeoutMs, signal),
 	});
 	const text = await response.text();
-	if (!response.ok) throw new Error(`A2A peer ${peer.name}: HTTP ${response.status}: ${text.slice(0, 300)}`);
+	if (!response.ok) throw new Error(`A2A peer ${peer.name}: HTTP ${response.status}: ${text}`);
 	let body: unknown;
 	try {
 		body = JSON.parse(text);

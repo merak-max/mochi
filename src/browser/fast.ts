@@ -72,10 +72,10 @@ async function browseFast(deps: FastDeps, args: { url: string; task: string }, c
 				if (model === undefined) throw new Error("Fast text model unavailable.");
 				const response = await deps.models.completeSimple(model, {
 					systemPrompt: TEXT_VALUE,
-					messages: [{ role: "user", content: JSON.stringify({ goal: args.task, field: action, page: { title: page.title, text: page.text.slice(0, 6000) }, recent_actions: history.slice(-6) }), timestamp: Date.now() }],
-				}, { reasoning: "minimal", maxTokens: 1024, ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
+					messages: [{ role: "user", content: JSON.stringify({ goal: args.task, field: action, page: { title: page.title, text: page.text }, recent_actions: history.slice(-6) }), timestamp: Date.now() }],
+				}, { reasoning: "minimal", maxTokens: model.maxTokens, ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
 				if (response.stopReason !== "stop") throw new Error("Text model failed; nothing typed.");
-				text = parseWith(Type.Object({ text: Type.String({ minLength: 1, maxLength: 2000 }) }, { additionalProperties: false }), JSON.parse(messageText(response)), "field text").text;
+				text = parseWith(Type.Object({ text: Type.String({ minLength: 1 }) }, { additionalProperties: false }), JSON.parse(messageText(response)), "field text").text;
 			}
 			await act(cdp, id, page, action, text);
 			const before = JSON.stringify([page.url, page.text, page.actions, page.page_key]);
