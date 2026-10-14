@@ -10,7 +10,7 @@ import { createClassify } from "./brain/classifier.ts";
 import { createIMessageChannel } from "./channels/imessage.ts";
 import { createWhatsAppChannel } from "./channels/whatsapp.ts";
 import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./channels/types.ts";
-import { type Config, type ChatUser, loadConfig } from "./config.ts";
+import { type Config, unknownKeys, type ChatUser, loadConfig } from "./config.ts";
 import { adoptInstructions, type Home, resolveHome } from "./home.ts";
 import { SearchIndex } from "./index/fts.ts";
 import { acquireLock } from "./lock.ts";
@@ -23,7 +23,7 @@ import { runTui } from "./attach/tui.ts";
 import { Profiles } from "./profiles/profiles.ts";
 import { triggersComponent } from "./triggers/webhooks.ts";
 import { a2aComponent, a2aServerSetup } from "./a2a/server.ts";
-import { AUTH_COMMAND, authFile, loginExecutor, storedTokenConnector } from "./auth/executor.ts";
+import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
 import { connectApps } from "./apps/apps.ts";
 import { InboundCursorDoc, ingest } from "./turn/turn.ts";
 import { runFeed } from "./memory/feed.ts";
@@ -94,11 +94,11 @@ async function main(args: readonly string[]): Promise<void> {
 		return;
 	}
 	if (args[0] === "auth") {
-		if (args[1] !== "executor") throw new Error(`Unknown auth target ${args[1] ?? "(none)"}. Usage: ${AUTH_COMMAND}`);
+		if (args[1] !== "apps") throw new Error(`Unknown auth target ${args[1] ?? "(none)"}. Usage: ${AUTH_COMMAND}`);
 		const config = await loadConfig(process.env);
-		if (config.executorUrl === undefined) throw new Error("Set executorUrl in config.toml (or EXECUTOR_URL) first.");
+		if (config.appsUrl === undefined) throw new Error("Set appsUrl in config.toml (or MOCHI_APPS_URL) first.");
 		await mkdir(config.dataDir, { recursive: true });
-		await loginExecutor(config.executorUrl, authFile(config.dataDir), (line) => process.stdout.write(`${line}\n`));
+		await loginApps(config.appsUrl, authFile(config.dataDir), (line) => process.stdout.write(`${line}\n`));
 		return;
 	}
 	const mode = parseMode(args, process.stdin.isTTY === true && process.stdout.isTTY === true);
@@ -148,7 +148,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const a2a = a2aServerSetup(config.env);
 	for (const line of [...setupReport([...services(config), ["a2a", a2a]]), ...channelReport]) log("setup", { line });
 	const { models } = config.modelSetup;
-	const apps = config.executorUrl === undefined ? undefined : connectApps(storedTokenConnector(config.executorUrl, authFile(config.dataDir)), log);
+	const apps = config.appsUrl === undefined ? undefined : connectApps(storedTokenConnector(config.appsUrl, authFile(config.dataDir)), log);
 
 	const mochi = await openMochi(
 		{
@@ -157,8 +157,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			brain: config.modelSetup.brain,
 			fast: config.modelSetup.fast,
 			classify: createClassify(models, config.modelSetup.classifier),
-			firecrawlKey: config.firecrawlKey,
-			...(config.env.FIRECRAWL_PROFILE?.trim() ? { firecrawlProfile: config.env.FIRECRAWL_PROFILE.trim() } : {}),
+			web: config.web,
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env, ...(config.file.providers === undefined ? {} : { providers: config.file.providers }) } }),
 			...(apps === undefined ? {} : { apps }),
 			index,
@@ -226,13 +225,15 @@ function socketPath(dataDir: string): string {
 }
 
 /** The outside services mochi calls. Models and the web need a key; without OpenRouter the trigger gates pass. */
-export function services(config: Pick<Config, "modelSetup" | "firecrawlKey" | "dataDir" | "executorUrl">): readonly (readonly [string, Setup<void>])[] {
+export function services(config: Pick<Config, "modelSetup" | "web" | "dataDir" | "appsUrl" | "file">): readonly (readonly [string, Setup<void>])[] {
 	const missing = config.modelSetup.missing;
+	const unknown = unknownKeys(config.file);
 	return [
 		["models", missing.length === 0 ? ready(undefined) : broken(`${missing.join("; ")}. Fix: put the key in ~/.mochi/.env`)],
 		["classifier", config.modelSetup.classifier === undefined ? off : ready(undefined)],
-		["firecrawl", config.firecrawlKey === undefined ? broken("FIRECRAWL_API_KEY is not set. Fix: put it in ~/.mochi/.env") : ready(undefined)],
-		["executor", config.executorUrl === undefined ? off : existsSync(authFile(config.dataDir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
+		["config", unknown.length === 0 ? ready(undefined) : broken(`config.toml has keys mochi does not read: ${unknown.join(", ")}. They are ignored; remove them.`)],
+		["web", config.web.key === undefined ? broken(`${config.web.keyEnv} is not set. Fix: put it in ~/.mochi/.env`) : ready(undefined)],
+		["apps", config.appsUrl === undefined ? off : existsSync(authFile(config.dataDir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
 	];
 }
 

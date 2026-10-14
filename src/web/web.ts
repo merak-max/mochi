@@ -25,18 +25,19 @@ function searchHits(web: WebHit[]): SearchHit[] {
 const FIND_TOOLS = { provider: "firecrawl", capability: "find-tools" } as const;
 
 export interface WebDeps {
-	/** `FIRECRAWL_API_KEY`; absent, every web function fails with a clear error. Bash never gets it. */
+	/** The web service key; absent, every web function fails with a clear error naming `keyEnv`. Bash never gets it. */
 	readonly apiKey: string | undefined;
+	readonly keyEnv: string;
 	readonly models: Models;
 	/** Runs web_fetch's `instruction`. */
 	readonly fast: ModelRef;
 	readonly baseUrl?: string;
 }
 
-/** Firecrawl v2 search, fetch, map and Alexandria on mochi's own key, as script functions. */
+/** Web search, fetch, map and data providers on mochi's own key, as script functions. The client speaks Firecrawl's v2 API. */
 export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 	const client = (): FirecrawlClient => {
-		if (deps.apiKey === undefined) throw new Error("Firecrawl is not configured: FIRECRAWL_API_KEY is unset.");
+		if (deps.apiKey === undefined) throw new Error(`Web is not configured: ${deps.keyEnv} is unset.`);
 		return new FirecrawlClient(deps.apiKey, deps.baseUrl);
 	};
 	return [

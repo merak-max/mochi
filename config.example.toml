@@ -4,14 +4,12 @@
 # Your time zone. Default: the machine's.
 timeZone = "America/New_York"
 
-# Minutes of silence after which your next message starts a fresh thread. 0 never resets.
-idleResetMinutes = 60
-
 # How mochi reaches models. Each provider is an endpoint, the protocol it speaks, and the
 # variable that holds its key:
 #   api = "anthropic"   Anthropic Messages
 #   api = "responses"   OpenAI Responses
 #   api = "chat"        OpenAI chat completions (OpenRouter, Ollama, vLLM, LiteLLM)
+#   api = "classifier"  the System One classifier protocol, for the classifier model
 # A gateway is one provider per protocol it serves. With no [providers], ANTHROPIC_API_KEY
 # (or OPENAI_API_KEY) decides.
 [providers.anthropic]
@@ -29,11 +27,21 @@ keyEnv = "ANTHROPIC_API_KEY"
 brain = "anthropic/claude-opus-5-5"
 fast = "anthropic/claude-haiku-5-5"
 
+# The yes/no classifier for classify and classify steps, on a provider with api = "classifier".
+# With none set, OPENROUTER_API_KEY alone turns on its default classifier.
+# classifier = "classifier/typesafe/jev-1.13"
+
 [models.aliases]
 sonnet = "anthropic/claude-sonnet-5-5"
 
+# [providers.classifier]
+# api = "classifier"
+# url = "https://openrouter.ai/api/v1"
+# keyEnv = "OPENROUTER_API_KEY"
+
 # Voice notes in and speech out, through any provider that serves the OpenAI audio API
-# (/audio/speech and /audio/transcriptions). provider names a [providers] entry.
+# (/audio/speech and /audio/transcriptions). provider names a [providers] entry. Images and
+# video take [media.images] and [media.video] with baseUrl, keyEnv and model.
 # [providers.gateway]
 # api = "responses"
 # url = "https://gateway.example.com/openai/v1"
@@ -45,20 +53,26 @@ sonnet = "anthropic/claude-sonnet-5-5"
 # stt = "gpt-4o-transcribe"
 # voice = "coral"
 
-# Routines. Each runs in its own conversation and reaches you only by notify.
-# role names an agent file (agents/*.md, or ~/.mochi/agents/*.md) whose model and
-# instructions the run uses.
+# Routines. Each runs in its own conversation and reaches you only by notify. A run is an
+# ordered chain of steps: a classify step is a fast yes/no question that stops the chain on
+# no, before the model runs (on = "output" judges the notify text instead); { model = {} }
+# is the run of prompt. Without steps a routine is one model step. profile names whose
+# instructions, model and memory the run uses.
 # [[triggers]]
 # kind = "cron"
 # id = "morning"
 # cron = "0 8 * * *"
 # tz = "America/New_York"
-# role = "worker"
+# profile = "worker"
 # prompt = "Check my calendar for today and tell me only what needs me."
+# steps = [
+#   { model = {} },
+#   { classify = { question = "Does this message need the owner today?", yes = "an event or task needs them", no = "nothing to act on", on = "output" } },
+# ]
 
-# Before a quiet thread is compacted, a fork of it saves what is worth keeping as notes. On by default.
-# [memory]
-# reflect = false
+# Profiles are standing teammates in this daemon. Each is ~/.mochi/profiles/<name>/instructions.md:
+# front matter with description, model, thinking and optionally tools (a comma list of script
+# functions it may use), then its role. mochi gives them work with profile_send.
 
 # Other people who may text mochi on iMessage, each in a thread of their own.
 # [[users]]
@@ -71,5 +85,11 @@ sonnet = "anthropic/claude-sonnet-5-5"
 # url = "http://127.0.0.1:9900"
 # tokenEnv = "HERMES_A2A_TOKEN"
 
-# App tools through an Executor MCP server. Log in with: mochi auth executor
-# executorUrl = "https://executor.example.com/mcp"
+# App tools through an MCP server with execute and skills tools. Log in with: mochi auth apps
+# appsUrl = "https://apps.example.com/mcp"
+
+# Web search, fetch and the logged-in browser. The client speaks Firecrawl's v2 API.
+# [web]
+# keyEnv = "FIRECRAWL_API_KEY"
+# url = "https://api.firecrawl.dev/v2"
+# browserProfile = "mochi"

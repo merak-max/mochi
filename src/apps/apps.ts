@@ -2,7 +2,7 @@ import type { Context, JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { McpClient, McpConnectionClosedError, McpSessionExpiredError, type McpTransport } from "@earendil-works/pi-mcp";
 import { McpOAuthAuthorizationRequiredError } from "@earendil-works/pi-mcp/oauth";
-import { AUTH_COMMAND } from "../auth/executor.ts";
+import { AUTH_COMMAND } from "../auth/apps.ts";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { Log } from "../log.ts";
 import { pause } from "../pause.ts";
@@ -34,8 +34,8 @@ export function connectApps(connect: Connect, log: Log): Apps & { run(context: C
 	let link: Link = { status: "down", error: "not connected yet" };
 	const connected = (): McpClient => {
 		const current = link;
-		if (current.status === "unauthorized") throw new Error(`Executor is not authorized; the owner runs \`${AUTH_COMMAND}\`.`);
-		if (current.status === "down") throw new Error(`Executor is down (${current.error}), retrying every 60 s.`);
+		if (current.status === "unauthorized") throw new Error(`The apps server is not authorized; the owner runs \`${AUTH_COMMAND}\`.`);
+		if (current.status === "down") throw new Error(`The apps server is down (${current.error}), retrying every 60 s.`);
 		return current.client;
 	};
 	const reconnected = async (old: McpClient, context: Context): Promise<McpClient> => {
@@ -51,7 +51,7 @@ export function connectApps(connect: Connect, log: Log): Apps & { run(context: C
 			return await client.callTool(name, args, options);
 		} catch (error) {
 			if (error instanceof McpSessionExpiredError || error instanceof McpConnectionClosedError || error instanceof McpOAuthAuthorizationRequiredError) {
-				log("executor.reconnecting", { error: String(error) });
+				log("apps.reconnecting", { error: String(error) });
 				await client.close();
 			}
 			throw error;
@@ -62,7 +62,7 @@ export function connectApps(connect: Connect, log: Log): Apps & { run(context: C
 		try {
 			return parseResult(await callOnce(client, name, args, context));
 		} catch (error) {
-			if (!(error instanceof McpSessionExpiredError)) throw error instanceof ExecutorResultError ? error : new Error(`Executor call failed: ${String(error)}`);
+			if (!(error instanceof McpSessionExpiredError)) throw error instanceof ExecutorResultError ? error : new Error(`Apps call failed: ${String(error)}`);
 		}
 		return parseResult(await callOnce(await reconnected(client, context), name, args, context));
 	};
@@ -71,8 +71,8 @@ export function connectApps(connect: Connect, log: Log): Apps & { run(context: C
 		for (let approvals = 0; ; approvals++) {
 			const requestId = approvalRequest(value);
 			if (requestId === undefined) return value;
-			if (approvals >= MAX_APPROVALS) throw new Error(`Executor asked for more than ${MAX_APPROVALS} approvals in one call.`);
-			log("executor.approved", { requestId });
+			if (approvals >= MAX_APPROVALS) throw new Error(`The apps server asked for more than ${MAX_APPROVALS} approvals in one call.`);
+			log("apps.approved", { requestId });
 			value = await callTool("resume", { requestId, response: ACCEPT }, context);
 		}
 	};
@@ -91,9 +91,9 @@ export function connectApps(connect: Connect, log: Log): Apps & { run(context: C
 				const report = link.status === "down" ? `down:${link.error}` : link.status;
 				if (report !== reported) {
 					reported = report;
-					if (link.status === "unauthorized") log("executor.unauthorized", { hint: `run \`${AUTH_COMMAND}\`` });
-					else if (link.status === "down") log("executor.down", { error: link.error, retryInSeconds: RETRY_MS / 1000 });
-					else log("executor.up", {});
+					if (link.status === "unauthorized") log("apps.unauthorized", { hint: `run \`${AUTH_COMMAND}\`` });
+					else if (link.status === "down") log("apps.down", { error: link.error, retryInSeconds: RETRY_MS / 1000 });
+					else log("apps.up", {});
 				}
 				if (link.status === "up") {
 					await untilClosed(link.client, context);
@@ -225,7 +225,7 @@ export function appsFns(apps: Apps): readonly ToolRegistration[] {
 		}),
 		defineTool({
 			name: "apps_skills",
-			description: "Executor's instructions for one app, or the list of apps.",
+			description: "The apps server's instructions for one app, or the list of apps.",
 			parameters: Type.Object({ app: Type.Optional(Type.String()) }),
 			structuredOutputSchema: Type.String(),
 			replay: "safe",

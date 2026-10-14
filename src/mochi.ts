@@ -41,6 +41,7 @@ import { identityExtension } from "./brain/identity.ts";
 import { type A2APeers, a2aFns } from "./a2a/tools.ts";
 import { boardFns, defineSweep, ensureSweep, SWEEP_EVERY_MS } from "./board/board.ts";
 import { profileFns, type Profiles } from "./profiles/profiles.ts";
+import type { WebConfig } from "./config.ts";
 import { type Home, homeAt } from "./home.ts";
 
 export interface MochiOptions {
@@ -49,14 +50,12 @@ export interface MochiOptions {
 	readonly brain: ModelRef;
 	readonly fast: ModelRef;
 	readonly classify: Classify;
-	/** `FIRECRAWL_API_KEY` for the web functions; absent, they fail with a clear error. */
-	readonly firecrawlKey: string | undefined;
-	/** `FIRECRAWL_PROFILE`, the persistent browser profile `browse` logs in with. */
-	readonly firecrawlProfile?: string;
+	/** The web service for the web and browser functions; without a key they fail with a clear error. */
+	readonly web: WebConfig;
 	/** Image, video and speech providers; absent, the media functions say they are not configured. */
 	readonly media?: Omit<MediaDeps, "workDir">;
 	/** Minutes of silence after which an owner message starts a fresh root; 0 never resets. */
-	/** Executor; absent, the apps functions say it is not connected. */
+	/** The apps MCP server; absent, the apps functions say it is not connected. */
 	readonly apps?: Apps;
 	/** Wall-clock limit of one `code` script. */
 	readonly scriptDeadlineMs?: number;
@@ -131,9 +130,9 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		recallTool(index),
 		historyTool(index),
 		reactTool(options.channels),
-		...webFns({ apiKey: options.firecrawlKey, models: options.models, fast: options.fast }),
-		...browserFns({ apiKey: options.firecrawlKey, profile: options.firecrawlProfile }),
-		...fastBrowserFns({ apiKey: options.firecrawlKey, profile: options.firecrawlProfile, models: options.models, fast: options.fast, classify: options.classify }),
+		...webFns({ apiKey: options.web.key, keyEnv: options.web.keyEnv, ...(options.web.url === undefined ? {} : { baseUrl: options.web.url }), models: options.models, fast: options.fast }),
+		...browserFns(browserDeps(options.web)),
+		...fastBrowserFns({ ...browserDeps(options.web), models: options.models, fast: options.fast, classify: options.classify }),
 		...mediaFns({ ...media, workDir: options.workDir }),
 		...gifFns({ workDir: options.workDir }),
 		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
@@ -217,7 +216,9 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	return { harness, root, registry, classify: options.classify, line, trigger, catalog: options.profiles };
 }
 
+const browserDeps = (web: WebConfig) => ({ apiKey: web.key, keyEnv: web.keyEnv, ...(web.url === undefined ? {} : { baseUrl: web.url }), ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) });
+
 const notConnected = async (): Promise<never> => {
-	throw new Error("Executor is not connected in this process.");
+	throw new Error("No apps server is connected in this process.");
 };
 const NO_APPS: Apps = { search: notConnected, call: notConnected, skills: notConnected };

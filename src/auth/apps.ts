@@ -14,7 +14,7 @@ import {
 import { Type } from "typebox";
 import { parseWith } from "../parse.ts";
 
-export const AUTH_COMMAND = "node src/main.ts auth executor";
+export const AUTH_COMMAND = "node src/main.ts auth apps";
 
 /**
  * Fixed so the redirect URI registered with Executor stays valid across logins; a random port would need a new
@@ -28,6 +28,7 @@ const LOGIN_TIMEOUT_MS = 10 * 60_000;
 const StateSchema = Type.Object({ serverUrl: Type.String() }, { additionalProperties: true });
 
 export function authFile(dataDir: string): string {
+	// The file kept its first name so an existing login still loads.
 	return join(dataDir, "executor-auth.json");
 }
 
@@ -74,8 +75,8 @@ export function storedTokenConnector(serverUrl: string, path: string): () => Pro
 	};
 }
 
-/** `mochi auth executor`: print the authorization URL, wait for the redirect, store the tokens, list the tools. */
-export async function loginExecutor(serverUrl: string, path: string, print: (line: string) => void): Promise<void> {
+/** `mochi auth apps`: print the authorization URL, wait for the redirect, store the tokens, list the tools. */
+export async function loginApps(serverUrl: string, path: string, print: (line: string) => void): Promise<void> {
 	let callback: OAuthCallbackServer;
 	try {
 		callback = await OAuthCallbackServer.listen({ host: CALLBACK_HOST, port: CALLBACK_PORT, timeoutMs: LOGIN_TIMEOUT_MS });

@@ -29,7 +29,7 @@ export type Seat = (typeof SEATS)[number];
 const ALL = SEATS;
 const AGENT: readonly Seat[] = ["agent"];
 const AGENT_TRIGGER: readonly Seat[] = ["agent", "trigger"];
-/** A user's thread never reaches the owner's apps: Executor approvals are accepted without asking. */
+/** A user's thread never reaches the owner's apps: the apps server's approvals are accepted without asking. */
 const NOT_USER: readonly Seat[] = ["agent", "trigger", "peer"];
 
 /** The tools the model calls directly, and the seats that get each. Their `control` (handoff, terminate) works only on a model-issued call. */

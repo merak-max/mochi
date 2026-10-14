@@ -19,7 +19,9 @@ const Session = Type.Object({
 
 export interface BrowserDeps {
 	readonly apiKey: string | undefined;
-	readonly profile: string | undefined;
+	/** The env variable the key comes from, for the error that names it. */
+	readonly keyEnv: string;
+	readonly profile?: string;
 	readonly baseUrl?: string;
 	readonly fetch?: typeof fetch;
 }
@@ -31,8 +33,8 @@ export class BrowserClient {
 	readonly #deps: BrowserDeps;
 
 	constructor(deps: BrowserDeps) {
-		if (!deps.apiKey?.trim()) throw new Error("Browser is not configured: FIRECRAWL_API_KEY is unset.");
-		if (!deps.profile?.trim()) throw new Error("Browser is not configured: FIRECRAWL_PROFILE is unset.");
+		if (!deps.apiKey?.trim()) throw new Error(`Browser is not configured: ${deps.keyEnv} is unset.`);
+		if (!deps.profile?.trim()) throw new Error("Browser is not configured: set [web] browserProfile in config.toml.");
 		this.#deps = deps;
 		this.#profile = deps.profile.trim();
 		this.#baseUrl = (deps.baseUrl ?? "https://api.firecrawl.dev/v2").replace(/\/+$/, "");
