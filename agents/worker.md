@@ -1,7 +1,7 @@
 ---
 name: worker
 description: Plain agent for a self-contained slice with an exact brief, such as one swarm slice, one arena candidate, one reviewer, one investigator, or a bulk extraction. Use when the brief already says what to do and how to report.
-model: fast
+model: sol
 thinking: low
 ---
 
