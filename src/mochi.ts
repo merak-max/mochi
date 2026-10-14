@@ -42,6 +42,7 @@ import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
 import { bindRepo, PublisherTask } from "./memory/publication.ts";
 import { type A2APeers, a2aFns } from "./a2a/tools.ts";
+import { defineSettle, ensureSettle, LOOK_EVERY_MS, SETTLE_MIN_TOKENS } from "./turn/settle.ts";
 import { defineDream, dreamConfig, type DreamConfigInput, reconcileDream } from "./memory/dream.ts";
 
 export interface MochiOptions {
@@ -67,6 +68,10 @@ export interface MochiOptions {
 	readonly triggerDeadlineMs?: number;
 	/** How often a background process's watcher reads its files. */
 	readonly procPollMs?: number;
+	/** How often the settle task looks for a quiet thread to compact. */
+	readonly settleLookMs?: number;
+	/** A quiet thread smaller than this many prompt tokens is not compacted. */
+	readonly settleMinTokens?: number;
 	readonly index: SearchIndex;
 	/** Bundled skills, `<skillsDir>/<name>/SKILL.md`, listed in the prompt and opened with `read`. */
 	readonly skillsDir: string;
@@ -195,6 +200,12 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		openReply: (tx, input) => openTurn(tx, lineOf(), input),
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
+	if (options.scheduling === "daemon") {
+		const cacheMs = (options.models.getModel(options.brain.provider, options.brain.modelId)?.promptCache?.short ?? 300) * 1000;
+		const settle = defineSettle({ harness: () => harness, handles: users.map((user) => user.handle), cacheMs, lookEveryMs: options.settleLookMs ?? LOOK_EVERY_MS, minTokens: options.settleMinTokens ?? SETTLE_MIN_TOKENS, log });
+		registry.install(defineExtension({ name: "settle", tasks: [settle] }));
+		await ensureSettle(harness, settle, lineId, context);
+	}
 	const idleResetMinutes = options.idleResetMinutes ?? 60;
 	line = {
 		harness,
