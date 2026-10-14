@@ -14,6 +14,7 @@ import {
 	type Harness,
 	hook,
 	LiveDoc,
+	ROOT_CONVERSATION_ID,
 	section,
 	type Tx,
 	UserEntry,
@@ -61,6 +62,15 @@ const TurnLog = defineDoc<Tree & { readonly upTo: number }>({
 	history: "latest",
 	fork: "initial",
 	initial: () => ({ ...empty(), upTo: 0 }),
+});
+
+const OldMemoryDoc = defineDoc<{ notes: Record<string, { subject: string; kind: string; body: string; updated: string }> }>({
+	kind: "mochi.memory",
+	version: 2,
+	scope: "conversation",
+	history: "rewindable",
+	fork: "current",
+	initial: () => ({ notes: {} }),
 });
 
 function render(tree: Tree, [lo, hi]: Block): string {
@@ -170,6 +180,15 @@ async function buildBlocks(read: () => Promise<Tree>, write: (key: string, summa
 		if (input === undefined) return;
 		await write(blockKey(next), await merge(fast, input, context));
 	}
+}
+
+/** Copies the notes of the retired note document into the memory log once, oldest first. */
+export async function importOldNotes(tx: Tx): Promise<void> {
+	const log = await tx.doc(MemoryLog);
+	if (log.lines.length > 0) return;
+	const old = await tx.doc(OldMemoryDoc, ROOT_CONVERSATION_ID);
+	const notes = Object.values(old.notes).sort((a, b) => a.updated.localeCompare(b.updated));
+	for (const note of notes) log.lines.push({ at: note.updated, text: `${note.subject} (${note.kind}): ${note.body.replace(/\s+/g, " ").trim()}` });
 }
 
 /** One pass over memory: fold new turns, then build due blocks in every memory log. The feed runs it after commits. */
