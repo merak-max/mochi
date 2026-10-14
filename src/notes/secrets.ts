@@ -40,7 +40,7 @@ export function findSecret(text: string, env: Env): SecretMatch | undefined {
 
 export function secretRejection(match: SecretMatch): string {
 	const what = match.kind === "env" ? `the value of the environment variable ${match.name}` : `a credential (${match.id})`;
-	const example = match.kind === "env" ? `"the key is in env ${match.name}"` : `"deepgram key is in env DEEPGRAM_API_KEY"`;
+	const example = match.kind === "env" ? `"the key is in env ${match.name}"` : `"the speech key is in env SPEECH_API_KEY"`;
 	return `Not saved: the note contains ${what}. Notes must never hold secrets. Store a reference instead, such as ${example}.`;
 }
 

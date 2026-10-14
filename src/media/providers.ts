@@ -20,7 +20,13 @@ export const MediaConfigSchema = Type.Object({
 		providers: Type.Array(ImageProviderSchema),
 	}),
 	video: Type.Optional(Type.Object(Connection)),
-	speech: Type.Optional(Type.Object({ deepgramKeyEnv: Type.String({ minLength: 1 }) })),
+	/** provider names a `[providers]` entry that serves the OpenAI audio API. */
+	speech: Type.Optional(Type.Object({
+		provider: Type.String({ minLength: 1 }),
+		tts: Type.String({ minLength: 1 }),
+		stt: Type.String({ minLength: 1 }),
+		voice: Type.Optional(Type.String({ pattern: "^[a-z]+$" })),
+	})),
 });
 
 export type ImageProvider = Static<typeof ImageProviderSchema>;

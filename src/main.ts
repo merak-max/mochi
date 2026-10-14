@@ -158,7 +158,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			classify: createClassify(models),
 			firecrawlKey: config.firecrawlKey,
 			...(config.env.FIRECRAWL_PROFILE?.trim() ? { firecrawlProfile: config.env.FIRECRAWL_PROFILE.trim() } : {}),
-			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env } }),
+			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env, ...(config.file.providers === undefined ? {} : { providers: config.file.providers }) } }),
 			...(config.file.idleResetMinutes === undefined ? {} : { idleResetMinutes: config.file.idleResetMinutes }),
 			...(apps === undefined ? {} : { apps }),
 			memory: { repo: resolve(config.file.memory?.repo ?? join(config.dataDir, "memory")), ...(config.file.memory?.reflect === undefined ? {} : { reflect: config.file.memory.reflect }) },

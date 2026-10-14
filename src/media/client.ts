@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, unlink } from "node:fs/promises";
+import { basename } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Type } from "@earendil-works/pi-ai";
+import { providerEndpoint, type ProviderConfig } from "../brain/providers.ts";
 import { parseWith } from "../parse.ts";
 import { loadAttachment, mimeOf, outputPath, saveOutput, workPath } from "./files.ts";
 import { parseMediaConfig, type MediaConfig, type ImageProvider } from "./providers.ts";
@@ -11,6 +13,8 @@ export interface MediaDeps {
 	readonly workDir: string;
 	readonly config: MediaConfig;
 	readonly env: Readonly<Record<string, string | undefined>>;
+	/** The `[providers]` table, where `media.speech.provider` finds its url and key. */
+	readonly providers?: Readonly<Record<string, ProviderConfig>>;
 	readonly fetch?: typeof fetch;
 	readonly pollMs?: number;
 }
@@ -24,10 +28,7 @@ const VideoReply = Type.Object({
 	status: Type.Union(["queued", "in_progress", "completed", "failed"].map((status) => Type.Literal(status))),
 	error: Type.Optional(Type.Union([Type.Null(), Type.Object({ message: Type.String() })])),
 });
-const TranscriptReply = Type.Object({
-	metadata: Type.Optional(Type.Object({ duration: Type.Optional(Type.Number()) })),
-	results: Type.Object({ channels: Type.Array(Type.Object({ alternatives: Type.Array(Type.Object({ transcript: Type.String() }), { minItems: 1 }) }), { minItems: 1 }) }),
-});
+const TranscriptReply = Type.Object({ text: Type.String(), duration: Type.Optional(Type.Number()) });
 
 const execute = promisify(execFile);
 
@@ -137,44 +138,42 @@ export class MediaClient {
 		}
 	}
 
-	private deepgram(): { base: string; headers: Record<string, string> } {
-		const keyEnv = this.deps.config.speech?.deepgramKeyEnv;
-		const key = keyEnv === undefined ? undefined : this.deps.env[keyEnv];
-		if (!key) throw new Error(`Deepgram is not configured: ${keyEnv ?? "speech.deepgramKeyEnv"} is unset.`);
-		return { base: "https://api.deepgram.com", headers: { Authorization: `Token ${key}` } };
+	private speech(): { base: string; headers: Record<string, string>; tts: string; stt: string; voice: string } {
+		const speech = this.deps.config.speech;
+		if (speech === undefined) throw new Error("Speech is not configured: set [media.speech] provider, tts and stt.");
+		const route = this.route(providerEndpoint(speech.provider, this.deps.providers));
+		return { ...route, tts: speech.tts, stt: speech.stt, voice: speech.voice ?? "coral" };
 	}
 
 	async speak(args: { text: string; voice?: string }, signal?: AbortSignal): Promise<{ path: string }> {
-		const voice = args.voice ?? "cordelia";
-		if (!/^[a-z]+$/.test(voice)) throw new Error("Voice must be an Aura-2 English voice name, such as cordelia.");
-		const route = this.deepgram();
-		const response = await this.request(`${route.base}/v1/speak?model=aura-2-${voice}-en&encoding=mp3`, {
-			method: "POST", headers: { ...route.headers, "content-type": "application/json" }, body: JSON.stringify({ text: args.text }),
+		const speech = this.speech();
+		const response = await this.request(`${speech.base}/audio/speech`, {
+			method: "POST", headers: { ...speech.headers, "content-type": "application/json" },
+			body: JSON.stringify({ model: speech.tts, input: args.text, voice: args.voice ?? speech.voice, response_format: "aac" }),
 		}, signal);
-		const mp3 = await saveOutput(this.deps.workDir, "mp3", new Uint8Array(await response.arrayBuffer()));
-		const mp3Absolute = await workPath(mp3.path, this.deps.workDir);
+		const aac = await saveOutput(this.deps.workDir, "aac", new Uint8Array(await response.arrayBuffer()));
+		const aacAbsolute = await workPath(aac.path, this.deps.workDir);
 		const m4a = await outputPath(this.deps.workDir, "m4a");
 		try {
-			await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", mp3Absolute, "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-n", m4a.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 60_000 });
+			await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", aacAbsolute, "-c:a", "copy", "-movflags", "+faststart", "-n", m4a.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 60_000 });
 			return { path: m4a.path };
 		} catch (error) {
 			await unlink(m4a.absolute).catch(() => {});
 			throw error;
 		} finally {
-			await unlink(mp3Absolute).catch(() => {});
+			await unlink(aacAbsolute).catch(() => {});
 		}
 	}
 
 	async transcript(path: string, signal?: AbortSignal): Promise<{ text: string; duration?: number }> {
 		const absolute = await workPath(path, this.deps.workDir);
-		const route = this.deepgram();
-		const response = await this.request(`${route.base}/v1/listen?model=nova-3&smart_format=true&detect_language=true`, {
-			method: "POST", headers: { ...route.headers, "content-type": mimeOf(path) }, body: await readFile(absolute),
-		}, signal);
+		const speech = this.speech();
+		const form = new FormData();
+		form.set("model", speech.stt);
+		form.set("file", new Blob([new Uint8Array(await readFile(absolute))], { type: mimeOf(path) }), basename(path));
+		const response = await this.request(`${speech.base}/audio/transcriptions`, { method: "POST", headers: speech.headers, body: form }, signal);
 		const reply = parseWith(TranscriptReply, await response.json(), "transcription response");
-		const first = reply.results.channels[0]!.alternatives[0]!;
-		const duration = reply.metadata?.duration;
-		return { text: first.transcript, ...(duration === undefined ? {} : { duration }) };
+		return { text: reply.text, ...(reply.duration === undefined ? {} : { duration: reply.duration }) };
 	}
 }
 
