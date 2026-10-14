@@ -23,7 +23,7 @@ interface Scenario {
 	/** Extra faux replies the tool itself consumes (a subagent's answer), placed between the call and the final reply. */
 	readonly inner?: number;
 	readonly expect?: RegExp;
-	readonly seat?: "agent";
+	readonly seat?: "trigger";
 	readonly setup?: (mochi: TestMochi, dir: string) => Promise<void>;
 }
 
@@ -47,7 +47,7 @@ const SCENARIOS: Scenario[] = [
 	{ name: "note", tool: "note", args: { slug: "dentist", kind: "user", subject: "Dentist", body: "Dr. Rao, Tuesdays." }, expect: /Saved note/ },
 	{ name: "recall 10k docs", tool: "recall", args: { query: "dentist lease" }, expect: /entry/, setup: seedIndex },
 	{ name: "react", tool: "react", args: { reaction: "like" }, expect: /Reacted/, setup: async (m) => void (await m.harness.commit(async (tx) => void ((await tx.doc(LastInboundDoc)).last = { channel: "telegram", messageId: "m1" }), context)) },
-	{ name: "notify (agent seat)", tool: "notify", args: { text: "build broke" }, expect: /Queued/, seat: "agent" },
+	{ name: "notify (trigger seat)", tool: "notify", args: { text: "build broke" }, expect: /Queued/, seat: "trigger" },
 	{ name: "code return 1", tool: "code", args: { code: "return 1;" }, expect: /completed[\s\S]*1/ },
 	{ name: "code 1 nested call", tool: "code", args: { code: `return (await tools.apps_search({ query: "q" })).items.length;` }, expect: /completed\.\n1/ },
 	{ name: "code 20 nested calls", tool: "code", args: { code: `return (await Promise.all(Array.from({ length: 20 }, (_, i) => tools.apps_search({ query: "q" + i })))).length;` }, expect: /completed\.\n20/ },
@@ -74,8 +74,8 @@ async function sample(s: Scenario): Promise<Sample> {
 			() => ((answered = performance.now()), fauxAssistantMessage("done")),
 		]);
 	let conversation = mochi.root;
-	if (s.seat === "agent") {
-		const id = await mochi.harness.commit((tx) => createSeatConversation(tx, "agent", { kind: "ownerless" }), context);
+	if (s.seat === "trigger") {
+		const id = await mochi.harness.commit((tx) => createSeatConversation(tx, "trigger", { kind: "ownerless" }), context);
 		conversation = (await mochi.harness.conversation(id, context))!;
 	}
 	const start = performance.now();

@@ -81,7 +81,8 @@ export function agentFns({ catalog, read, abortTask }: AgentFnDeps): ToolRegistr
 		await api.commit(async (tx) => {
 			const at = await forkPoint(tx, api.conversationId);
 			({ id } = await journaled(tx, api.taskId, "fork", async () => {
-				const brief = `You are ${args.name}, a fork of this conversation made by the script above. Your answer goes back to that script, not to the owner.\n\n${args.brief}`;
+				const reply = background ? "You run in the background: nothing reads your answer, so call notify if the owner needs the result." : "Your answer goes back to that script, not to the owner.";
+				const brief = `You are ${args.name}, a fork of this conversation made by the script above. ${reply}\n\n${args.brief}`;
 				const id = await tx.createTask(AgentTask, { name: args.name, brief }, background ? { ownership: { kind: "conversation" }, background: true } : { ownership: { kind: "task", taskId: api.taskId } });
 				await forkSeatConversation(tx, api.conversationId, at, { kind: "task", taskId: id });
 				return id;

@@ -15,55 +15,61 @@ import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 
 /**
- * A seat is the kind of conversation, stored in its agent and written only here.
- *   agent  root, a trigger run, a subagent, a fork, an A2A context. Every agent conversation has the same tools and
- *          prompt, so a fork reuses its parent's prompt cache and any agent can start or fork agents, at any depth.
- *   user   a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
+ * A seat is how far a conversation is trusted, stored in its agent and written only here.
+ *   agent    root and every copy of it: agents and forks. They have the same tools and prompt, so a fork reuses its
+ *            parent's prompt cache and any agent can start or fork agents, at any depth.
+ *   trigger  a trigger run. It reads outside data (webhook bodies, mail), so it cannot write notes, start agents, add
+ *            triggers or change profiles. It reaches the owner only with notify.
+ *   peer     another agent's requests over A2A. It works with the owner's apps and answers; nothing else.
+ *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
-export const SEATS = ["agent", "user"] as const;
+export const SEATS = ["agent", "trigger", "peer", "user"] as const;
 export type Seat = (typeof SEATS)[number];
 
 const ALL = SEATS;
 const AGENT: readonly Seat[] = ["agent"];
+const AGENT_TRIGGER: readonly Seat[] = ["agent", "trigger"];
+/** A user's thread never reaches the owner's apps: Executor approvals are accepted without asking. */
+const NOT_USER: readonly Seat[] = ["agent", "trigger", "peer"];
 
 /** The tools the model calls directly, and the seats that get each. Their `control` (handoff, terminate) works only on a model-issued call. */
 export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 	codemode: ALL,
-	notify: AGENT,
-	handoff: ALL,
+	notify: AGENT_TRIGGER,
+	handoff: ["agent", "user"],
 };
 
 /** Caps, in characters, on each seat's tool schemas and each prompt section. A description that grows past one fails the build. */
 export const BUDGET: { readonly tools: Readonly<Record<Seat, number>>; readonly sections: Readonly<Record<string, number>> } = {
-	tools: { agent: 3600, user: 3000 },
+	tools: { agent: 3600, trigger: 3000, peer: 2600, user: 3000 },
 	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000, codemode: 9000 },
 };
 
-/** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. A user's thread never reaches the owner's apps. */
+/** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. */
 export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readonly inline: boolean }>> = {
 	read: { seats: ALL, inline: true },
 	bash: { seats: ALL, inline: true },
 	edit: { seats: ALL, inline: true },
 	write: { seats: ALL, inline: true },
 	recall: { seats: ALL, inline: true },
-	history: { seats: AGENT, inline: false },
+	history: { seats: NOT_USER, inline: false },
 	note: { seats: AGENT, inline: true },
 	react: { seats: AGENT, inline: true },
 	web_search: { seats: ALL, inline: true },
 	web_fetch: { seats: ALL, inline: true },
 	llm: { seats: ALL, inline: true },
-	apps_search: { seats: AGENT, inline: true },
-	apps_call: { seats: AGENT, inline: true },
+	apps_search: { seats: NOT_USER, inline: true },
+	apps_call: { seats: NOT_USER, inline: true },
 	agent: { seats: AGENT, inline: true },
 	agent_start: { seats: AGENT, inline: false },
 	fork: { seats: AGENT, inline: true },
 	fork_start: { seats: AGENT, inline: false },
 	trigger_add: { seats: AGENT, inline: true },
-	trigger_list: { seats: AGENT, inline: true },
-	trigger_remove: { seats: AGENT, inline: false },
+	trigger_list: { seats: AGENT_TRIGGER, inline: true },
+	trigger_remove: { seats: AGENT_TRIGGER, inline: false },
 	web_map: { seats: ALL, inline: false },
 	classify: { seats: ALL, inline: false },
-	apps_skills: { seats: AGENT, inline: false },
+	apps_skills: { seats: NOT_USER, inline: false },
 	agent_send: { seats: AGENT, inline: false },
 	agent_stop: { seats: AGENT, inline: false },
 	agent_status: { seats: AGENT, inline: false },
@@ -75,14 +81,14 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	gif_search: { seats: ALL, inline: false },
 	gif_save: { seats: ALL, inline: false },
 	transcribe: { seats: ALL, inline: false },
-	proc_start: { seats: AGENT, inline: false },
-	proc_status: { seats: AGENT, inline: false },
-	proc_logs: { seats: AGENT, inline: false },
-	proc_stop: { seats: AGENT, inline: false },
-	a2a_list: { seats: AGENT, inline: false },
-	a2a_ask: { seats: AGENT, inline: false },
-	a2a_send: { seats: AGENT, inline: false },
-	a2a_status: { seats: AGENT, inline: false },
+	proc_start: { seats: AGENT_TRIGGER, inline: false },
+	proc_status: { seats: AGENT_TRIGGER, inline: false },
+	proc_logs: { seats: AGENT_TRIGGER, inline: false },
+	proc_stop: { seats: AGENT_TRIGGER, inline: false },
+	a2a_list: { seats: AGENT_TRIGGER, inline: false },
+	a2a_ask: { seats: AGENT_TRIGGER, inline: false },
+	a2a_send: { seats: AGENT_TRIGGER, inline: false },
+	a2a_status: { seats: AGENT_TRIGGER, inline: false },
 	profile_list: { seats: AGENT, inline: false },
 	profile_create: { seats: AGENT, inline: false },
 	profile_update: { seats: AGENT, inline: false },
@@ -182,13 +188,18 @@ export async function seatRoot(tx: Tx): Promise<boolean> {
 	return true;
 }
 
-/** The seats the agent seat replaced. A conversation that still names one moves to the agent seat. */
-const RETIRED_SEATS = new Set(["seat-owner", "seat-run", "seat-worker"]);
-
+/**
+ * The seats retired on 2026-10-14, and where each conversation goes. A task-owned one is an agent's child, so it
+ * becomes a copy of root. An ownerless `run` is a trigger run; an ownerless `worker` is an A2A context or the line.
+ */
 export async function reseat(tx: Tx, id: ConversationId): Promise<boolean> {
 	const agent = await tx.doc(AgentDoc, id);
-	if (!Array.isArray(agent.extensions) || !agent.extensions.some((name) => RETIRED_SEATS.has(name))) return false;
-	agent.extensions = selection("agent");
+	if (!Array.isArray(agent.extensions)) return false;
+	const old = agent.extensions.find((name) => name === "seat-owner" || name === "seat-run" || name === "seat-worker");
+	if (old === undefined) return false;
+	const owned = (await tx.conversation(id))?.owner !== undefined;
+	const seat: Seat = old === "seat-owner" || owned ? "agent" : old === "seat-run" ? "trigger" : "peer";
+	agent.extensions = selection(seat);
 	return true;
 }
 

@@ -91,7 +91,7 @@ test("commands dedupe across reopen and a crash after execution before opening t
 test("/stop aborts root background work, not ownerless triggers or line tasks", async () => {
 	const mochi = await open(await temp());
 	try {
-		const trigger = { id: await mochi.harness.commit((tx) => createSeatConversation(tx, "agent", { kind: "ownerless" }), context) };
+		const trigger = { id: await mochi.harness.commit((tx) => createSeatConversation(tx, "trigger", { kind: "ownerless" }), context) };
 		const ids = await mochi.harness.commit(async (tx) => ({
 			root: await tx.createTask(Sleeper, null, { ownership: { kind: "conversation" }, conversationId: mochi.root.id, background: true }),
 			trigger: await tx.createTask(Sleeper, null, { ownership: { kind: "conversation" }, conversationId: trigger.id, background: true }),

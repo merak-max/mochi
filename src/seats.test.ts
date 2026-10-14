@@ -8,7 +8,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { measureSurface } from "../eval/surface.ts";
-import { BUDGET, createSeatConversation, FORBIDDEN_TOOL_NAME, SEATS, seatExtensions, selection } from "./seats.ts";
+import { BUDGET, createSeatConversation, FORBIDDEN_TOOL_NAME, LIBRARY, SEATS, seatExtensions, selection } from "./seats.ts";
 import { FAUX, newFaux, openTestMochi, tempDir } from "./test-support.ts";
 
 test("each seat's request carries its tools within BUDGET; every agent conversation offers root's exact tools and prompt, and a user has no owner notes", async () => {
@@ -25,8 +25,12 @@ test("each seat's request carries its tools within BUDGET; every agent conversat
 	const seen = Object.fromEntries(surfaces.map(([seat, { tools }]) => [seat, tools.map((tool) => tool.name)]));
 	assert.deepEqual(seen, {
 		agent: ["notify", "handoff", "codemode"],
+		trigger: ["notify", "codemode"],
+		peer: ["codemode"],
 		user: ["handoff", "codemode"],
 	});
+	const outsideReach = Object.entries(LIBRARY).filter(([, { seats }]) => seats.includes("trigger") || seats.includes("peer")).map(([name]) => name);
+	for (const name of ["note", "react", "agent", "agent_start", "fork", "fork_start", "trigger_add", "profile_create", "profile_update"]) assert.ok(!outsideReach.includes(name), `${name} reaches outside data`);
 	const userSections = surfaces.find(([seat]) => seat === "user")![1].sections.map((section) => section.name);
 	assert.deepEqual(userSections.filter((name) => name === "owner" || name === "notes-index"), []);
 	assert.deepEqual(Object.values(seen).flat().filter((name) => FORBIDDEN_TOOL_NAME.test(name)), []);
@@ -61,19 +65,25 @@ test("a root created before seats gets the agent seat at boot and keeps its thin
 	assert.deepEqual(again, []);
 });
 
-test("conversations on the retired owner, run and worker seats move to the agent seat once", async () => {
+test("conversations on the retired seats keep their trust: an agent's child becomes agent, a trigger run trigger, an A2A context peer", async () => {
 	const dir = await tempDir();
 	const first = await openTestMochi(dir, newFaux());
-	const run = await first.harness.commit(async (tx) => {
-		const id = await createSeatConversation(tx, "agent", { kind: "ownerless" });
-		(await tx.doc(AgentDoc, id)).extensions = ["identity", "notes", "skills", "fast-compaction", "seat-run"];
-		return id;
+	const old = (seat: string) => ["identity", "notes", "skills", "fast-compaction", seat];
+	const [run, a2a] = await first.harness.commit(async (tx) => {
+		const ids = [];
+		for (const seat of ["seat-run", "seat-worker"]) {
+			const id = await createSeatConversation(tx, "agent", { kind: "ownerless" });
+			(await tx.doc(AgentDoc, id)).extensions = old(seat);
+			ids.push(id);
+		}
+		return ids;
 	}, context);
 	await first.close();
 	const logs: unknown[] = [];
 	const mochi = await openTestMochi(dir, newFaux(), new Map(), undefined, [], { log: (event, fields) => logs.push({ event, ...fields }) });
-	assert.deepEqual(logs, [{ event: "upgrade", unit: "U11", name: "one-agent-seat", changed: 1 }]);
-	assert.deepEqual((await mochi.harness.snapshot(AgentDoc, run, context))?.extensions, selection("agent"));
+	assert.deepEqual(logs, [{ event: "upgrade", unit: "U11", name: "one-agent-seat", changed: 2 }]);
+	assert.deepEqual((await mochi.harness.snapshot(AgentDoc, run!, context))?.extensions, selection("trigger"));
+	assert.deepEqual((await mochi.harness.snapshot(AgentDoc, a2a!, context))?.extensions, selection("peer"));
 	await mochi.close();
 });
 

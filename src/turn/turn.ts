@@ -200,7 +200,7 @@ export async function ensureUser(tx: Tx, user: ChatUser): Promise<ConversationId
 export async function ensureLine(harness: Harness, context: Context): Promise<ConversationId> {
 	return harness.commit(async (tx) => {
 		const line = await tx.doc(LineDoc);
-		if (line.conversation === null) line.conversation = await createSeatConversation(tx, "user", { kind: "ownerless" });
+		if (line.conversation === null) line.conversation = await createSeatConversation(tx, "peer", { kind: "ownerless" });
 		return line.conversation;
 	}, context);
 }

@@ -263,7 +263,7 @@ test("the upgrade turns each live mochi.triggers item into a task with its origi
 	const open = (logs: unknown[]) => openTestMochi(dir, newFaux(), undefined, undefined, [], { scheduling: "local", log: (event, fields) => logs.push({ event, ...fields }) });
 	let mochi = await open([]);
 	const old = await mochi.harness.commit(async (tx) => {
-		const conversationId = await createSeatConversation(tx, "agent", { kind: "ownerless" });
+		const conversationId = await createSeatConversation(tx, "trigger", { kind: "ownerless" });
 		(await tx.doc(TriggersDoc, ROOT_CONVERSATION_ID)).items = {
 			daily: { trigger: DAILY, origin: "model", conversationId, last: { result: "silent" } },
 			news: { trigger: { ...DAILY, id: "news" }, origin: "config", conversationId: null, last: null },

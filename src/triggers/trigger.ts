@@ -211,7 +211,7 @@ export async function addTrigger(
 	const reused = conversation ?? previous?.conversationId;
 	// The definition owns the run's model and role: a re-added trigger applies them to the conversation it keeps.
 	if (reused !== undefined) await configure(tx, reused, { ...agent, instructions });
-	const conversationId = reused ?? (await createSeatConversation(tx, "agent", { kind: "ownerless" }, { instructions, ...agent }));
+	const conversationId = reused ?? (await createSeatConversation(tx, "trigger", { kind: "ownerless" }, { instructions, ...agent }));
 	const id = await tx.createTask(task, input, { ownership: { kind: "conversation" }, conversationId, background: true });
 	return { id, replaced: previous !== undefined && live(previous) ? previous.id : undefined };
 }
