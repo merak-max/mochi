@@ -14,8 +14,6 @@ import {
 	DeliveryError,
 	type Env,
 	type Inbound,
-	type Reaction,
-	REACTIONS,
 	type ReplyTarget,
 	SendRejected,
 	SendUnknown,
@@ -32,11 +30,9 @@ export const IMESSAGE_PROFILE: ChannelProfile = {
 	maxBubbles: 3,
 	maxBubbleChars: 400,
 	paragraphsAreBubbles: true,
-	reactions: REACTIONS,
 	typingMaxMs: 90_000,
 };
 
-const TAPBACKS: Readonly<Record<Reaction, string>> = { love: "❤️", like: "👍", dislike: "👎", laugh: "😂", emphasize: "‼️", question: "❓" };
 const TAPBACK_TEXT_CHARS = 80;
 
 export interface ReactionHandle {
@@ -371,7 +367,7 @@ function iMessageChannel(credentials: { readonly projectId: string; readonly pro
 			const target = recent.get(messageId) ?? (await (await space()).getMessage(messageId));
 			if (!target) throw new Error(`iMessage message ${messageId} not found`);
 			await previous?.unsend();
-			const handle = await target.react(TAPBACKS[reaction]);
+			const handle = await target.react(reaction);
 			if (handle) reactions.set(messageId, handle);
 			else reactions.delete(messageId);
 		},

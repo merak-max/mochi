@@ -139,10 +139,10 @@ test("steers into one run on two channels send the answer once per channel", asy
 	const answer = gated(fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.recall({ query: "thing" });` }), { stopReason: "toolUse" }));
 	const faux = newFaux();
 	faux.setResponses([answer.respond, fauxAssistantMessage("Both done.")]);
-	const telegram = recordingChannel("telegram");
+	const imessageChannel = recordingChannel("imessage");
 	const whatsapp = recordingChannel("whatsapp");
-	const mochi = await openTestMochi(await tempDir(), faux, new Map<ChatChannelId, Channel>([["telegram", telegram.channel], ["whatsapp", whatsapp.channel]]));
-	await ingest(mochi.line, message("telegram", "t1", "do the thing"), context);
+	const mochi = await openTestMochi(await tempDir(), faux, new Map<ChatChannelId, Channel>([["imessage", imessageChannel.channel], ["whatsapp", whatsapp.channel]]));
+	await ingest(mochi.line, message("imessage", "t1", "do the thing"), context);
 	await answer.entered;
 	await ingest(mochi.line, message("whatsapp", "w1", "and this"), context);
 	answer.release();
@@ -150,7 +150,7 @@ test("steers into one run on two channels send the answer once per channel", asy
 
 	const steer = await mochi.harness.commit((tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, "whatsapp:w1"), context);
 	assert.equal(steer?.status, "done");
-	assert.deepEqual(telegram.sent, ["Both done."]);
+	assert.deepEqual(imessageChannel.sent, ["Both done."]);
 	assert.deepEqual(whatsapp.sent, ["Both done."]);
 	assert.deepEqual(await turnResults(mochi), ["sent", "sent"]);
 	await mochi.close();
@@ -269,8 +269,8 @@ test("an absent channel, then a down one, delivers after it connects with no rep
 	const sent: string[] = [];
 	let downs = 2;
 	let unknowns = 1;
-	const telegram: Channel = {
-		...recordingChannel("telegram").channel,
+	const imessageChannel: Channel = {
+		...recordingChannel("imessage").channel,
 		send: async (bubble) => {
 			if (downs-- > 0) throw new ChannelDown("reconnecting");
 			if (unknowns-- > 0) {
@@ -283,10 +283,10 @@ test("an absent channel, then a down one, delivers after it connects with no rep
 	const channels = new Map<ChatChannelId, Channel>();
 	const logs: string[] = [];
 	const mochi = await openTestMochi(await tempDir(), faux, channels, undefined, [], { retry: FAST_RETRY, log: (event) => logs.push(event) });
-	await ingest(mochi.line, message("telegram", "t1"), context);
-	await (await mochi.harness.submission((await mochi.harness.commit((tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, "telegram:t1"), context))!.id, context))!.wait(context);
+	await ingest(mochi.line, message("imessage", "t1"), context);
+	await (await mochi.harness.submission((await mochi.harness.commit((tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, "imessage:t1"), context))!.id, context))!.wait(context);
 	await new Promise((resolve) => setTimeout(resolve, 30));
-	channels.set("telegram", telegram);
+	channels.set("imessage", imessageChannel);
 	await turnsSettled(mochi.harness);
 	assert.deepEqual(sent, ["maybe:Back online now.", "Back online now."]);
 	assert.ok(logs.includes("turn.send_unknown"));
@@ -389,38 +389,38 @@ test("a local process leaves a pending Turn waiting, and the next daemon start d
 	const dir = await tempDir();
 	const faux = newFaux();
 	const local = await openTestMochi(dir, faux, new Map(), undefined, [], { scheduling: "local" });
-	await local.harness.commit((tx) => openTurn(tx, local.line, { source: "run", channel: "telegram", text: "Your parcel arrived.", from: { kind: "trigger", id: "parcel" } }), context);
+	await local.harness.commit((tx) => openTurn(tx, local.line, { source: "run", channel: "imessage", text: "Your parcel arrived.", from: { kind: "trigger", id: "parcel" } }), context);
 	local.harness.resume();
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	assert.deepEqual(await turnResults(local), ["pending"]);
 	await local.close();
 
-	const telegram = recordingChannel("telegram");
-	const daemon = await openTestMochi(dir, faux, new Map([["telegram", telegram.channel]]));
+	const imessageChannel = recordingChannel("imessage");
+	const daemon = await openTestMochi(dir, faux, new Map([["imessage", imessageChannel.channel]]));
 	daemon.harness.resume();
 	await turnsSettled(daemon.harness);
-	assert.deepEqual(telegram.sent, ["Your parcel arrived."]);
+	assert.deepEqual(imessageChannel.sent, ["Your parcel arrived."]);
 	assert.equal((await notifyRecords(daemon)).length, 1);
 	await daemon.close();
 });
 
 test("react defaults to the owner's newest message, takes an explicit id, and fails clearly without reactions", async () => {
-	const telegram = recordingChannel("telegram");
+	const imessageChannel = recordingChannel("imessage");
 	const whatsapp = recordingChannel("whatsapp", { react: false });
 	const react = (args: Record<string, string>, id: string) => fauxAssistantMessage(fauxToolCall("codemode", { code: `return await tools.react(${JSON.stringify(args)});` }, { id }), { stopReason: "toolUse" });
 	const faux = newFaux();
-	faux.setResponses([react({ reaction: "like" }, "r1"), fauxAssistantMessage(""), react({ reaction: "none", messageId: "m1" }, "r2"), fauxAssistantMessage(""), react({ reaction: "like" }, "r3"), fauxAssistantMessage("ok")]);
-	const mochi = await openTestMochi(await tempDir(), faux, new Map<ChatChannelId, Channel>([["telegram", telegram.channel], ["whatsapp", whatsapp.channel]]));
-	for (const [channel, id] of [["telegram", "m1"], ["telegram", "m2"], ["whatsapp", "c1"]] as const) {
+	faux.setResponses([react({ reaction: "🫡" }, "r1"), fauxAssistantMessage(""), react({ reaction: "none", messageId: "m1" }, "r2"), fauxAssistantMessage(""), react({ reaction: "🫡" }, "r3"), fauxAssistantMessage("ok")]);
+	const mochi = await openTestMochi(await tempDir(), faux, new Map<ChatChannelId, Channel>([["imessage", imessageChannel.channel], ["whatsapp", whatsapp.channel]]));
+	for (const [channel, id] of [["imessage", "m1"], ["imessage", "m2"], ["whatsapp", "c1"]] as const) {
 		await ingest(mochi.line, message(channel, id), context);
 		await turnsSettled(mochi.harness);
 	}
 
-	assert.deepEqual(telegram.reactions, [
-		{ messageId: "m1", reaction: "like" },
+	assert.deepEqual(imessageChannel.reactions, [
+		{ messageId: "m1", reaction: "🫡" },
 		{ messageId: "m1", reaction: "none" },
 	]);
-	assert.deepEqual(telegram.sent, [], "an empty answer after a reaction sends nothing");
+	assert.deepEqual(imessageChannel.sent, [], "an empty answer after a reaction sends nothing");
 	const results = (await mochi.root.entries({}, 100, undefined, context)).items
 		.filter((entry) => ToolResultEntry.is(entry))
 		.flatMap((entry) => entry.model ?? [])

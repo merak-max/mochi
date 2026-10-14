@@ -250,7 +250,7 @@ describe("whatsapp outbound", () => {
 	it("sends a typed reaction, and none to remove it", async () => {
 		const graph = fakeGraph();
 		const wa = channel(graph);
-		await wa.react?.("wamid.IMAGE1", "like");
+		await wa.react?.("wamid.IMAGE1", "👍");
 		await wa.react?.("wamid.IMAGE1", "none");
 		assert.deepEqual(
 			graph.calls.map((c) => c.body),

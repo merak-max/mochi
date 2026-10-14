@@ -8,7 +8,6 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { openMochi } from "./mochi.ts";
 import { createClassify } from "./brain/classifier.ts";
 import { createIMessageChannel } from "./channels/imessage.ts";
-import { createTelegramChannel } from "./channels/telegram.ts";
 import { createWhatsAppChannel } from "./channels/whatsapp.ts";
 import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./channels/types.ts";
 import { type Config, type ChatUser, loadConfig } from "./config.ts";
@@ -33,7 +32,6 @@ import { runFeed } from "./memory/feed.ts";
 /** Only iMessage serves users; the other adapters stay owner-only. */
 const ADAPTERS: Readonly<Record<ChatChannelId, (env: Env, users: readonly ChatUser[]) => Setup<Channel>>> = {
 	imessage: (env, users) => createIMessageChannel(env, { users: users.map((user) => user.handle) }),
-	telegram: (env) => createTelegramChannel(env),
 	whatsapp: (env) => createWhatsAppChannel(env),
 };
 

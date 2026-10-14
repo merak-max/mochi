@@ -1,8 +1,8 @@
+import { WHATSAPP_PROFILE } from "./whatsapp.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { IMESSAGE_PROFILE } from "./imessage.ts";
 import { present } from "./present.ts";
-import { TELEGRAM_PROFILE } from "./telegram.ts";
 
 const texts = (text: string) => present(text, IMESSAGE_PROFILE).map((bubble) => (bubble.kind === "text" ? bubble.text : bubble.kind === "link" ? `<${bubble.url}>` : bubble.name));
 
@@ -47,5 +47,5 @@ test("short fragments merge into a neighbour and a long paragraph splits at a se
 });
 
 test("a channel without paragraph bubbles sends one bubble", () => {
-	assert.deepEqual(present("One.\n\nTwo paragraphs here.", TELEGRAM_PROFILE), [{ kind: "text", text: "One.\n\nTwo paragraphs here." }]);
+	assert.deepEqual(present("One.\n\nTwo paragraphs here.", WHATSAPP_PROFILE), [{ kind: "text", text: "One.\n\nTwo paragraphs here." }]);
 });

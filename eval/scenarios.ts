@@ -142,7 +142,7 @@ export const SCENARIOS: readonly Scenario[] = [
 		id: "dropped-thread",
 		at: "2026-10-06 09:05",
 		situation: "A week ago Sam said he'd email the landlord about the deposit. He never did. Today he asks what he's dropped.",
-		channel: "telegram",
+		channel: "imessage",
 				history: [
 			{
 				ago: "8d",

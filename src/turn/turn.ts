@@ -32,7 +32,6 @@ import {
 	type ChatChannelId,
 	DeliveryError,
 	type Inbound,
-	REACTIONS,
 	type ReplyTarget,
 	SendRejected,
 	SendUnknown,
@@ -565,10 +564,10 @@ export function reactTool(channels: Channels): ToolRegistration {
 	return defineTool({
 				name: "react",
 				description:
-					"React to an owner message with a tapback. none removes it. messageId is the id= in the message tag; the default is the owner's newest message. " +
+					"React to an owner message with any one emoji, or none to remove it. messageId is the id= in the message tag; the default is the owner's newest message. " +
 					"Use it to acknowledge a long job, or when a reaction says everything.",
 				parameters: Type.Object({
-					reaction: Type.Union([...REACTIONS, "none"].map((reaction) => Type.Literal(reaction))),
+					reaction: Type.String({ minLength: 1, maxLength: 16 }),
 					messageId: Type.Optional(Type.String({ minLength: 1 })),
 				}),
 				replay: "safe",

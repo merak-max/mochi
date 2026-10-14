@@ -94,7 +94,7 @@ describe("imessage message mapping", () => {
 });
 
 describe("imessage adapter", () => {
-	it("delivers only owner messages, then sends bubbles, types and reacts with typed tapbacks in the owner's space", async () => {
+	it("delivers only owner messages, then sends bubbles, types and reacts with any emoji in the owner's space", async () => {
 		const log = fx.events();
 		const ownerSpace = fx.space(log, fx.OWNER_DM);
 		const fake = fx.app(ownerSpace, [
@@ -119,8 +119,8 @@ describe("imessage adapter", () => {
 		await channel.send({ kind: "file", name: "plan.pdf", mimeType: "application/pdf", bytes: new Uint8Array([1]) });
 		await channel.typing(true);
 		await channel.typing(false);
-		await channel.react?.("GUID-OWNER", "laugh");
-		await channel.react?.("GUID-OWNER", "love");
+		await channel.react?.("GUID-OWNER", "😂");
+		await channel.react?.("GUID-OWNER", "🫶");
 		await channel.react?.("GUID-OWNER", "none");
 		assert.deepEqual(log.sent, [
 			{ space: fx.OWNER_DM, text: "a".repeat(4000) },
@@ -131,9 +131,9 @@ describe("imessage adapter", () => {
 		assert.deepEqual(log.typing, [`${fx.OWNER_DM}:on`, `${fx.OWNER_DM}:off`]);
 		assert.deepEqual(log.reacted, [
 			{ id: "GUID-OWNER", emoji: "😂" },
-			{ id: "GUID-OWNER", emoji: "❤️" },
+			{ id: "GUID-OWNER", emoji: "🫶" },
 		]);
-		assert.deepEqual(log.unsent, ["GUID-OWNER:😂", "GUID-OWNER:❤️"]);
+		assert.deepEqual(log.unsent, ["GUID-OWNER:😂", "GUID-OWNER:🫶"]);
 
 		controller.abort();
 		await running;
@@ -172,10 +172,10 @@ describe("imessage adapter", () => {
 		const running = channel.run(async () => {}, controller.signal);
 		await new Promise((resolve) => setImmediate(resolve));
 		await channel.send({ kind: "text", text: "morning" });
-		await channel.react?.("GUID-OLD", "like");
+		await channel.react?.("GUID-OLD", "👍");
 		assert.deepEqual(log.sent, [{ space: fx.OWNER_DM, text: "morning" }]);
 		assert.deepEqual(log.reacted, [{ id: "GUID-OLD", emoji: "👍" }]);
-		await assert.rejects(channel.react?.("GUID-MISSING", "like") ?? Promise.resolve(), /not found/);
+		await assert.rejects(channel.react?.("GUID-MISSING", "👍") ?? Promise.resolve(), /not found/);
 		controller.abort();
 		await running;
 	});

@@ -16,8 +16,6 @@ import {
 	DeliveryError,
 	type Env,
 	type InboundSink,
-	type Reaction,
-	REACTIONS,
 	SendRejected,
 	SendUnknown,
 } from "./types.ts";
@@ -32,11 +30,9 @@ export const WHATSAPP_PROFILE: ChannelProfile = {
 	maxBubbles: 3,
 	maxBubbleChars: TEXT_LIMIT,
 	paragraphsAreBubbles: false,
-	reactions: REACTIONS,
 	typingMaxMs: 90_000,
 };
 
-const WHATSAPP_REACTIONS: Readonly<Record<Reaction, string>> = { love: "❤️", like: "👍", dislike: "👎", laugh: "😂", emphasize: "‼️", question: "❓" };
 const MAX_BODY_BYTES = 1_000_000;
 const DEFAULT_PORT = 8787;
 
@@ -318,7 +314,7 @@ function whatsAppChannel(config: WhatsAppConfig, deps: WhatsAppDeps): Channel {
 		},
 
 		async react(messageId, reaction) {
-			await postMessage({ type: "reaction", reaction: { message_id: messageId, emoji: reaction === "none" ? "" : WHATSAPP_REACTIONS[reaction] } });
+			await postMessage({ type: "reaction", reaction: { message_id: messageId, emoji: reaction === "none" ? "" : reaction } });
 		},
 	};
 }

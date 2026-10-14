@@ -1,6 +1,6 @@
 # mochi
 
-A personal agent that runs all day on your own machine. You text it on iMessage, Telegram or WhatsApp, and it does the work: email, calendar, the web, files, code, errands. It stays quiet until something needs you.
+A personal agent that runs all day on your own machine. You text it on iMessage or WhatsApp, and it does the work: email, calendar, the web, files, code, errands. It stays quiet until something needs you.
 
 mochi is built on [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable), the durable runtime under [pi](https://github.com/earendil-works/pi). Every reply, routine, agent and fork is a durable task, so a crash or a restart never loses work or sends a message twice.
 

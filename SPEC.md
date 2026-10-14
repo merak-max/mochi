@@ -1,6 +1,6 @@
 # Mochi spec, v0
 
-Mochi is a personal agent that runs all day on this EC2 box. The owner messages it on WhatsApp, iMessage or Telegram, or from a terminal. It answers with Claude Opus 5.5, uses the owner's Executor apps as tools, keeps typed notes in a pi-durable document, searches past chats, runs shell commands and file edits in its work directory, and starts subagents. Crash recovery and message queueing come from `@earendil-works/pi-durable`.
+Mochi is a personal agent that runs all day on this EC2 box. The owner messages it on iMessage or WhatsApp, or from a terminal. It answers with Claude Opus 5.5, uses the owner's Executor apps as tools, keeps typed notes in a pi-durable document, searches past chats, runs shell commands and file edits in its work directory, and starts subagents. Crash recovery and message queueing come from `@earendil-works/pi-durable`.
 
 Voice calls, the browser takeover link, and named persistent bots are out of scope for v0 and listed under [Later](#later).
 
@@ -112,7 +112,6 @@ src/
   channels/
     types.ts           Channel, ChannelProfile, Inbound, Bubble, Reaction, DeliveryError classes, channelSetup
     present.ts         reply text to bubbles, pure
-    telegram.ts        grammY, long polling, TELEGRAM_PROFILE
     whatsapp.ts        WhatsApp Cloud API webhook and send, media upload, WHATSAPP_PROFILE
     imessage.ts        Photon spectrum-ts, IMESSAGE_PROFILE, catch-up and the probe-only judge
   turn/
@@ -133,7 +132,7 @@ The bundled `CodingTools` extension (bash, read, edit, write) comes from `@earen
 
 ```ts
 // channels/types.ts
-export type ChatChannelId = "imessage" | "telegram" | "whatsapp";
+export type ChatChannelId = "imessage" | "whatsapp";
 export type ChannelId = ChatChannelId | "cli";   // cli is a view: terminals render the transcript, nothing is delivered
 
 export interface ChannelProfile {                // the one source for present(), typing, tapbacks and the channels line
@@ -174,7 +173,7 @@ export interface Channel {
 }
 ```
 
-`present(text, profile)` (`channels/present.ts`) is pure. Blank text, meaning only whitespace and U+200B, U+FEFF and U+2060, gives no bubbles, so silence sends nothing; U+200D and U+200C are content and survive. On iMessage each blank-line paragraph is a bubble, a line that is only a URL is a link bubble, text under 12 characters merges into its neighbour, and a reply has at most three bubbles. Telegram and WhatsApp send one bubble per reply. Each adapter maps every platform error to one `DeliveryError` class: an unreachable service, 429 and auth failures are `ChannelDown`; a timeout or a 5xx is `SendUnknown`; any other refusal is `SendRejected`. The Turn sleeps to a stored retry time on `ChannelDown` (5 s doubling to 5 min; a channel absent from this process counts as down) and gives up after an hour of back-off with one `turn.undelivered` log line; it retries a `SendUnknown` once, accepting a possible duplicate; it skips a `SendRejected` bubble; any other throw faults the Turn and is logged with the answer.
+`present(text, profile)` (`channels/present.ts`) is pure. Blank text, meaning only whitespace and U+200B, U+FEFF and U+2060, gives no bubbles, so silence sends nothing; U+200D and U+200C are content and survive. On iMessage each blank-line paragraph is a bubble, a line that is only a URL is a link bubble, text under 12 characters merges into its neighbour, and a reply has at most three bubbles. WhatsApp sends one bubble per reply. Each adapter maps every platform error to one `DeliveryError` class: an unreachable service, 429 and auth failures are `ChannelDown`; a timeout or a 5xx is `SendUnknown`; any other refusal is `SendRejected`. The Turn sleeps to a stored retry time on `ChannelDown` (5 s doubling to 5 min; a channel absent from this process counts as down) and gives up after an hour of back-off with one `turn.undelivered` log line; it retries a `SendUnknown` once, accepting a possible duplicate; it skips a `SendRejected` bubble; any other throw faults the Turn and is logged with the answer.
 
 On iMessage, a threaded reply carries `replyTo`. The model input gets one line after the tag: `[replying to your message id=<id>] <text>` when mochi sent the target, else `their message`. The text is a short quote, clipped to 80 characters, so the model can find the target without a second copy of it. When the target text is not available, the line says `(text not available; use recall)`. The first text bubble of the answer is then a threaded reply to the inbound message. iMessage emits tapbacks for reactions from the owner or a user. A tapback is a passive write to the reactor's conversation: `[context, no reply needed: user2 reacted 👍 to your message id=<id>: "<text>"]`. The adapter sends a read receipt for each message it accepts.
 
@@ -356,7 +355,6 @@ Environment variables. Names only here; values live in the owner's shell secrets
 - `BIFROST_VIRTUAL_KEY`
 - `OPENROUTER_API_KEY` (classifier; optional)
 - `FIRECRAWL_API_KEY` (web tools; optional)
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`
 - `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_OWNER`
 - `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET`, `IMESSAGE_OWNER`
 - `MOCHI_DATA_DIR` (default `./data`)
@@ -483,3 +481,4 @@ The sweep, `mochi.board-sweep`, is one background task of root. Every 60 s it re
 | 2026-10-14 | Reflect replaces nightly Dreaming. Before settle compacts root, a fork of root saves notes with `note`. `dream.ts`, its tests, its crash fixture and `eval/dream-dry.ts` are deleted (about 600 lines). | A 04:30 review by a tool-less reader of transcripts is a sleep cycle. An agent can review when the context is about to be lost, from inside that context, at cache-read price, through the same `note` checks every other write uses. Measured live through Bifrost on Opus 5.5 (`reflect-live.ts`, fresh store, two owner turns, clock moved past the settle time): the fork read 6,369 cached tokens and wrote 428. Root had already saved both facts with `note` mid-chat, and the fork answered "Nothing new" without duplicating them, so reflect is a backstop, not the main path. A copy of the live store upgraded with `retire-dreaming` changed 2 and a second boot changed 0. |
 | 2026-10-14 | `persona.md` becomes `instructions.md`, and profile tools take `instructions`. A home renames an old `persona.md` once at start (`adoptInstructions`), and so does `profile_list` and `profile_update` for a profile home. A profile is described as an address (home, channels, instructions), not a person. | Owner direction to drop human framing. The file always held root's instructions; a persona is a costume. A guest user's `persona` in `[[users]]` stays: it describes a real person. |
 | 2026-10-14 | The board. A small internal task list replaces `once` triggers for promises, with one sweep on root that wakes a fork of root for each due task. | Measured on the live store (Oct 6 to 14): of 23 real commitments root made, 10 had nothing behind them, and the traced ones died at compaction. Hermes's kanban (a dispatcher tick with no model cost, one assignee per card, claim TTLs, a failure breaker) informed the no-model sweep and the re-wake cap; its 15 tools and worker subprocesses were left out. Notion stays an app the owner can ask for. Live through Bifrost on Opus 5.5: "remind me in 1 minute to stretch" over WhatsApp became board task #1 with the right due; the sweep forked root at the due time; the fork sent "Time to stretch" and closed the task. Before the identity line was added, Opus used a `once` trigger instead. |
+| 2026-10-14 | Telegram is removed, and `react` takes any one emoji. iMessage through Spectrum is the main channel; WhatsApp stays. The `Reaction` enum, `REACTIONS`, the per-channel emoji tables and `ChannelProfile.reactions` are gone; Spectrum's `message.react(string)` and WhatsApp's reaction API both take any emoji. | Owner request: Telegram is unused, and a fixed list of six reactions was a leftover of iMessage's old tapbacks. iMessage has accepted any emoji tapback since iOS 18. |

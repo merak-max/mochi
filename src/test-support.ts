@@ -12,7 +12,6 @@ import type { Apps } from "./apps/apps.ts";
 import type { Classified, Classify } from "./brain/classifier.ts";
 import { type Mochi, openMochi } from "./mochi.ts";
 import { IMESSAGE_PROFILE } from "./channels/imessage.ts";
-import { TELEGRAM_PROFILE } from "./channels/telegram.ts";
 import type { Channel, ChannelProfile, Channels, ChatChannelId, Reaction } from "./channels/types.ts";
 import { WHATSAPP_PROFILE } from "./channels/whatsapp.ts";
 import { SearchIndex } from "./index/fts.ts";
@@ -123,7 +122,7 @@ export function newFaux(): FauxProviderHandle {
 	return fauxProvider();
 }
 
-export const PROFILES: Readonly<Record<ChatChannelId, ChannelProfile>> = { imessage: IMESSAGE_PROFILE, telegram: TELEGRAM_PROFILE, whatsapp: WHATSAPP_PROFILE };
+export const PROFILES: Readonly<Record<ChatChannelId, ChannelProfile>> = { imessage: IMESSAGE_PROFILE, whatsapp: WHATSAPP_PROFILE };
 
 /** A channel that records each bubble it sends (a link as its URL, a file as its name), each reaction, and each user's bubbles by handle. */
 export function recordingChannel(id: ChatChannelId, options: { react: boolean } = { react: true }) {
@@ -131,7 +130,7 @@ export function recordingChannel(id: ChatChannelId, options: { react: boolean } 
 	const sentTo: { person: string | undefined; text: string }[] = [];
 	const reactions: { messageId: string; reaction: Reaction | "none" }[] = [];
 	const channel: Channel = {
-		profile: options.react ? PROFILES[id] : { ...PROFILES[id], reactions: [] },
+		profile: PROFILES[id],
 		run: async (_sink, signal) => {
 			await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
 		},

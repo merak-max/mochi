@@ -1,6 +1,6 @@
 import { broken, off, ready, type Setup } from "../setup.ts";
 
-export type ChatChannelId = "imessage" | "telegram" | "whatsapp";
+export type ChatChannelId = "imessage" | "whatsapp";
 /** `cli` is a view, not a line: attached terminals render replies from the transcript, and nothing is delivered to it. */
 export type ChannelId = ChatChannelId | "cli";
 
@@ -18,15 +18,12 @@ export interface ChannelProfile {
 	readonly maxBubbleChars: number;
 	/** Blank-line-separated paragraphs become separate messages. */
 	readonly paragraphsAreBubbles: boolean;
-	/** Reactions this platform can show. Empty: the channel has no `react`. */
-	readonly reactions: readonly Reaction[];
 	/** The typing indicator stops after this long, so a long job is silent instead of "typing" for minutes. */
 	readonly typingMaxMs: number;
 }
 
-/** The six iMessage tapbacks, the common set every channel maps to its own reaction. */
-export const REACTIONS = ["love", "like", "dislike", "laugh", "emphasize", "question"] as const;
-export type Reaction = (typeof REACTIONS)[number];
+/** One emoji, as the model picks it: "👍", "😂", "🫡". */
+export type Reaction = string;
 
 export interface Attachment {
 	readonly kind: "image" | "audio" | "file";

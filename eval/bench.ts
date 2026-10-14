@@ -46,7 +46,7 @@ const SCENARIOS: Scenario[] = [
 	{ name: "bash echo", tool: "bash", args: { command: "echo hi" }, expect: /hi/ },
 	{ name: "note", tool: "note", args: { slug: "dentist", kind: "user", subject: "Dentist", body: "Dr. Rao, Tuesdays." }, expect: /Saved note/ },
 	{ name: "recall 10k docs", tool: "recall", args: { query: "dentist lease" }, expect: /entry/, setup: seedIndex },
-	{ name: "react", tool: "react", args: { reaction: "like" }, expect: /Reacted/, setup: async (m) => void (await m.harness.commit(async (tx) => void ((await tx.doc(LastInboundDoc)).last = { channel: "telegram", messageId: "m1" }), context)) },
+	{ name: "react", tool: "react", args: { reaction: "👍" }, expect: /Reacted/, setup: async (m) => void (await m.harness.commit(async (tx) => void ((await tx.doc(LastInboundDoc)).last = { channel: "imessage", messageId: "m1" }), context)) },
 	{ name: "notify (trigger seat)", tool: "notify", args: { text: "build broke" }, expect: /Queued/, seat: "trigger" },
 	{ name: "code return 1", tool: "code", args: { code: "return 1;" }, expect: /completed[\s\S]*1/ },
 	{ name: "code 1 nested call", tool: "code", args: { code: `return (await tools.apps_search({ query: "q" })).items.length;` }, expect: /completed\.\n1/ },
@@ -59,9 +59,9 @@ interface Sample { readonly open: number; readonly turn: number; readonly tool: 
 async function sample(s: Scenario): Promise<Sample> {
 	const dir = await tempDir();
 	const faux: FauxProviderHandle = newFaux();
-	const { channel } = recordingChannel("telegram");
+	const { channel } = recordingChannel("imessage");
 	const t0 = performance.now();
-	const mochi = await openTestMochi(dir, faux, new Map([["telegram", channel]]), undefined, [], { apps });
+	const mochi = await openTestMochi(dir, faux, new Map([["imessage", channel]]), undefined, [], { apps });
 	const opened = performance.now();
 	await s.setup?.(mochi, dir);
 	let called = 0;

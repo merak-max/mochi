@@ -23,11 +23,10 @@ test("each outside service reports one readiness line naming its fix", () => {
 });
 
 test("each adapter reports one readiness line, and only ready ones run", () => {
-	const { channels, report } = configuredChannels({ TELEGRAM_BOT_TOKEN: "t", TELEGRAM_OWNER_ID: "42", WHATSAPP_TOKEN: "w" });
-	assert.deepEqual([...channels.keys()], ["telegram"]);
+	const { channels, report } = configuredChannels({ PHOTON_PROJECT_ID: "p", PHOTON_PROJECT_SECRET: "s", IMESSAGE_OWNER: "+15550100001", WHATSAPP_TOKEN: "w" });
+	assert.deepEqual([...channels.keys()], ["imessage"]);
 	assert.deepEqual(report, [
-		"off  imessage (not configured)",
-		"ok   telegram",
+		"ok   imessage",
 		"fix  whatsapp: WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_OWNER are not set. Fix: export them where mochi starts",
 	]);
 });
