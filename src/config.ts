@@ -42,7 +42,6 @@ const FileSchema = Type.Object(
 		web: Type.Optional(Type.Object({ url: Type.Optional(Type.String({ pattern: "^https?://" })), keyEnv: Type.Optional(Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" })), browserProfile: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false })),
 		/** Image, video and speech providers; see config.example.toml. */
 		media: Type.Optional(MediaConfigSchema),
-		/** Minutes of silence after which an owner message starts a fresh thread; 0 never resets. Default 60. */
 		users: Type.Optional(Type.Array(ChatUserSchema)),
 		/** The owner's other agents that mochi may call over A2A, by name. */
 		a2a: Type.Optional(Type.Object({ peers: Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), A2APeerSchema) }, { additionalProperties: false })),
@@ -57,14 +56,11 @@ export function unknownKeys(file: Readonly<Record<string, unknown>>): string[] {
 	return Object.keys(file).filter((key) => !known.has(key));
 }
 
-
 /** The web service: the key variable it reads, its key when set, an API url other than the default, and the browser profile. */
 export type WebConfig = { readonly keyEnv: string; readonly key: string | undefined; readonly url?: string; readonly browserProfile?: string };
 
 export interface Config {
 	readonly home: Home;
-	/** The home's directory: the store, the work directory, logs. */
-	readonly dataDir: string;
 	readonly appsUrl: string | undefined;
 	readonly modelSetup: ModelSetup;
 	/** Absent: the web functions in `code` fail with a clear error. */
@@ -89,7 +85,6 @@ export async function loadConfig(env: Readonly<Record<string, string | undefined
 	assertTimeZone(timeZone);
 	return {
 		home,
-		dataDir: home.dir,
 		appsUrl: env.MOCHI_APPS_URL ?? file.appsUrl,
 		modelSetup: createModelSetup({ ...(file.providers === undefined ? {} : { providers: file.providers }), ...(file.models === undefined ? {} : { models: file.models }), env }),
 		web: {

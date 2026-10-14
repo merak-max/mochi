@@ -18,7 +18,7 @@ import type { Log } from "./log.ts";
 import { forkFns, ForkTask } from "./fork/fork.ts";
 import { ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
-import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
+import { historyTool, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
 import { defaultSelection, seatExtensions } from "./seats.ts";
@@ -186,7 +186,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		users,
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
 	};
-	await harness.commit(importOldNotes, context);
 	index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
 	return { harness, classify: options.classify, line, trigger, catalog: options.profiles };
 }

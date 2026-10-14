@@ -102,7 +102,7 @@ async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "
 	].join("\n");
 }
 
-// /new keeps background work: processes and background agents.
+// /new keeps background work: processes and background forks.
 async function abortTargets(deps: CommandDeps, target: Conversation, command: Command, context: Context) {
 	const graph = await deps.harness.taskGraph(context);
 	try {

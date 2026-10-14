@@ -1,4 +1,3 @@
-import { existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -12,14 +11,14 @@ export interface Home {
 	/** `KEY=value` lines, loaded before anything reads the environment; a variable already set wins. */
 	readonly envFile: string;
 	readonly configFile: string;
-	/** Root's own instructions, after every prompt section. Was `persona.md`; `adoptInstructions` renames it once. */
+	/** Root's own instructions, after every prompt section. */
 	readonly instructionsFile: string;
 	readonly skillsDir: string;
 	readonly profilesDir: string;
 	readonly logFile: string;
 }
 
-export function homeAt(dir: string): Home {
+function homeAt(dir: string): Home {
 	return {
 		dir,
 		envFile: join(dir, ".env"),
@@ -34,10 +33,4 @@ export function homeAt(dir: string): Home {
 /** `MOCHI_HOME`, then the older `MOCHI_DATA_DIR`, then `~/.mochi`. */
 export function resolveHome(env: Readonly<Record<string, string | undefined>>): Home {
 	return homeAt(resolve(env.MOCHI_HOME ?? env.MOCHI_DATA_DIR ?? join(homedir(), ".mochi")));
-}
-
-/** A home from before 2026-10-14 keeps root's instructions in `persona.md`. Renames it once; a no-op after. */
-export function adoptInstructions(home: Home): void {
-	const old = join(home.dir, "persona.md");
-	if (existsSync(old) && !existsSync(home.instructionsFile)) renameSync(old, home.instructionsFile);
 }

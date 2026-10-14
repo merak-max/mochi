@@ -18,7 +18,7 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  * A seat is how far a conversation is trusted, stored in its agent and written only here.
  *   agent    root, every fork of it and every profile. A fork has its parent's tools and prompt, so it reuses its
  *            parent's prompt cache, and forks can fork at any depth.
- *   trigger  a trigger run. It reads outside data (webhook bodies, mail), so it cannot write notes, start agents, add
+ *   trigger  a trigger run. It reads outside data (webhook bodies, mail), so it cannot write notes, fork, add
  *            triggers or change profiles. It reaches the owner only with notify.
  *   peer     another agent's requests over A2A. It works with the owner's apps and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
