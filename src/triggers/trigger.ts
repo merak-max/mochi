@@ -8,6 +8,7 @@ import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type Conversati
 import type { ChannelId } from "../channels/types.ts";
 import { holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
+import { withAttachments } from "../media/files.ts";
 import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
@@ -378,7 +379,7 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 }
 
 interface NotifyDeps {
-	readonly line: () => Pick<Line, "id" | "turn">;
+	readonly line: () => Pick<Line, "id" | "turn" | "workDir">;
 	readonly channels: readonly ChannelId[];
 	readonly classify: Classify;
 	readonly log: Log;
@@ -391,10 +392,12 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 		name: "notify",
 		description:
 			"Send a message now to the owner, or in a trigger run to the trigger's recipients. In a trigger run this is the only way to reach " +
-			"them, so call it only when something needs their attention. channel applies to the owner and defaults to where the owner last wrote. Users always get iMessage.",
+			"them, so call it only when something needs their attention. channel applies to the owner and defaults to where the owner last wrote. Users always get iMessage. " +
+			"attachments: files to send after the text, work-relative or absolute under home, each under 100 MB.",
 		parameters: Type.Object({
 			text: Type.String({ minLength: 1 }),
 			channel: Type.Optional(Type.Union(channelNames.map((id) => Type.Literal(id)))),
+			attachments: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 10 })),
 		}),
 		replay: "safe",
 		execute: async (args, api, context) => {
@@ -408,6 +411,7 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 					return { output: [{ type: "text", text: `Not sent: the trigger's classify step judged no to "${step.question}" (p=${yes.toFixed(2)}). Finish without notifying.` }] };
 				}
 			}
+			const text = await withAttachments(args.text, args.attachments ?? [], deps.line().workDir);
 			const last = (await api.snapshot(LastInboundDoc, context))?.last?.channel;
 			const channel = (args.channel as ChannelId | undefined) ?? (last !== undefined && deps.channels.includes(last) ? last : (deps.channels[0] ?? "cli"));
 			const from = trigger === undefined ? ({ kind: "conversation", id: api.conversationId } as const) : ({ kind: "trigger", id: trigger.id } as const);
@@ -415,13 +419,13 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 			const queued: string[] = [];
 			for (const recipient of trigger?.notify ?? [OWNER_ID]) {
 				if (recipient === OWNER_ID) {
-					turns.push({ source: "run", channel, text: args.text, from });
+					turns.push({ source: "run", channel, text, from });
 					queued.push(`${OWNER_ID} on ${channel}`);
 					continue;
 				}
 				const user = deps.users.find((candidate) => candidate.id === recipient);
 				if (user === undefined) throw new Error(`Notify recipient ${recipient} is not configured.`);
-				turns.push({ source: "run", channel: "imessage", text: args.text, from, person: user.handle });
+				turns.push({ source: "run", channel: "imessage", text, from, person: user.handle });
 				queued.push(`${recipient} on imessage`);
 			}
 			await api.commit(async (tx) => {
