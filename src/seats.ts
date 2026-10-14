@@ -167,8 +167,3 @@ export async function forkPoint(tx: Tx, parent: ConversationId): Promise<EntryId
 	if (newest === undefined) throw new Error("There is nothing to fork yet.");
 	return newest.id;
 }
-
-/** A fork keeps its parent's whole agent and history through `at`, so its first request reuses the parent's cached prompt. */
-export async function forkSeatConversation(tx: Tx, parent: ConversationId, at: EntryId, ownership: ConversationOwnership): Promise<ConversationId> {
-	return (await tx.forkConversation(parent, at, { ownership })).id;
-}

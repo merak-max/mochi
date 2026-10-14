@@ -4,7 +4,7 @@ import { parse as parseToml } from "smol-toml";
 import { type Static, Type } from "typebox";
 import { createModelSetup, type ModelSetup, ModelsSchema, ProviderSchema } from "./brain/providers.ts";
 import { type Home, resolveHome } from "./home.ts";
-import { MediaConfigSchema } from "./media/media.ts";
+import { MediaConfigSchema } from "./media/providers.ts";
 import { parseWith } from "./parse.ts";
 import { normalizeHandle } from "./channels/imessage.ts";
 import type { A2APeer, A2APeers } from "./a2a/tools.ts";

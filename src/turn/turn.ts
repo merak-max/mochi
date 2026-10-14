@@ -41,7 +41,9 @@ import { type ChatUser, OWNER_ID } from "../config.ts";
 import type { Log } from "../log.ts";
 import { formatStamp, messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
-import { loadAttachment, type MediaDeps, prepareInbound, splitAttachments } from "../media/media.ts";
+import type { MediaDeps } from "../media/client.ts";
+import { loadAttachment, splitAttachments } from "../media/files.ts";
+import { prepareInbound } from "../media/inbound.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
 
 // A Turn is a background task of the ownerless line conversation, so neither Esc nor /stop on root reaches it.

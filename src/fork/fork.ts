@@ -2,7 +2,7 @@ import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineTask, defineTool, type EntryId, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { journaled } from "../journal.ts";
-import { forkPoint, forkSeatConversation } from "../seats.ts";
+import { forkPoint } from "../seats.ts";
 import { answerText } from "../turn/turn.ts";
 
 // A fork is a short-lived copy of the calling conversation, history and all, for one slice of a task. Its first
@@ -23,7 +23,8 @@ export async function startFork(
 	options: TaskOptions = { ownership: { kind: "conversation" }, conversationId: parent, background: true },
 ): Promise<TaskId<ForkResult>> {
 	const id = await tx.createTask(ForkTask, input, options);
-	await forkSeatConversation(tx, parent, at, { kind: "task", taskId: id });
+	// The fork keeps its parent's whole agent and history through `at`, so its first request reuses the parent's cached prompt.
+	await tx.forkConversation(parent, at, { ownership: { kind: "task", taskId: id } });
 	return id;
 }
 

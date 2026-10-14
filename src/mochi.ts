@@ -2,7 +2,6 @@ import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import type { Models } from "@earendil-works/pi-ai";
 import {
-	type CompactionPolicy,
 	createRegistry,
 	defineExtension,
 	Harness,
@@ -27,7 +26,8 @@ import { reactTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/t
 import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
 import { fastBrowserFns } from "./browser/fast.ts";
-import { type MediaDeps, mediaFns } from "./media/media.ts";
+import type { MediaDeps } from "./media/client.ts";
+import { mediaFns } from "./media/media.ts";
 import { gifFns } from "./media/gif.ts";
 import { defineProcWatch, PROC_POLL_MS, procFns } from "./procs/procs.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
@@ -81,9 +81,6 @@ export interface Mochi {
 	readonly trigger: TriggerTask;
 	readonly catalog: Profiles;
 }
-
-/** The one context policy: pi-durable's built-in compaction, at its own defaults, written down. */
-const COMPACTION: CompactionPolicy = { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000, backgroundTokens: 32_768 };
 
 export async function openMochi(options: MochiOptions, context: Context): Promise<Mochi> {
 	const { index, log, users, a2aPeers } = options;
@@ -149,7 +146,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		{
 			models: options.models,
 			registry,
-			settings: { extensions: defaultSelection((name) => registry.snapshot().extension(name)), compaction: COMPACTION, steeringMode: "all", followUpMode: "all" },
+			settings: { extensions: defaultSelection((name) => registry.snapshot().extension(name)), steeringMode: "all", followUpMode: "all" },
 			env: ({ cwd }) => environment(cwd ?? options.workDir),
 			onReport: (error) => log("harness.report", { error: String(error) }),
 		},
