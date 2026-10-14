@@ -3,7 +3,8 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
-import { AgentDoc, configure, LiveDoc, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { AgentDoc, configure, defineTask, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { journaled } from "../journal.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { Owner } from "../memory/memory.ts";
 import { answerText } from "../turn/turn.ts";
@@ -153,6 +154,37 @@ async function ensureConversation(tx: Tx, profile: Profile, profiles: Profiles):
 
 type Host = Pick<Harness, "commit" | "conversation">;
 
+type ReplyInput = { readonly submission: SubmissionId; readonly to: ConversationId; readonly from: string; readonly re: string };
+
+/**
+ * Waits for a profile's answer to a message nobody waits for inline, then sends it back to the asker's conversation as
+ * a new message, which wakes the asker. Durable, so a restart still delivers it, once.
+ */
+export const defineReply = (harness: () => Pick<Harness, "submission">) => defineTask<ReplyInput, { readonly phase: "wait" }, null>({
+	name: "mochi.reply",
+	version: 1,
+	initial: () => ({ phase: "wait" }),
+	phases: {
+		wait: async (task, runtime, context) => {
+			const { submission, to, from, re } = task.input;
+			const settled = await (await harness().submission(submission, context))!.wait(context);
+			let body = "(no answer: it finished without a reply)";
+			if (settled.status === "unanswered") body = `(no answer: ${settled.reason ?? "unanswered"})`;
+			else if (settled.type === "input") {
+				let answer = "";
+				await runtime.commit(async (tx) => void (answer = await answerText(tx, settled.answer)), context);
+				if (answer !== "") body = answer;
+			}
+			const target = await runtime.conversation(to, context);
+			if (target !== undefined) await target.submit({ type: "input", content: `[from ${from}] re: ${re}\n${body}`, requestId: `reply:${task.id}`, whenBusy: "followUp" }, context);
+			await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+		},
+	},
+	abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+});
+
+const firstLine = (text: string): string => (text.split("\n").find((line) => line.trim() !== "") ?? "").trim();
+
 /** Submits `message` to the profile's standing conversation, creating it the first time. Same requestId, same submission. */
 /** Submits `message` to the profile's standing conversation, creating it the first time. Same requestId, same submission. `busy`: it was mid-turn. */
 export async function sendToProfile(host: Host, profiles: Profiles, name: string, message: string, requestId: string, context: Context): Promise<{ submission: Submission; busy: boolean }> {
@@ -164,7 +196,9 @@ export async function sendToProfile(host: Host, profiles: Profiles, name: string
 	return { submission: await target.submit({ type: "input", content: message, requestId, whenBusy: "followUp" }, context), busy };
 }
 
-export function profileFns(profiles: Profiles, host: () => Host): ToolRegistration[] {
+export type ReplyTask = ReturnType<typeof defineReply>;
+
+export function profileFns(profiles: Profiles, host: () => Host, reply: ReplyTask): ToolRegistration[] {
 	return [
 		defineTool({
 			name: "profile_list",
@@ -178,7 +212,7 @@ export function profileFns(profiles: Profiles, host: () => Host): ToolRegistrati
 			name: "profile_send",
 			description:
 				"Give a profile a message: a task, a question, or a board item id. Profiles message each other this way too. It works in its own standing conversation with its own memory. " +
-				"Resolves to its answer; with background it returns at once, and the profile calls notify if the owner needs the result.",
+				"Resolves to its answer. With background, or when the profile is busy, it returns at once and the answer arrives here later as a new message.",
 			parameters: Type.Object({ name: Type.String(), message: Type.String({ minLength: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.String(),
 			replay: "unsafe",
@@ -187,9 +221,11 @@ export function profileFns(profiles: Profiles, host: () => Host): ToolRegistrati
 				const sender = owner === "root" ? "root" : owner.profile;
 				if (sender === name) throw new Error(`You are ${name}; send to another profile.`);
 				const { submission, busy } = await sendToProfile(host(), profiles, name, `[from ${sender}] ${message}`, `profile:${api.taskId}`, context);
-				if (background === true) return { structuredOutput: `Sent to ${name}.` };
-				// A busy profile may be waiting on this very caller, so an inline wait could never end.
-				if (busy) return { structuredOutput: `${name} is in the middle of something; your message is queued and it will answer in its own turn.` };
+				// A busy profile may be waiting on this very caller, so an inline wait could never end: its answer comes back later.
+				if (background === true || busy) {
+					await api.commit((tx) => journaled(tx, api.taskId, "reply", () => tx.createTask(reply, { submission: submission.id, to: api.conversationId, from: name, re: firstLine(message) }, { ownership: { kind: "conversation" }, conversationId: api.conversationId, background: true })), context);
+					return { structuredOutput: busy ? `${name} is busy; your message is queued, and its answer comes back here as a new message.` : `Sent to ${name}; its answer comes back here as a new message.` };
+				}
 				const settled = await submission.wait(context);
 				if (settled.status !== "done" || settled.type !== "input") throw new Error(`Profile ${name} did not answer: ${settled.reason ?? settled.status}.`);
 				return { structuredOutput: await api.commit((tx) => answerText(tx, settled.answer), context) };

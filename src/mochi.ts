@@ -19,7 +19,7 @@ import { workEnv } from "./env/work-env.ts";
 import type { SearchIndex } from "./index/fts.ts";
 import type { Log } from "./log.ts";
 import { forkFns, ForkTask } from "./fork/fork.ts";
-import { ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
+import { defineReply, ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
 import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
@@ -123,6 +123,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.profiles, classify: options.classify });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
+	const reply = defineReply(() => harness);
 	const library: ToolRegistration[] = [
 		...(await codingTools()),
 		noteTool(index, ownerIn),
@@ -141,7 +142,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...triggerFns({ task: trigger, catalog: options.profiles, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users }),
 		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 		...a2aFns(a2aPeers),
-		...profileFns(options.profiles, () => harness),
+		...profileFns(options.profiles, () => harness, reply),
 		...boardFns({ by: async (tx, conversation) => { const owner = await ownerIn(tx, conversation); return owner === "root" ? "root" : owner.profile; }, now: () => now().getTime() }),
 	];
 	for (const extension of [
@@ -149,7 +150,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		memoryExtension(ownerOf),
 		skillsExtension(options.skillsDir),
 		windowExtension(),
-		defineExtension({ name: "agents", tasks: [ForkTask] }),
+		defineExtension({ name: "agents", tasks: [ForkTask, reply] }),
 		defineExtension({ name: "procs", tasks: [procWatch] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
