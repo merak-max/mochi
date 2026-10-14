@@ -23,7 +23,6 @@ export interface BrowserDeps {
 	readonly keyEnv: string;
 	readonly profile?: string;
 	readonly baseUrl?: string;
-	readonly fetch?: typeof fetch;
 }
 
 export class BrowserClient {
@@ -66,7 +65,7 @@ export class BrowserClient {
 
 	async #request<S extends TSchema>(path: string, method: string, body: object | undefined, schema: S, signal?: AbortSignal): Promise<Static<S>> {
 		const timeout = AbortSignal.timeout(method === "DELETE" ? 30_000 : 240_000);
-		const response = await (this.#deps.fetch ?? fetch)(`${this.#baseUrl}/${path}`, {
+		const response = await fetch(`${this.#baseUrl}/${path}`, {
 			method,
 			headers: { Authorization: `Bearer ${this.#deps.apiKey}`, "Content-Type": "application/json" },
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),

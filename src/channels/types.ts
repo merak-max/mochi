@@ -39,7 +39,6 @@ export type Inbound =
 			readonly text: string;
 			readonly at: Date;
 			readonly attachments: readonly Attachment[];
-			readonly sequence?: number;
 			/** A configured user's normalized handle. Absent: the owner wrote it. */
 			readonly person?: string;
 			readonly replyTo?: ReplyTarget;
@@ -83,8 +82,8 @@ export class SendRejected extends DeliveryError {
 
 export interface Channel {
 	readonly profile: ChannelProfile;
-	/** Runs until `signal` aborts, never messaging the owner about itself. `cursor` reads the sequence `ingest` stored, for replay. */
-	run(sink: InboundSink, signal: AbortSignal, cursor?: () => Promise<number | null>): Promise<void>;
+	/** Runs until `signal` aborts, never messaging the owner about itself. */
+	run(sink: InboundSink, signal: AbortSignal): Promise<void>;
 	/** Throws only DeliveryError subclasses for platform failures. `person` absent: the owner. */
 	send(bubble: Bubble, person?: string, options?: { readonly replyTo?: string }): Promise<void>;
 	typing(on: boolean, person?: string): Promise<void>;

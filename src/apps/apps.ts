@@ -15,7 +15,7 @@ const RECONNECT_WAIT_MS = 15_000;
 const ACCEPT = { action: "accept", content: {} };
 
 /** Resolves to undefined when mochi holds no Executor tokens. */
-export type Connect = () => Promise<McpTransport | undefined>;
+type Connect = () => Promise<McpTransport | undefined>;
 
 /** The owner's apps through Executor. Each method throws one line while Executor is not up. */
 export interface Apps {
@@ -134,7 +134,7 @@ class ExecutorResultError extends Error {}
  * An Executor program that searches, then adds each item's full signature from `tools.search.describe`.
  * Search returns only the input type; an item that describe misses gets a signature built from it.
  */
-export function searchProgram(query: string): string {
+function searchProgram(query: string): string {
 	return `const found = await tools.search(${JSON.stringify({ query })});
 const items = found.items ?? [];
 const described = items.length === 0 ? { items: [] } : await tools.search.describe({ paths: items.map((item) => item.path) });
@@ -149,7 +149,7 @@ return found;`;
 }
 
 /** A path as apps_search returns it ("tools[\"a-b\"].x") or without the prefix ("gmail.send", "[\"a-b\"].x"), as a callable expression. */
-export function toolExpression(path: string): string {
+function toolExpression(path: string): string {
 	const trimmed = path.trim();
 	if (trimmed.startsWith("tools.") || trimmed.startsWith("tools[")) return trimmed;
 	if (trimmed.startsWith("[")) return `tools${trimmed}`;

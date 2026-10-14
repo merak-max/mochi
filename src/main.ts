@@ -11,7 +11,7 @@ import { createIMessageChannel } from "./channels/imessage.ts";
 import { createWhatsAppChannel } from "./channels/whatsapp.ts";
 import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./channels/types.ts";
 import { type Config, unknownKeys, type ChatUser, loadConfig } from "./config.ts";
-import { adoptInstructions, type Home, resolveHome } from "./home.ts";
+import { type Home, resolveHome } from "./home.ts";
 import { SearchIndex } from "./index/fts.ts";
 import { acquireLock } from "./lock.ts";
 import { log, setLogFile } from "./log.ts";
@@ -25,13 +25,13 @@ import { triggersComponent } from "./triggers/webhooks.ts";
 import { a2aComponent, a2aServerSetup } from "./a2a/server.ts";
 import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
 import { connectApps } from "./apps/apps.ts";
-import { InboundCursorDoc, ingest } from "./turn/turn.ts";
+import { ingest } from "./turn/turn.ts";
 import { runFeed } from "./memory/feed.ts";
 import { fastCompletion } from "./turn/lifecycle.ts";
 
 /** Only iMessage serves users; the other adapters stay owner-only. */
 const ADAPTERS: Readonly<Record<ChatChannelId, (env: Env, users: readonly ChatUser[]) => Setup<Channel>>> = {
-	imessage: (env, users) => createIMessageChannel(env, { users: users.map((user) => user.handle) }),
+	imessage: (env, users) => createIMessageChannel(env, users.map((user) => user.handle)),
 	whatsapp: (env) => createWhatsAppChannel(env),
 };
 
@@ -97,14 +97,14 @@ async function main(args: readonly string[]): Promise<void> {
 		if (args[1] !== "apps") throw new Error(`Unknown auth target ${args[1] ?? "(none)"}. Usage: ${AUTH_COMMAND}`);
 		const config = await loadConfig(process.env);
 		if (config.appsUrl === undefined) throw new Error("Set appsUrl in config.toml (or MOCHI_APPS_URL) first.");
-		await mkdir(config.dataDir, { recursive: true });
-		await loginApps(config.appsUrl, authFile(config.dataDir), (line) => process.stdout.write(`${line}\n`));
+		await mkdir(config.home.dir, { recursive: true });
+		await loginApps(config.appsUrl, authFile(config.home.dir), (line) => process.stdout.write(`${line}\n`));
 		return;
 	}
 	const mode = parseMode(args, process.stdin.isTTY === true && process.stdout.isTTY === true);
 	const config = await loadConfig(process.env);
-	await mkdir(config.dataDir, { recursive: true });
-	const socket = socketPath(config.dataDir);
+	await mkdir(config.home.dir, { recursive: true });
+	const socket = socketPath(config.home.dir);
 
 	if (mode.kind === "daemon") {
 		const daemon = await startDaemon(config, "configured");
@@ -122,12 +122,12 @@ async function main(args: readonly string[]): Promise<void> {
 	try {
 		client = await AttachClient.connect(socket);
 	} catch {
-		if (mode.kind === "tui") setLogFile(join(config.dataDir, "mochi.log"));
+		if (mode.kind === "tui") setLogFile(config.home.logFile);
 		local = await startDaemon(config, mode.kind === "tui" ? "configured" : "terminal");
 		client = await AttachClient.connect(socket);
 	}
 	try {
-		if (mode.kind === "tui") await runTui(client, config.dataDir);
+		if (mode.kind === "tui") await runTui(client, config.home.dir);
 		else await runLines(client, mode.prompt, mode);
 	} finally {
 		client.close();
@@ -137,22 +137,22 @@ async function main(args: readonly string[]): Promise<void> {
 
 /** Open storage, the Harness, channels, components and the attach socket. `terminal` runs no outside channel. */
 async function startDaemon(config: Config, channelSet: "configured" | "terminal"): Promise<{ stop(reason: string): Promise<void> }> {
-	const releaseLock = acquireLock(join(config.dataDir, "mochi.lock"));
+	const releaseLock = acquireLock(join(config.home.dir, "mochi.lock"));
 	const controller = new AbortController();
 	const running = withAbortSignal(controller.signal, BACKGROUND_CONTEXT);
-	const index = new SearchIndex(join(config.dataDir, "index.sqlite"));
+	const index = new SearchIndex(join(config.home.dir, "index.sqlite"));
 
 	const { channels, report: channelReport } = channelSet === "terminal" ? { channels: new Map() as Channels, report: [] } : configuredChannels(config.env, config.users);
-	const workDir = join(config.dataDir, "work");
+	const workDir = join(config.home.dir, "work");
 	await mkdir(workDir, { recursive: true });
 	const a2a = a2aServerSetup(config.env);
 	for (const line of [...setupReport([...services(config), ["a2a", a2a]]), ...channelReport]) log("setup", { line });
 	const { models } = config.modelSetup;
-	const apps = config.appsUrl === undefined ? undefined : connectApps(storedTokenConnector(config.appsUrl, authFile(config.dataDir)), log);
+	const apps = config.appsUrl === undefined ? undefined : connectApps(storedTokenConnector(config.appsUrl, authFile(config.home.dir)), log);
 
 	const mochi = await openMochi(
 		{
-			storage: await openNodeSqliteStorage(join(config.dataDir, "mochi.sqlite")),
+			storage: await openNodeSqliteStorage(join(config.home.dir, "mochi.sqlite")),
 			models,
 			brain: config.modelSetup.brain,
 			fast: config.modelSetup.fast,
@@ -167,7 +167,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			channels,
 			users: config.users,
 			a2aPeers: config.a2aPeers,
-			home: config.home,
 			timeZone: config.timeZone,
 			publicUrl: config.env.MOCHI_PUBLIC_URL,
 			scheduling: channelSet === "terminal" ? "local" : "daemon",
@@ -177,7 +176,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		BACKGROUND_CONTEXT,
 	);
 	mochi.harness.resume();
-	await listenAttach(socketPath(config.dataDir), { line: mochi.line, models, log }, running);
+	await listenAttach(socketPath(config.home.dir), { line: mochi.line, models, log }, running);
 
 	const background = [
 		runFeed(mochi.harness, index, fastCompletion(models, config.modelSetup.fast), mochi.catalog, running, (error) => log("memory.failed", { error: String(error) })),
@@ -189,7 +188,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const channelsRunning = new AbortController();
 	const sink: InboundSink = async (message) => void (await ingest(mochi.line, message, running));
 	const inbound = [...channels.values()].map((channel) =>
-		channel.run(sink, channelsRunning.signal, async () => (await mochi.harness.snapshot(InboundCursorDoc, channel.profile.id, running))?.sequence ?? null).catch((error: unknown) => {
+		channel.run(sink, channelsRunning.signal).catch((error: unknown) => {
 			log("channel.failed", { channel: channel.profile.id, error: String(error) });
 		}),
 	);
@@ -204,28 +203,26 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			channelsRunning.abort();
 			await Promise.allSettled(inbound);
 			index.close();
-			rmSync(socketPath(config.dataDir), { force: true });
+			rmSync(socketPath(config.home.dir), { force: true });
 			releaseLock();
 		},
 	};
 }
 
-/** `<home>/instructions.md`, root's own instructions; no file leaves root's as they are. */
 async function readInstructions(home: Home): Promise<{ instructions?: string }> {
-	adoptInstructions(home);
 	const text = await readFile(home.instructionsFile, "utf8").catch(() => undefined);
 	return text === undefined || text.trim() === "" ? {} : { instructions: text.trim() };
 }
 
-/** `<dataDir>/mochi.sock`, or a short path in the temp directory when that exceeds the Unix socket limit. */
-function socketPath(dataDir: string): string {
-	const path = join(dataDir, "mochi.sock");
+/** `<home>/mochi.sock`, or a short path in the temp directory when that exceeds the Unix socket limit. */
+function socketPath(homeDir: string): string {
+	const path = join(homeDir, "mochi.sock");
 	if (Buffer.byteLength(path) <= 100) return path;
-	return join(tmpdir(), `mochi-${createHash("sha256").update(dataDir).digest("hex").slice(0, 16)}.sock`);
+	return join(tmpdir(), `mochi-${createHash("sha256").update(homeDir).digest("hex").slice(0, 16)}.sock`);
 }
 
-/** The outside services mochi calls. Models and the web need a key; without OpenRouter the trigger gates pass. */
-export function services(config: Pick<Config, "modelSetup" | "web" | "dataDir" | "appsUrl" | "file">): readonly (readonly [string, Setup<void>])[] {
+/** The outside services mochi calls. Models and the web need a key; without a classifier, classify steps fail. */
+function services(config: Pick<Config, "modelSetup" | "web" | "home" | "appsUrl" | "file">): readonly (readonly [string, Setup<void>])[] {
 	const missing = config.modelSetup.missing;
 	const unknown = unknownKeys(config.file);
 	return [
@@ -233,12 +230,11 @@ export function services(config: Pick<Config, "modelSetup" | "web" | "dataDir" |
 		["classifier", config.modelSetup.classifier === undefined ? off : ready(undefined)],
 		["config", unknown.length === 0 ? ready(undefined) : broken(`config.toml has keys mochi does not read: ${unknown.join(", ")}. They are ignored; remove them.`)],
 		["web", config.web.key === undefined ? broken(`${config.web.keyEnv} is not set. Fix: put it in ~/.mochi/.env`) : ready(undefined)],
-		["apps", config.appsUrl === undefined ? off : existsSync(authFile(config.dataDir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
+		["apps", config.appsUrl === undefined ? off : existsSync(authFile(config.home.dir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
 	];
 }
 
-/** Every ready adapter, and one readiness line per adapter. */
-export function configuredChannels(env: Env, users: readonly ChatUser[] = []): { readonly channels: Channels; readonly report: readonly string[] } {
+function configuredChannels(env: Env, users: readonly ChatUser[]): { readonly channels: Channels; readonly report: readonly string[] } {
 	const setups = (Object.keys(ADAPTERS) as ChatChannelId[]).map((id) => [id, ADAPTERS[id](env, users)] as const);
 	const channels = new Map(setups.flatMap(([id, setup]) => (setup.kind === "ready" ? [[id, setup.value] as const] : [])));
 	return { channels, report: setupReport(setups) };

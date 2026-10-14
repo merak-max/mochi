@@ -3,8 +3,8 @@ import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
-import { type ModelThinkingLevel, type Static, Type } from "@earendil-works/pi-ai";
-import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, configure, defineTask, defineTool, type Harness, type ModelRef, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { type Static, Type } from "@earendil-works/pi-ai";
+import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, defineTask, defineTool, type Harness, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import type { ChannelId } from "../channels/types.ts";
 import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
@@ -25,7 +25,7 @@ export const RUN_DEADLINE_MS = 30 * 60_000;
 const DAY_MS = 86_400_000;
 const CHECK_TIMEOUT_MS = 5 * 60_000;
 
-export type LastSlot = { readonly at: number; readonly result: "done" | "unanswered" | "skipped-busy" | "missed" | "timed-out" | "quiet" | "check-failed" | "stopped" };
+type LastSlot = { readonly at: number; readonly result: "done" | "unanswered" | "skipped-busy" | "missed" | "timed-out" | "quiet" | "check-failed" | "stopped" };
 
 const run = promisify(execFile);
 
@@ -35,7 +35,7 @@ async function runCheck(argv: readonly string[]): Promise<string | null> {
 	return stdout.trim() === "" ? null : stdout.trim();
 }
 
-export type Plan = { readonly kind: "fire" | "miss"; readonly slot: number } | { readonly kind: "listen" | "done" };
+type Plan = { readonly kind: "fire" | "miss"; readonly slot: number } | { readonly kind: "listen" | "done" };
 
 const late = (trigger: Trigger, slot: number, now: number): boolean => trigger.kind === "cron" && now - slot > LATE_MS;
 
@@ -56,7 +56,7 @@ type TriggerState =
 
 type TriggerInput = { readonly trigger: Trigger; readonly origin: "model" | "config" };
 export type TriggerTask = Task<TriggerInput, TriggerState, null, object>;
-export type TriggerRecord = TaskRecord<TriggerInput, TriggerState, null>;
+type TriggerRecord = TaskRecord<TriggerInput, TriggerState, null>;
 
 const iso = (at: number): string => new Date(at).toISOString();
 
@@ -171,7 +171,7 @@ async function freshRun(harness: Pick<Harness, "commit">, conversation: Pick<Con
 }
 
 /** `existing` is `scanTriggers`, read before the commit's first write. A replaced live trigger is for the caller to abort after the commit. */
-export async function addTrigger(
+async function addTrigger(
 	tx: Tx,
 	task: TriggerTask,
 	input: TriggerInput,
@@ -212,10 +212,10 @@ export async function inputPasses(
 }
 
 /** The classify steps that judge a trigger's notify text, in order. */
-export const outputSteps = (trigger: Trigger): readonly ClassifyStep[] =>
+const outputSteps = (trigger: Trigger): readonly ClassifyStep[] =>
 	stepsOf(trigger).flatMap((step: Step) => ("classify" in step && step.classify.on === "output" ? [step.classify] : []));
 
-export async function runAgent(trigger: Trigger, catalog: Profiles): Promise<RunAgent> {
+async function runAgent(trigger: Trigger, catalog: Profiles): Promise<RunAgent> {
 	const header = `${INSTRUCTIONS}
 Trigger: ${trigger.id}.`;
 	const name = trigger.profile ?? trigger.role;
@@ -391,7 +391,7 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 			"Send a message now to the owner, or in a trigger run to the trigger's recipients. In a trigger run this is the only way to reach " +
 			"them, so call it only when something needs their attention. channel applies to the owner and defaults to where the owner last wrote. Users always get iMessage.",
 		parameters: Type.Object({
-			text: Type.String({ minLength: 1, maxLength: 4000 }),
+			text: Type.String({ minLength: 1 }),
 			channel: Type.Optional(Type.Union(channelNames.map((id) => Type.Literal(id)))),
 		}),
 		replay: "safe",

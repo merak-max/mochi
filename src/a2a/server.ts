@@ -39,7 +39,7 @@ import {
 const BODY_LIMIT = 1024 * 1024;
 const CARD_PATHS = ["/.well-known/agent-card.json", "/.well-known/agent.json"];
 
-export const A2AContextDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
+const A2AContextDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
 	kind: "mochi.a2a-context",
 	version: 1,
 	scope: "session",
@@ -57,7 +57,7 @@ const A2ATaskDoc = defineDocFamily<{ task: A2ATask | null }, null>({
 	initial: () => ({ task: null }),
 });
 
-export interface A2AServerSettings {
+interface A2AServerSettings {
 	readonly tokens: ReadonlyMap<string, string>;
 	readonly host: string;
 	readonly port: number;
@@ -115,7 +115,7 @@ interface ServerDeps {
 	readonly log: Log;
 }
 
-export async function startA2AServer(deps: ServerDeps, context: Context): Promise<AddressInfo> {
+async function startA2AServer(deps: ServerDeps, context: Context): Promise<AddressInfo> {
 	const server = createServer((request, response) => {
 		handle(deps, request, response, context).catch((error: unknown) => {
 			deps.log("a2a.failed", { url: request.url, error: String(error) });

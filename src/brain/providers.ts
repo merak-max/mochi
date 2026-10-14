@@ -46,11 +46,11 @@ export const ModelsSchema = Type.Object(
 	{
 		brain: Type.Optional(Type.String({ minLength: 3 })),
 		fast: Type.Optional(Type.String({ minLength: 3 })),
-		/** The strongest model, for an agent that asks for `strongest`. Default: the brain. */
+		/** The strongest model, for a profile that asks for `strongest`. Default: the brain. */
 		strongest: Type.Optional(Type.String({ minLength: 3 })),
-		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names an agent file or a trigger may use. */
 		/** The yes/no classifier for `classify` and classify steps, on a provider with api "classifier". */
 		classifier: Type.Optional(Type.String({ minLength: 3 })),
+		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a profile or a trigger may use. */
 		aliases: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), Type.String({ minLength: 3 }))),
 		/** Facts about a model pi-ai's catalog does not know, by `<provider>/<id>`: dollars per million tokens and limits. */
 		overrides: Type.Optional(Type.Record(Type.String({ minLength: 3 }), ModelOverrideSchema)),
@@ -66,7 +66,6 @@ const DEFAULTS = {
 	classifier: { url: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "typesafe/jev-1.13" },
 } as const;
 
-/** The url and key variable of a `[providers]` entry, with the protocol's defaults filled in. */
 export function providerEndpoint(name: string, providers: Readonly<Record<string, ProviderConfig>> = {}): { baseUrl: string; keyEnv: string } {
 	const config = providers[name];
 	if (config === undefined) throw new Error(`Provider "${name}" is not in [providers]. Configured: ${Object.keys(providers).join(", ") || "none"}.`);

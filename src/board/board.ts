@@ -10,10 +10,10 @@ import { forkPoint } from "../seats.ts";
 // The sweep reads it in code each minute and wakes a model only for a task whose due time has passed: it forks root
 // with the task as the brief, once per due time.
 
-export const STATUSES = ["open", "waiting", "done", "dropped"] as const;
-export type Status = (typeof STATUSES)[number];
+const STATUSES = ["open", "waiting", "done", "dropped"] as const;
+type Status = (typeof STATUSES)[number];
 
-export type BoardTask = {
+type BoardTask = {
 	id: number;
 	title: string;
 	/** ISO time with offset. Absent: no reminder, the task waits until someone picks it up. */
@@ -30,7 +30,7 @@ export type BoardTask = {
 	wakes?: number;
 };
 
-export const BoardDoc = defineDoc<{ next: number; tasks: Record<string, BoardTask> }>({
+const BoardDoc = defineDoc<{ next: number; tasks: Record<string, BoardTask> }>({
 	kind: "mochi.board",
 	version: 1,
 	scope: "session",
@@ -53,9 +53,9 @@ const append = (task: BoardTask, by: string, text: string, now: number) => {
 const live = (task: BoardTask) => task.status === "open" || task.status === "waiting";
 
 /** A woken task with no log line since is woken again after this long. */
-export const REWAKE_MS = 24 * 60 * 60_000;
+const REWAKE_MS = 24 * 60 * 60_000;
 /** Wakes for one due time before the sweep stops trying and tells the owner. */
-export const WAKES_MAX = 3;
+const WAKES_MAX = 3;
 
 const lastLog = (task: BoardTask) => Date.parse(task.log.at(-1)?.at ?? "1970-01-01T00:00:00Z");
 
@@ -63,7 +63,7 @@ const lastLog = (task: BoardTask) => Date.parse(task.log.at(-1)?.at ?? "1970-01-
  * Tasks the sweep should wake now: live and due by `now`, and either not yet woken for this due time, or woken, left
  * untouched for `REWAKE_MS` (a fork that crashed or stopped without board_update), and under `WAKES_MAX`.
  */
-export function dueTasks(tasks: readonly BoardTask[], now: number): BoardTask[] {
+function dueTasks(tasks: readonly BoardTask[], now: number): BoardTask[] {
 	return tasks.filter((task) => {
 		if (!live(task) || task.due === undefined || parseDue(task.due) > now) return false;
 		if (task.nudged !== task.due) return true;
@@ -72,7 +72,7 @@ export function dueTasks(tasks: readonly BoardTask[], now: number): BoardTask[] 
 	});
 }
 
-export function boardBrief(task: BoardTask): string {
+function boardBrief(task: BoardTask): string {
 	const tries = task.nudged === task.due ? task.wakes ?? 1 : 0;
 	if (tries >= WAKES_MAX) {
 		return `Board task #${task.id} (${task.title}) was woken ${tries} times for due ${task.due} and nobody updated it. Read it with tools.board_list, tell the owner in one notify that it is stuck and why if you can see why, then set it to waiting with tools.board_update and no due.`;
@@ -80,7 +80,7 @@ export function boardBrief(task: BoardTask): string {
 	const lines = [
 		`Board task #${task.id} is due: ${task.title}`,
 		`Due ${task.due}. Bots: ${task.bots.join(", ")} (the first leads).`,
-		...task.log.slice(-10).map((entry) => `- ${entry.at} ${entry.by}: ${entry.text}`),
+		...task.log.map((entry) => `- ${entry.at} ${entry.by}: ${entry.text}`),
 		"",
 		"The board woke you for this task. Claim it with tools.board_claim, then do what it needs now. " +
 			"Record what happened with tools.board_update: done when finished, waiting with a new due when it needs time, or a log line. " +

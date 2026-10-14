@@ -4,13 +4,11 @@ import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-work
 import { type AlexandriaCall, FirecrawlClient, type SearchHit as WebHit, type SearchRequest } from "./client.ts";
 import { cleanFirecrawlHtml, extractFirecrawlContent } from "./content.ts";
 
-const EXTRACT_CHARS = 12_000;
 const RECENCY = ["hour", "day", "week", "month", "year"] as const;
 const literals = <T extends string>(values: readonly T[]) => Type.Union(values.map((value) => Type.Literal(value)));
 const SearchHit = Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() });
 type SearchHit = Static<typeof SearchHit>;
 
-/** Web hits deduped by URL. */
 function searchHits(web: WebHit[]): SearchHit[] {
 	const hits: SearchHit[] = [];
 	const seen = new Set<string>();
@@ -24,7 +22,7 @@ function searchHits(web: WebHit[]): SearchHit[] {
 }
 const FIND_TOOLS = { provider: "firecrawl", capability: "find-tools" } as const;
 
-export interface WebDeps {
+interface WebDeps {
 	/** The web service key; absent, every web function fails with a clear error naming `keyEnv`. Bash never gets it. */
 	readonly apiKey: string | undefined;
 	readonly keyEnv: string;
@@ -87,9 +85,8 @@ export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 				const markdown = (page.html === undefined ? undefined : await cleanFirecrawlHtml(page.html, url)) ?? page.markdown ?? "";
 				if (ask === "") return { structuredOutput: markdown };
 				if (markdown === "") throw new Error(`Firecrawl returned no page content for ${url}, so the instruction has nothing to answer from.`);
-				const extracted = await extractFirecrawlContent({ models: deps.models, model: deps.fast, url, markdown, instruction: ask, schema, maxOutput: EXTRACT_CHARS, signal });
-				const notice = extracted.inputTruncated ? "[The model saw only the first and last parts of this long page. Fetch without instruction for all of it.]\n\n" : "";
-				return { structuredOutput: notice + extracted.text, usage: extracted.usage };
+				const extracted = await extractFirecrawlContent({ models: deps.models, model: deps.fast, url, markdown, instruction: ask, schema, signal });
+				return { structuredOutput: extracted.text, usage: extracted.usage };
 			},
 		}),
 		defineTool({

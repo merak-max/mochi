@@ -20,7 +20,6 @@ interface WebhookDeps {
 	readonly harness: Pick<Harness, "commit" | "conversation">;
 	readonly log: Log;
 	readonly classify: Classify;
-	readonly deadlineMs?: number;
 }
 
 type Headers = IncomingMessage["headers"];
@@ -47,7 +46,7 @@ function webhookContent(id: string, prompt: string, body: Buffer): string {
 
 const single = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
 
-export async function startWebhookServer(
+async function startWebhookServer(
 	deps: WebhookDeps,
 	listen: { readonly host: string; readonly port: number },
 	context: Context,
@@ -92,7 +91,7 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 		deps.log("webhook.admitted", { id, delivery, submissionId: submission.id });
 		reply(response, 202, "accepted");
 		const race = withCancel(context);
-		const settled = await Promise.race([submission.wait(race.context), pause(deps.deadlineMs ?? RUN_DEADLINE_MS, race.context.abortSignal).then(() => undefined)]).finally(() => race.cancel());
+		const settled = await Promise.race([submission.wait(race.context), pause(RUN_DEADLINE_MS, race.context.abortSignal).then(() => undefined)]).finally(() => race.cancel());
 		if (settled === undefined && !context.abortSignal?.aborted) {
 			await conversation!.abort(context);
 			deps.log("webhook.timed_out", { id, delivery });

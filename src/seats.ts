@@ -18,13 +18,13 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  * A seat is how far a conversation is trusted, stored in its agent and written only here.
  *   agent    root, every fork of it and every profile. A fork has its parent's tools and prompt, so it reuses its
  *            parent's prompt cache, and forks can fork at any depth.
- *   trigger  a trigger run. It reads outside data (webhook bodies, mail), so it cannot write notes, start agents, add
+ *   trigger  a trigger run. It reads outside data (webhook bodies, mail), so it cannot write notes, fork, add
  *            triggers or change profiles. It reaches the owner only with notify.
  *   peer     another agent's requests over A2A. It works with the owner's apps and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
-export const SEATS = ["agent", "trigger", "peer", "user"] as const;
-export type Seat = (typeof SEATS)[number];
+const SEATS = ["agent", "trigger", "peer", "user"] as const;
+type Seat = (typeof SEATS)[number];
 
 const ALL = SEATS;
 const AGENT: readonly Seat[] = ["agent"];
@@ -33,14 +33,14 @@ const AGENT_TRIGGER: readonly Seat[] = ["agent", "trigger"];
 const NOT_USER: readonly Seat[] = ["agent", "trigger", "peer"];
 
 /** The tools the model calls directly, and the seats that get each. Their `control` (handoff, terminate) works only on a model-issued call. */
-export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
+const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 	codemode: ALL,
 	notify: AGENT_TRIGGER,
 	handoff: ["agent", "user"],
 };
 
 /** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. */
-export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readonly inline: boolean }>> = {
+const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readonly inline: boolean }>> = {
 	read: { seats: ALL, inline: true },
 	bash: { seats: ALL, inline: true },
 	edit: { seats: ALL, inline: true },
@@ -90,13 +90,10 @@ export const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[];
 	profile_update: { seats: AGENT, inline: false },
 };
 
-/** Anthropic's billing classifier flags these names. */
-export const FORBIDDEN_TOOL_NAME = /^(memory|session_search)$|^mcp_(?!_)/;
-
 const SHARED = ["identity", "notes", "skills", "fast-compaction"];
 
 /** The extensions a seat's agent names. Owner notes describe the owner, so a user's thread leaves them out. */
-export function selection(seat: Seat): string[] {
+function selection(seat: Seat): string[] {
 	const shared = seat === "user" ? SHARED.filter((name) => name !== "notes") : SHARED;
 	return [...shared, `seat-${seat}`];
 }
@@ -104,23 +101,23 @@ export function selection(seat: Seat): string[] {
 const drift = (names: readonly string[], table: object): string[] => [...names.filter((name) => !Object.hasOwn(table, name)), ...Object.keys(table).filter((name) => !names.includes(name))];
 
 /** Longest script run, set when a script names no `timeout_ms` of its own. */
-export const SCRIPT_DEADLINE_MS = 10 * 60_000;
+const SCRIPT_DEADLINE_MS = 10 * 60_000;
 const SCRIPT_MEMORY_BYTES = 256 * 1024 * 1024;
 
 /** A script with no options line gets the default deadline, so a hung call never holds a turn forever. */
-function withDeadline(code: string, deadlineMs: number): string {
+function withDeadline(code: string): string {
 	if (code.trimStart().startsWith("// @options:")) return code;
-	return `// @options: {"timeout_ms": ${deadlineMs}}\n${code}`;
+	return `// @options: {"timeout_ms": ${SCRIPT_DEADLINE_MS}}\n${code}`;
 }
 
 /**
  * One `seat-<seat>` extension per seat: its model tools, `codemode` with its prompt section, and the library tools its
  * scripts may call. Throws when the tables and the definitions disagree.
  */
-export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], deadlineMs = SCRIPT_DEADLINE_MS): Extension[] {
+export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[]): Extension[] {
 	const codemode = createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: SCRIPT_MEMORY_BYTES }), models: false });
 	const tool = codemode.tools![0]!;
-	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code, deadlineMs) }, api, context) };
+	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
 	const disagree = [...drift([...modelTools.map((each) => each.name), "codemode"], SURFACE), ...drift(library.map((each) => each.name), LIBRARY)];
 	if (disagree.length > 0) throw new Error(`SURFACE, LIBRARY and the definitions disagree on ${disagree.join(", ")}.`);
 	return SEATS.map((seat) => {
@@ -169,9 +166,4 @@ export async function forkPoint(tx: Tx, parent: ConversationId): Promise<EntryId
 	const newest = (await tx.scanEntries({ conversationId: parent }, 1)).items[0];
 	if (newest === undefined) throw new Error("There is nothing to fork yet.");
 	return newest.id;
-}
-
-/** A fork keeps its parent's whole agent and history through `at`, so its first request reuses the parent's cached prompt. */
-export async function forkSeatConversation(tx: Tx, parent: ConversationId, at: EntryId, ownership: ConversationOwnership): Promise<ConversationId> {
-	return (await tx.forkConversation(parent, at, { ownership })).id;
 }
