@@ -101,23 +101,23 @@ function selection(seat: Seat): string[] {
 const drift = (names: readonly string[], table: object): string[] => [...names.filter((name) => !Object.hasOwn(table, name)), ...Object.keys(table).filter((name) => !names.includes(name))];
 
 /** Longest script run, set when a script names no `timeout_ms` of its own. */
-export const SCRIPT_DEADLINE_MS = 10 * 60_000;
+const SCRIPT_DEADLINE_MS = 10 * 60_000;
 const SCRIPT_MEMORY_BYTES = 256 * 1024 * 1024;
 
 /** A script with no options line gets the default deadline, so a hung call never holds a turn forever. */
-function withDeadline(code: string, deadlineMs: number): string {
+function withDeadline(code: string): string {
 	if (code.trimStart().startsWith("// @options:")) return code;
-	return `// @options: {"timeout_ms": ${deadlineMs}}\n${code}`;
+	return `// @options: {"timeout_ms": ${SCRIPT_DEADLINE_MS}}\n${code}`;
 }
 
 /**
  * One `seat-<seat>` extension per seat: its model tools, `codemode` with its prompt section, and the library tools its
  * scripts may call. Throws when the tables and the definitions disagree.
  */
-export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], deadlineMs = SCRIPT_DEADLINE_MS): Extension[] {
+export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[]): Extension[] {
 	const codemode = createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: SCRIPT_MEMORY_BYTES }), models: false });
 	const tool = codemode.tools![0]!;
-	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code, deadlineMs) }, api, context) };
+	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
 	const disagree = [...drift([...modelTools.map((each) => each.name), "codemode"], SURFACE), ...drift(library.map((each) => each.name), LIBRARY)];
 	if (disagree.length > 0) throw new Error(`SURFACE, LIBRARY and the definitions disagree on ${disagree.join(", ")}.`);
 	return SEATS.map((seat) => {

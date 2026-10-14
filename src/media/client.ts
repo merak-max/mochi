@@ -15,8 +15,6 @@ export interface MediaDeps {
 	readonly env: Readonly<Record<string, string | undefined>>;
 	/** The `[providers]` table, where `media.speech.provider` finds its url and key. */
 	readonly providers?: Readonly<Record<string, ProviderConfig>>;
-	readonly fetch?: typeof fetch;
-	readonly pollMs?: number;
 }
 
 const ImageReply = Type.Object({ data: Type.Array(Type.Union([
@@ -56,7 +54,7 @@ export class MediaClient {
 
 	private async request(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
 		const timeout = AbortSignal.timeout(120_000);
-		const response = await (this.deps.fetch ?? fetch)(url, {
+		const response = await fetch(url, {
 			...init, signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
 		});
 		if (!response.ok) {
@@ -131,7 +129,7 @@ export class MediaClient {
 					const content = await this.request(`${url}/content?variant=video`, { headers: route.headers }, bounded);
 					return saveOutput(this.deps.workDir, "mp4", new Uint8Array(await content.arrayBuffer()));
 				}
-				await delay(this.deps.pollMs ?? 5_000, undefined, { signal: bounded });
+				await delay(5_000, undefined, { signal: bounded });
 			}
 		} catch (error) {
 			throw new Error(`Video ${id} was not downloaded. ${error instanceof Error ? error.message : String(error)} Resume with this id, do not generate it again.`, { cause: error });

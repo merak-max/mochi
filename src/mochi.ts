@@ -23,7 +23,7 @@ import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, reca
 import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
 import { defaultSelection, seatExtensions } from "./seats.ts";
-import { reactTool, defineTurn, ensureLine, type Line, openTurn, RETRY } from "./turn/turn.ts";
+import { reactTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
 import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
 import { fastBrowserFns } from "./browser/fast.ts";
@@ -113,7 +113,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...browserFns(browserDeps(options.web)),
 		...fastBrowserFns({ ...browserDeps(options.web), models: options.models, fast: options.fast, classify: options.classify }),
 		...mediaFns({ ...media, workDir: options.workDir }),
-		...gifFns({ workDir: options.workDir }),
+		...gifFns(options.workDir),
 		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
 		...forkFns((name) => join(options.workDir, "forks", name)),
@@ -158,7 +158,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 
 	const root = await harness.root(context, { agent: { model: options.brain, thinkingLevel: "medium" } });
 	await root.configure({ model: options.brain, ...(options.instructions === undefined ? {} : { instructions: options.instructions }) }, context);
-	const turn = defineTurn({ root, harness, users, channels: options.channels, workDir: options.workDir, media, retry: RETRY, log });
+	const turn = defineTurn({ root, harness, users, channels: options.channels, workDir: options.workDir, media, log });
 	if (options.scheduling === "daemon") registry.install(defineExtension({ name: "delivery", tasks: [turn] }));
 	const lineId = await ensureLine(harness, context);
 	const commands = commandTask({

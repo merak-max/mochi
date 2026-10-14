@@ -29,8 +29,7 @@ function parseTenorPage(html: string): GifHit[] {
 	return hits;
 }
 
-export function gifFns(deps: { readonly workDir: string; readonly fetch?: typeof fetch }): ToolRegistration[] {
-	const network = deps.fetch ?? fetch;
+export function gifFns(workDir: string): ToolRegistration[] {
 	return [
 		defineTool({
 			name: "gif_search",
@@ -41,7 +40,7 @@ export function gifFns(deps: { readonly workDir: string; readonly fetch?: typeof
 			execute: async ({ query, limit }, _api, context) => {
 				const slug = query.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 				if (slug === "") throw new Error("The GIF query needs letters or digits.");
-				const response = await network(`${SEARCH_URL}${slug}-gifs`, { headers: { "user-agent": BROWSER_AGENT }, signal: context.abortSignal ?? null });
+				const response = await fetch(`${SEARCH_URL}${slug}-gifs`, { headers: { "user-agent": BROWSER_AGENT }, signal: context.abortSignal ?? null });
 				if (!response.ok) throw new Error(`Tenor search failed with HTTP ${response.status}.`);
 				const hits = parseTenorPage(await response.text());
 				if (hits.length === 0) throw new Error("Tenor returned no GIFs for that query; its page layout may have changed.");
@@ -57,11 +56,11 @@ export function gifFns(deps: { readonly workDir: string; readonly fetch?: typeof
 			execute: async ({ url }, _api, context) => {
 				const parsed = new URL(url);
 				if (parsed.protocol !== "https:" || parsed.hostname !== MEDIA_HOST || !parsed.pathname.endsWith(".gif")) throw new Error(`Only https://${MEDIA_HOST} .gif URLs from gif_search can be saved.`);
-				const response = await network(parsed, { headers: { "user-agent": BROWSER_AGENT }, signal: context.abortSignal ?? null });
+				const response = await fetch(parsed, { headers: { "user-agent": BROWSER_AGENT }, signal: context.abortSignal ?? null });
 				if (!response.ok) throw new Error(`GIF download failed with HTTP ${response.status}.`);
 				const bytes = new Uint8Array(await response.arrayBuffer());
 				if (bytes.length > MAX_GIF_BYTES) throw new Error(`The GIF is ${bytes.length} bytes, over the ${MAX_GIF_BYTES} byte limit. Pick another.`);
-				return { structuredOutput: await saveOutput(deps.workDir, "gif", bytes) };
+				return { structuredOutput: await saveOutput(workDir, "gif", bytes) };
 			},
 		}),
 	];

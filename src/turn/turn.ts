@@ -105,17 +105,16 @@ type TurnState =
 type TurnResult = "sent" | "silent" | "merged";
 type TurnTask = Task<TurnInput, TurnState, TurnResult, object>;
 
-export type Retry = { readonly firstMs: number; readonly maxMs: number; readonly giveUpMs: number };
-export const RETRY: Retry = { firstMs: 5_000, maxMs: 5 * 60_000, giveUpMs: 60 * 60_000 };
+const RETRY = { firstMs: 5_000, maxMs: 5 * 60_000, giveUpMs: 60 * 60_000 };
 
-const delayOf = (retry: Retry, attempt: number): number => Math.min(retry.firstMs * 2 ** (attempt - 1), retry.maxMs);
+const delayOf = (attempt: number): number => Math.min(RETRY.firstMs * 2 ** (attempt - 1), RETRY.maxMs);
 
-function nextOutage(outage: Outage | null, now: number, retry: Retry = RETRY): Outage | "give-up" {
-	if (outage === null) return { retryAt: now + retry.firstMs, attempt: 1, downMs: 0 };
-	const downMs = outage.downMs + delayOf(retry, outage.attempt);
-	if (downMs >= retry.giveUpMs) return "give-up";
+function nextOutage(outage: Outage | null, now: number): Outage | "give-up" {
+	if (outage === null) return { retryAt: now + RETRY.firstMs, attempt: 1, downMs: 0 };
+	const downMs = outage.downMs + delayOf(outage.attempt);
+	if (downMs >= RETRY.giveUpMs) return "give-up";
 	const attempt = outage.attempt + 1;
-	return { retryAt: now + delayOf(retry, attempt), attempt, downMs };
+	return { retryAt: now + delayOf(attempt), attempt, downMs };
 }
 
 const taskFamily = (kind: string) => defineDocFamily<{ task: TaskId | null }, null>({ kind, version: 1, scope: "session", family: true, initial: () => ({ task: null }) });
@@ -188,7 +187,7 @@ export interface Line {
 }
 
 // The record is a passive write, which a task's conversation handle cannot submit, so it uses the host's handles.
-type TurnHost = Pick<Line, "root" | "harness" | "users" | "channels" | "workDir" | "media"> & { readonly retry: Retry; readonly log: Log };
+type TurnHost = Pick<Line, "root" | "harness" | "users" | "channels" | "workDir" | "media"> & { readonly log: Log };
 
 const NOTIFY_ENTRY = "app.notify";
 const DELIVERED_RECORD_CHARS = 280;
@@ -269,7 +268,7 @@ function claimKey(answer: Answer, task: TaskId, channel: ChatChannelId): string 
 }
 
 export function defineTurn(host: TurnHost): TurnTask {
-	const { users, channels, workDir, media, retry, log } = host;
+	const { users, channels, workDir, media, log } = host;
 	return defineTask<TurnInput, TurnState, TurnResult>({
 		name: "mochi.turn",
 		version: 2,
@@ -371,7 +370,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 						if (error instanceof SendRejected) {
 							log("turn.rejected", { task: task.id, channel: id, bubble: sent, error: error.message });
 						} else {
-							const next = nextOutage(outage, runtime.now(), retry);
+							const next = nextOutage(outage, runtime.now());
 							if (next === "give-up") {
 								log("turn.undelivered", { task: task.id, channel: id, answer, sent });
 								return runtime.commit(() => ({ status: "terminal", outcome: { status: "failed", error: { message: `${id} stayed down` } } }), context);
