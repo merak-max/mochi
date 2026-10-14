@@ -171,6 +171,29 @@ test("a steer that arrives after the answer starts the next run and gets its own
 	await mochi.close();
 });
 
+test("a burst of texts that lands while the answer is being written reaches the model as one turn and gets one reply", async () => {
+	const answer = gated(fauxAssistantMessage("First answer here."));
+	const requests: number[] = [];
+	const faux = newFaux();
+	faux.setResponses([answer.respond, async (request: { messages: { role: string }[] }) => {
+		requests.push(request.messages.filter((each) => each.role === "user").length);
+		return fauxAssistantMessage("All three, together.");
+	}]);
+	const whatsapp = recordingChannel("whatsapp");
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["whatsapp", whatsapp.channel]]));
+	await ingest(mochi.line, message("whatsapp", "a", "one"), context);
+	await answer.entered;
+	await ingest(mochi.line, message("whatsapp", "b", "two"), context);
+	await ingest(mochi.line, message("whatsapp", "c", "three"), context);
+	await ingest(mochi.line, message("whatsapp", "d", "four"), context);
+	answer.release();
+	await turnsSettled(mochi.harness);
+	assert.equal(faux.state.callCount, 2, "one request for the burst, not one per text");
+	assert.equal(requests[0], 4);
+	assert.deepEqual(whatsapp.sent, ["First answer here.", "All three, together."]);
+	await mochi.close();
+});
+
 test("a failed run sends one failure notice", async () => {
 	const faux = newFaux();
 	faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "boom" })]);

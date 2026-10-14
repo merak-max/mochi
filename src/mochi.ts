@@ -170,7 +170,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		{
 			models: options.models,
 			registry,
-			settings: { extensions: defaultSelection((name) => registry.snapshot().extension(name)), compaction: COMPACTION },
+			settings: { extensions: defaultSelection((name) => registry.snapshot().extension(name)), compaction: COMPACTION, steeringMode: "all", followUpMode: "all" },
 			env: ({ cwd }) => environment(cwd ?? options.workDir),
 			onReport: (error) => log("harness.report", { error: String(error) }),
 			now: () => now().getTime(),
