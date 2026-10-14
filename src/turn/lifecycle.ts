@@ -1,13 +1,8 @@
 import type { Context } from "@earendil-works/chord";
 import { type Message, type Models, Type } from "@earendil-works/pi-ai";
 import {
-	CompactionTask,
 	type Conversation,
-	defineExtension,
 	defineTool,
-	type Harness,
-	hook,
-	LiveDoc,
 	type ModelRef,
 	ResetEntry,
 	type SubmissionId,
@@ -31,44 +26,7 @@ export function fastCompletion(models: Models, fast: ModelRef): FastCompletion {
 	};
 }
 
-export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
-
-Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
-
-const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work. If the conversation starts with an earlier summary, preserve its information and fold the newer messages into it.
-
-Use this EXACT format:
-
-## Goal
-[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
-
-## Constraints & Preferences
-- [Any constraints, preferences, or requirements mentioned by user]
-- [Or "(none)" if none were mentioned]
-
-## Progress
-### Done
-- [x] [Completed tasks/changes]
-
-### In Progress
-- [ ] [Current work]
-
-### Blocked
-- [Issues preventing progress, if any]
-
-## Key Decisions
-- **[Decision]**: [Brief rationale]
-
-## Next Steps
-1. [Ordered list of what should happen next]
-
-## Critical Context
-- [Any data, examples, or references needed to continue]
-- [Or "(none)" if not applicable]
-
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
-
-export function serializeConversation(messages: readonly Message[]): string {
+function serializeConversation(messages: readonly Message[]): string {
 	const parts: string[] = [];
 	for (const message of messages) {
 		if (message.role === "user") {
@@ -89,29 +47,6 @@ export function serializeConversation(messages: readonly Message[]): string {
 		}
 	}
 	return parts.join("\n\n");
-}
-
-export function compactionExtension(fast: FastCompletion) {
-	return defineExtension({
-		name: "fast-compaction",
-		hooks: [hook(CompactionTask, {
-			beforeCompact: async (input, api, context) => {
-				try {
-					const existing = await api.memo<string>("mochi.compaction.summary", context);
-					if (existing !== undefined) return { summary: existing };
-					const focus = input.instructions === undefined ? "" : `\n\nAdditional focus: ${input.instructions}`;
-					const summary = await fast({
-						system: SUMMARIZATION_SYSTEM_PROMPT,
-						prompt: `<conversation>\n${serializeConversation(input.messages)}\n</conversation>\n\n${SUMMARIZATION_PROMPT}${focus}`,
-						maxTokens: 12_000,
-					}, context);
-					return { summary: await api.memo("mochi.compaction.summary", summary, context) };
-				} catch {
-					return undefined;
-				}
-			},
-		})],
-	});
 }
 
 export async function threadHandoff(root: Conversation, fast: FastCompletion, context: Context): Promise<string | undefined> {
@@ -144,35 +79,6 @@ export async function keyedReset(root: Pick<Conversation, "submit">, key: string
 	}, context);
 	await submission.wait(context);
 	return submission.id;
-}
-
-export async function idleResetIfStale(
-	deps: { readonly harness: Harness; readonly fast: FastCompletion; readonly idleResetMinutes: number; readonly now: () => number },
-	conversation: Conversation,
-	key: string,
-	context: Context,
-): Promise<boolean> {
-	const resetKey = `idle-reset:${key}`;
-	const existing = await deps.harness.commit((tx) => tx.submissionByRequest(conversation.id, resetKey), context);
-	if (existing !== undefined) {
-		await (await deps.harness.submission(existing.id, context))?.wait(context);
-		return true;
-	}
-	if (deps.idleResetMinutes <= 0) return false;
-	const live = await deps.harness.snapshot(LiveDoc, conversation.id, context);
-	if (live?.run !== undefined) return false;
-	const view = await conversation.context(context);
-	const newest = view.entries.at(-1);
-	let at: number | undefined;
-	if (newest?.model !== undefined && newest.model.length > 0) at = Math.max(...newest.model.map((message) => message.timestamp));
-	else if (newest?.data !== null && typeof newest?.data === "object" && "at" in newest.data && typeof newest.data.at === "number") at = newest.data.at;
-	if (at === undefined || deps.now() - at <= deps.idleResetMinutes * 60_000) return false;
-	const handoff = await threadHandoff(conversation, deps.fast, context);
-	const current = await conversation.context(context);
-	const busy = await deps.harness.snapshot(LiveDoc, conversation.id, context);
-	if (busy?.run !== undefined || current.entries.at(-1)?.id !== view.entries.at(-1)?.id) return false;
-	await keyedReset(conversation, resetKey, handoff, deps.now(), context);
-	return true;
 }
 
 export function handoffTool() {
