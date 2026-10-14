@@ -6,6 +6,7 @@ import type { ChannelId } from "./channels/types.ts";
 import { allPages } from "./pages.ts";
 import { seatRoot } from "./seats.ts";
 import type { AgentCatalog } from "./agents/catalog.ts";
+import type { Log } from "./log.ts";
 import { addTrigger, runAgent, scanTriggers, type TriggerTask } from "./triggers/trigger.ts";
 import type { Trigger } from "./triggers/types.ts";
 import { type Line, openTurn } from "./turn/turn.ts";
@@ -16,7 +17,7 @@ import { type Line, openTurn } from "./turn/turn.ts";
 export interface UpgradeStep {
 	readonly unit: string;
 	readonly name: string;
-	run(host: { readonly storage: Storage; readonly line: Line; readonly trigger: TriggerTask; readonly catalog: AgentCatalog }, context: Context): Promise<{ readonly changed: number }>;
+	run(host: { readonly storage: Storage; readonly line: Line; readonly trigger: TriggerTask; readonly catalog: AgentCatalog; readonly log: Log }, context: Context): Promise<{ readonly changed: number }>;
 }
 
 type Route = { submissionId: SubmissionId; channel: ChannelId; messageId: string; recorded: boolean };
@@ -185,12 +186,20 @@ export const codeToCodemode: UpgradeStep = {
 export const triggerAgents: UpgradeStep = {
 	unit: "U14",
 	name: "trigger-agents",
-	async run({ line: { harness }, catalog }, context) {
+	async run({ line: { harness }, catalog, log }, context) {
 		return harness.commit(async (tx) => {
 			let changed = 0;
 			for (const task of await scanTriggers(tx)) {
 				if (task.state.status === "terminal" || task.abortRequested) continue;
-				const { agent, instructions } = runAgent(task.input.trigger, catalog);
+				let resolved: ReturnType<typeof runAgent>;
+				try {
+					resolved = runAgent(task.input.trigger, catalog);
+				} catch (error) {
+					// One trigger naming a missing role must not stop mochi: it keeps the agent it has, and the log says why.
+					log("upgrade.trigger_agent_skipped", { id: task.input.trigger.id, error: String(error) });
+					continue;
+				}
+				const { agent, instructions } = resolved;
 				const current = await tx.doc(AgentDoc, task.conversationId!);
 				const same = JSON.stringify(current.model) === JSON.stringify(agent.model) && current.instructions === instructions && current.thinkingLevel === (agent.thinkingLevel ?? current.thinkingLevel);
 				if (same) continue;

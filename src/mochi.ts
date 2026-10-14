@@ -221,7 +221,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...(idleResetMinutes > 0 ? { idleReset: (conversation: Conversation, key: string, context: Context) => idleResetIfStale({ harness, fast, idleResetMinutes, now: () => now().getTime() }, conversation, key, context) } : {}),
 	};
 	for (const step of UPGRADES) {
-		const { changed } = await step.run({ storage: options.storage, line, trigger, catalog: options.agents }, context);
+		const { changed } = await step.run({ storage: options.storage, line, trigger, catalog: options.agents, log }, context);
 		if (changed > 0) log("upgrade", { unit: step.unit, name: step.name, changed });
 	}
 	await bindRepo(harness, options.memory?.repo, context);
