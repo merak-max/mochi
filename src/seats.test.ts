@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { AgentDoc, createRegistry, defineTool, Harness } from "@earendil-works/pi-durable";
+import { AgentDoc, createRegistry, defineDoc, defineExtension, defineTask, defineTool, Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -75,4 +75,28 @@ test("conversations on the retired owner, run and worker seats move to the agent
 	assert.deepEqual(logs, [{ event: "upgrade", unit: "U11", name: "one-agent-seat", changed: 1 }]);
 	assert.deepEqual((await mochi.harness.snapshot(AgentDoc, run, context))?.extensions, selection("agent"));
 	await mochi.close();
+});
+
+test("a live nightly Dreaming task is settled and its document retired once", async () => {
+	const dir = await tempDir();
+	const dream = defineTask<null, { phase: "wait" }, null>({ name: "mochi.dream", version: 1, initial: () => ({ phase: "wait" }), phases: { wait: async () => {} }, abort: async () => {} });
+	const doc = defineDoc({ kind: "mochi.dream", version: 1, scope: "session", initial: () => ({ task: null as string | null }) });
+	const registry = createRegistry();
+	registry.install(defineExtension({ name: "old", tasks: [dream] }));
+	const old = await Harness.open(await openNodeSqliteStorage(join(dir, "mochi.sqlite")), { models: createModels(), registry }, context);
+	await old.root(context, { agent: { model: FAUX, thinkingLevel: "high" } });
+	const id = await old.commit(async (tx) => {
+		(await tx.doc(doc)).task = "x";
+		return tx.createTask(dream, null, { ownership: { kind: "conversation" }, conversationId: ROOT_CONVERSATION_ID, background: true });
+	}, context);
+	await old.close(context);
+	const logs: unknown[] = [];
+	const mochi = await openTestMochi(dir, newFaux(), new Map(), undefined, [], { log: (event, fields) => logs.push({ event, ...fields }) });
+	assert.deepEqual(logs.at(-1), { event: "upgrade", unit: "U12", name: "retire-dreaming", changed: 2 });
+	assert.equal((await mochi.harness.getTask(id, context))?.state.status, "terminal");
+	assert.equal(await mochi.harness.snapshot(doc, context), undefined);
+	await mochi.close();
+	const again: unknown[] = [];
+	await (await openTestMochi(dir, newFaux(), new Map(), undefined, [], { log: (event) => again.push(event) })).close();
+	assert.deepEqual(again, []);
 });

@@ -1,11 +1,17 @@
 import type { Context } from "@earendil-works/chord";
 import { AssistantEntry, type ConversationId, defineTask, type Harness, LiveDoc, ROOT_CONVERSATION_ID, type Tx } from "@earendil-works/pi-durable";
+import { startFork } from "../agents/subagent.ts";
+import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
+import { forkPoint } from "../seats.ts";
 import { UserDoc } from "./turn.ts";
 
 // Compact a quiet thread while the provider's prompt cache is still warm. Without this, the first message after a
 // break of more than the cache's lifetime rewrites the whole context to the cache; with it, that message rewrites
 // only the summary. The summary itself is written by the fast model (`fast-compaction`).
+//
+// Reflect: before root is compacted, a background fork of it saves what is worth keeping with `note`. The fork holds
+// the whole context the summary is about to drop, and its first request reads the still-warm cache.
 
 /** How long a thread stays quiet before it is compacted: inside Anthropic's five-minute cache lifetime. */
 export const SETTLE_AFTER_MS = 4 * 60_000;
@@ -13,6 +19,12 @@ export const SETTLE_AFTER_MS = 4 * 60_000;
 export const SETTLE_MIN_TOKENS = 30_000;
 /** How often the task looks for a thread that went quiet. */
 export const LOOK_EVERY_MS = 30_000;
+
+export const REFLECT_BRIEF =
+	"This conversation is about to be compacted, and its detail will be lost. Look back over it and save what is worth keeping with tools.note: " +
+	"lasting facts about the owner, their people, projects and preferences, standing rules they gave, and corrections to notes that are now wrong. " +
+	"Update an existing note rather than adding a near-copy. Skip one-off tasks and anything already saved. Do not message anyone. " +
+	"Answer with one line naming what you saved, or nothing new.";
 
 type Thread = { readonly conversation: ConversationId; readonly lastAt: number; readonly tokens: number; readonly busy: boolean };
 
@@ -49,7 +61,7 @@ export function due(thread: Thread, settled: number | undefined, now: number, ca
 /** `settled`: per thread, the turn time it was last compacted after, so one quiet spell compacts once. `next`: when to look again. */
 type SettleState = { readonly phase: "settle"; readonly settled: Readonly<Record<string, number>>; readonly next: number };
 
-export function defineSettle(deps: { readonly harness: () => Harness; readonly handles: readonly string[]; readonly cacheMs: number; readonly lookEveryMs: number; readonly minTokens: number; readonly log: Log }) {
+export function defineSettle(deps: { readonly harness: () => Harness; readonly handles: readonly string[]; readonly cacheMs: number; readonly lookEveryMs: number; readonly minTokens: number; readonly reflect: boolean; readonly log: Log }) {
 	return defineTask<null, SettleState, null>({
 		name: "mochi.settle",
 		version: 1,
@@ -71,6 +83,13 @@ export function defineSettle(deps: { readonly harness: () => Harness; readonly h
 					if (!due(thread, settled[thread.conversation], runtime.now(), deps.cacheMs, deps.minTokens)) continue;
 					const conversation = await harness.conversation(thread.conversation, context);
 					if (conversation === undefined) continue;
+					if (deps.reflect && thread.conversation === ROOT_CONVERSATION_ID) {
+						const { id, created } = await harness.commit(async (tx) => {
+							const at = await forkPoint(tx, ROOT_CONVERSATION_ID);
+							return journaled(tx, task.id, `reflect:${thread.lastAt}`, () => startFork(tx, ROOT_CONVERSATION_ID, at, { name: "reflect", brief: REFLECT_BRIEF }));
+						}, context);
+						if (created) deps.log("thread.reflect", { conversation: thread.conversation, task: id });
+					}
 					await conversation.compact(undefined, context);
 					settled[thread.conversation] = thread.lastAt;
 					deps.log("thread.settled", { conversation: thread.conversation, tokens: thread.tokens, quietMs: runtime.now() - thread.lastAt });

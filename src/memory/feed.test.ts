@@ -28,9 +28,9 @@ test("the feed catches up on commits made while it was stopped, then indexes eac
 	await (await mochi.root.submit({ type: "input", content: "My cat is called Pancake." }, context)).wait(context);
 	await until("again", 200);
 
-	await mochi.harness.commit((tx) => writeNote(tx, { slug: "dream-fact", kind: "fact", subject: "durable", body: "Unattended platypus fact." }, undefined, "2026-10-05"), context);
+	await mochi.harness.commit((tx) => writeNote(tx, { slug: "unattended-fact", kind: "fact", subject: "durable", body: "Unattended platypus fact." }, undefined, "2026-10-05"), context);
 	await until("platypus", 1000);
-	assert.equal(mochi.index.search({ query: "platypus", limit: 5 })[0]?.ref, "note:dream-fact");
+	assert.equal(mochi.index.search({ query: "platypus", limit: 5 })[0]?.ref, "note:unattended-fact");
 
 	const stopping = Date.now();
 	controller.abort();

@@ -45,10 +45,10 @@ import { type A2APeers, a2aFns } from "./a2a/tools.ts";
 import { defineSettle, ensureSettle, LOOK_EVERY_MS, SETTLE_MIN_TOKENS } from "./turn/settle.ts";
 import { profileFns } from "./profiles/profiles.ts";
 import { type Home, homeAt } from "./home.ts";
-import { defineDream, dreamConfig, type DreamConfigInput, reconcileDream } from "./memory/dream.ts";
 
 export interface MochiOptions {
-	readonly memory?: { repo: string; dreaming?: DreamConfigInput };
+	/** `reflect`: a fork of root saves notes before root is compacted. Default on; needs daemon scheduling. */
+	readonly memory?: { repo?: string; reflect?: boolean };
 	readonly storage: Storage;
 	readonly models: Models;
 	readonly brain: ModelRef;
@@ -117,7 +117,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const { index, log } = options;
 	const users = options.users ?? [];
 	const a2aPeers = options.a2aPeers ?? new Map();
-	const dreaming = dreamConfig(options.memory?.dreaming, options.timeZone);
 	const registry = createRegistry();
 	const fast = fastCompletion(options.models, options.fast);
 	const media: Omit<MediaDeps, "workDir"> = options.media ?? { config: { images: { default: "", providers: [] } }, env: {} };
@@ -131,7 +130,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		handoffTool(),
 	];
 	const now = options.now ?? (() => new Date());
-	const dream = defineDream({ models: { brain: options.brain, fast: options.fast }, pick: fast, today: options.today, log });
 	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
@@ -161,7 +159,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		compactionExtension(fast),
 		defineExtension({ name: "agents", tasks: [AgentTask] }),
 		defineExtension({ name: "procs", tasks: [procWatch] }),
-		defineExtension({ name: "memory-maintenance", tasks: [PublisherTask, dream] }),
+		defineExtension({ name: "memory-maintenance", tasks: [PublisherTask] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
 		...seatExtensions(modelTools, library, options.scriptDeadlineMs ?? SCRIPT_DEADLINE_MS),
@@ -207,7 +205,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
 	if (options.scheduling === "daemon") {
 		const cacheMs = (options.models.getModel(options.brain.provider, options.brain.modelId)?.promptCache?.short ?? 300) * 1000;
-		const settle = defineSettle({ harness: () => harness, handles: users.map((user) => user.handle), cacheMs, lookEveryMs: options.settleLookMs ?? LOOK_EVERY_MS, minTokens: options.settleMinTokens ?? SETTLE_MIN_TOKENS, log });
+		const settle = defineSettle({ harness: () => harness, handles: users.map((user) => user.handle), cacheMs, lookEveryMs: options.settleLookMs ?? LOOK_EVERY_MS, minTokens: options.settleMinTokens ?? SETTLE_MIN_TOKENS, reflect: options.memory?.reflect ?? true, log });
 		registry.install(defineExtension({ name: "settle", tasks: [settle] }));
 		await ensureSettle(harness, settle, lineId, context);
 	}
@@ -230,7 +228,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		if (changed > 0) log("upgrade", { unit: step.unit, name: step.name, changed });
 	}
 	await bindRepo(harness, options.memory?.repo, context);
-	await reconcileDream(harness, dream, dreaming, options.scheduling, context);
 	index.replaceNotes(sortedNotes(await readMemory(harness, context)));
 	return { harness, root, registry, classify: options.classify, line, trigger, catalog: options.agents };
 }

@@ -24,29 +24,8 @@ These checks do not protect against arbitrary simultaneous human shell writes be
 
 Passive timestamped `mochi.memory-change` entries anchor historical recall after unattended writes. They contribute no model input and start no root model turn.
 
-## Dreaming configuration
+## Reflect
 
-Dreaming is off by default; the owner's daemon turns it on. The daemon supports these `data/config.json` settings:
+Before the settle task compacts root, it forks root and asks the fork to save what is worth keeping with `note`. The fork sees the whole context the compaction summary is about to drop, and its first request reads root's prompt cache. Its writes go through `note` like any other: the secret scan, owner-note protection, and the cap on always-in-prompt notes all apply, and each note's source is the fork's own entry. It is on by default; `memory.reflect = false` in `config.toml` turns it off. Terminal-only mode has no settle task and so no reflect.
 
-```json
-{
-	"memory": {
-		"repo": "/absolute/path/to/memory",
-		"dreaming": {
-			"enabled": true,
-			"cron": "30 4 * * *",
-			"tz": "Asia/Kolkata",
-			"model": "fast",
-			"deadlineMinutes": 20
-		}
-	}
-}
-```
-
-The repository defaults to `dataDir/memory`. The cron defaults to `30 4 * * *`; the timezone defaults to the owner's timezone. Model is `fast` or `brain`, default `fast`. Deadline is 0.01 to 120 minutes, default 20. Invalid cron, timezone, and schema values are rejected before startup. Restart applies enabled, disabled, and changed configuration. Terminal-only mode disables Dreaming.
-
-Each scheduled run pins current memory, a bounded set of committed transcript evidence, a cutoff, a request ID, and a deadline. It opens a separate ownerless conversation with no extensions or tools. The model can only return structured put or forget proposals with exact provided evidence. It cannot notify, call apps, run code, access files, or start agents. Previous Dreaming answers are not evidence.
-
-The task persists the proposal batch and absolute deadline before applying it. A resumed expired proposal is discarded without a memory write. A single SQLite commit rejects a stale memory base or changed revision, including edits that later restore identical bytes. It also rejects invented or out-of-cutoff evidence, owner-note changes, secrets, duplicate targets, and standing user or rule proposals. Only the owner's note tool can create standing user and rule notes; Dreaming cannot promote webhook or assistant text into those prompt sections. Valid edits use the normal note owner and publication queue. Failure, timeout, empty output, and missed slots advance silently. Configuration replacement revokes the old task's application rights, aborts its model conversation, then creates a new generation. No scheduled work enters the root model conversation.
-
-Evidence selection includes the owner conversation and up to 63 other recent non-maintenance conversations: every entry after the previous successful dream's cutoff, up to 1,500,000 characters, and 6,000 per entry. A dream that fails or is rejected leaves the cutoff, so the next one reads the same entries. Evidence over 40,000 characters is first narrowed: the fast model maps each 40,000-character chunk to the entries that state a lasting fact (memoized per chunk, 8 in flight), and the reviewer reduces over the newest picks that fit. A durable conversation marker excludes prior Dreaming and publication work even when its instructions change. Evidence validation verifies committed text and provenance, not semantic truth. Conservative inference remains a model judgment.
+Reflect replaced the nightly Dreaming review. A store that ran Dreaming has its task settled and its `mochi.dream` document retired at the next boot. A `[memory.dreaming]` table in `config.toml` is read and ignored.

@@ -1,6 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import { type Static, Type } from "@earendil-works/pi-ai";
-import { type ConversationId, defineTask, defineTool, type TaskId, type TaskRecord, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { type ConversationId, defineTask, defineTool, type EntryId, type TaskId, type TaskRecord, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { journaled } from "../journal.ts";
 import { allPages } from "../pages.ts";
 import { createSeatConversation, forkPoint, forkSeatConversation } from "../seats.ts";
@@ -21,6 +21,13 @@ export type AgentResult = { readonly answer: string } | { readonly failure: stri
 type AgentRecord = TaskRecord<AgentInput, { readonly phase: "run" }, AgentResult>;
 
 const KIND = "mochi.agent";
+
+/** Inside one commit, after `forkPoint` was read: a background agent task on a fork of `parent` at `at`. */
+export async function startFork(tx: Tx, parent: ConversationId, at: EntryId, input: AgentInput): Promise<TaskId<AgentResult>> {
+	const id = await tx.createTask(AgentTask, input, { ownership: { kind: "conversation" }, conversationId: parent, background: true });
+	await forkSeatConversation(tx, parent, at, { kind: "task", taskId: id });
+	return id;
+}
 
 const childOf = async (tx: Tx, task: TaskId): Promise<ConversationId> => (await tx.scanConversations({ ownerTaskId: task }, 1)).items[0]!.id;
 

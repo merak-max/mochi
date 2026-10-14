@@ -43,10 +43,9 @@ sonnet = "anthropic/claude-sonnet-5-5"
 # role = "worker"
 # prompt = "Check my calendar for today and tell me only what needs me."
 
-# Nightly memory review: reads new chat, keeps lasting facts as notes.
-[memory.dreaming]
-enabled = true
-cron = "30 4 * * *"
+# Before a quiet thread is compacted, a fork of it saves what is worth keeping as notes. On by default.
+# [memory]
+# reflect = false
 
 # Other people who may text mochi on iMessage, each in a thread of their own.
 # [[users]]

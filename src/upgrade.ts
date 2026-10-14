@@ -225,4 +225,28 @@ export const oneAgentSeat: UpgradeStep = {
 	},
 };
 
-export const UPGRADES: readonly UpgradeStep[] = [outboxToTurns, rootSeat, triggersToTasks, drainAgentKinds, retireRollover, codeToCodemode, triggerAgents, oneAgentSeat];
+const DreamDoc = defineDoc({ kind: "mochi.dream", version: 1, scope: "session", initial: () => ({}) });
+
+/**
+ * Nightly Dreaming became reflect, a fork of root before it is compacted. The `mochi.dream` task has no definition
+ * now, so `abortTask` settles a live one `orphaned`, aborting a review conversation it owns; then its document retires.
+ */
+export const retireDreaming: UpgradeStep = {
+	unit: "U12",
+	name: "retire-dreaming",
+	async run({ line: { harness } }, context) {
+		let changed = 0;
+		const tasks = await allPages((cursor) => harness.commit((tx) => tx.scanTasks({ kind: "mochi.dream" }, 256, cursor), context));
+		for (const task of tasks.filter((task) => task.state.status !== "terminal")) {
+			await harness.abortTask(task.id, context);
+			changed++;
+		}
+		if ((await harness.snapshot(DreamDoc, context)) !== undefined) {
+			await harness.commit((tx) => tx.retireDoc(DreamDoc), context);
+			changed++;
+		}
+		return { changed };
+	},
+};
+
+export const UPGRADES: readonly UpgradeStep[] = [outboxToTurns, rootSeat, triggersToTasks, drainAgentKinds, retireRollover, codeToCodemode, triggerAgents, oneAgentSeat, retireDreaming];

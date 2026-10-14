@@ -173,7 +173,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env } }),
 			...(config.file.idleResetMinutes === undefined ? {} : { idleResetMinutes: config.file.idleResetMinutes }),
 			...(apps === undefined ? {} : { apps }),
-			memory: { repo: resolve(config.file.memory?.repo ?? join(config.dataDir, "memory")), ...(config.file.memory?.dreaming === undefined ? {} : { dreaming: config.file.memory.dreaming }) },
+			memory: { repo: resolve(config.file.memory?.repo ?? join(config.dataDir, "memory")), ...(config.file.memory?.reflect === undefined ? {} : { reflect: config.file.memory.reflect }) },
 			index,
 			skillsDir: join(REPO, "skills"),
 			agents: await AgentCatalog.load(join(REPO, "agents"), config.home.agentsDir, config.modelSetup.ref),

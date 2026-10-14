@@ -6,7 +6,6 @@ import { createModelSetup, type ModelSetup, ModelsSchema, ProviderSchema } from 
 import { type Home, loadHomeEnv, resolveHome } from "./home.ts";
 import { MediaConfigSchema } from "./media/media.ts";
 import { parseWith } from "./parse.ts";
-import { DreamConfigSchema, dreamConfig } from "./memory/dream.ts";
 import { normalizeHandle } from "./channels/imessage.ts";
 import type { A2APeer, A2APeers } from "./a2a/tools.ts";
 
@@ -39,7 +38,8 @@ const FileSchema = Type.Object(
 		models: Type.Optional(ModelsSchema),
 		/** The Executor MCP endpoint for app tools. Absent: the apps functions say they are not connected. */
 		executorUrl: Type.Optional(Type.String({ pattern: "^https?://" })),
-		memory: Type.Optional(Type.Object({ repo: Type.Optional(Type.String({ minLength: 1 })), dreaming: Type.Optional(DreamConfigSchema) }, { additionalProperties: false })),
+		/** `reflect`: a fork of root saves notes before root is compacted; default true. `dreaming` is the retired nightly review, read and ignored. */
+		memory: Type.Optional(Type.Object({ repo: Type.Optional(Type.String({ minLength: 1 })), reflect: Type.Optional(Type.Boolean()), dreaming: Type.Optional(Type.Unknown()) }, { additionalProperties: false })),
 		/** Image, video and speech providers; see src/media/config.example.json. */
 		media: Type.Optional(MediaConfigSchema),
 		/** Minutes of silence after which an owner message starts a fresh thread; 0 never resets. Default 60. */
@@ -83,7 +83,6 @@ export async function loadConfig(env: Readonly<Record<string, string | undefined
 	const file = parseWith(FileSchema, await readConfigFile(home), configName(home));
 	const timeZone = file.timeZone ?? hostTimeZone();
 	assertTimeZone(timeZone);
-	dreamConfig(file.memory?.dreaming, timeZone);
 	const openRouterKey = env.OPENROUTER_API_KEY || undefined;
 	return {
 		home,

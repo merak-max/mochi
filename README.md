@@ -11,7 +11,7 @@ mochi is built on [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-
 - **Copies of itself.** `fork` copies the current conversation, context and all, and reuses its prompt cache, so trying three drafts at once costs the new tokens only. `agent` starts a fresh copy from a brief. Every copy has the same tools, so copies make copies, as deep as the work needs.
 - **Routines.** Cron, one-shot and webhook triggers run in their own conversations. A cheap check script or a classifier gate decides whether a run happens at all, and a run reaches you only when it calls `notify`.
 - **Roles.** A routine or a helper can run as a role: a Markdown file with instructions and a model. Routine roles run on the fast model.
-- **Memory.** Notes you can read and edit, searchable history, and a nightly review that keeps lasting facts with a source for each.
+- **Memory.** Notes you can read and edit, and searchable history. Before a quiet conversation is compacted, a fork of it, with the whole context still in its cache, saves anything worth keeping.
 - **Profiles.** mochi can start other mochis, each with its own home, persona and memory, nested as deep as you like. They talk over A2A.
 - **Prompt-cache care.** Stable prompt sections, bursts of texts answered in one turn, and quiet threads compacted while their cache is still warm.
 
