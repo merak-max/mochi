@@ -167,7 +167,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			channels,
 			users: config.users,
 			a2aPeers: config.a2aPeers,
-			home: config.home,
 			timeZone: config.timeZone,
 			publicUrl: config.env.MOCHI_PUBLIC_URL,
 			scheduling: channelSet === "terminal" ? "local" : "daemon",
