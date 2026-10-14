@@ -98,6 +98,7 @@ export interface Mochi {
 	readonly classify: Classify;
 	readonly line: Line;
 	readonly trigger: TriggerTask;
+	readonly catalog: AgentCatalog;
 }
 
 /** The one context policy: pi-durable's built-in compaction, at its own defaults, written down. */
@@ -122,7 +123,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	];
 	const now = options.now ?? (() => new Date());
 	const dream = defineDream({ models: { brain: options.brain, fast: options.fast }, today: options.today, log });
-	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log });
+	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
 	const library: ToolRegistration[] = [
@@ -138,7 +139,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
 		...agentFns({ catalog: options.agents, read: (read, context) => harness.commit(read, context), abortTask: (id, context) => harness.abortTask(id, context) }),
-		...triggerFns({ task: trigger, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users }),
+		...triggerFns({ task: trigger, catalog: options.agents, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: () => now().getTime(), users }),
 		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 		...a2aFns(a2aPeers),
 	];
@@ -208,13 +209,13 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...(idleResetMinutes > 0 ? { idleReset: (conversation: Conversation, key: string, context: Context) => idleResetIfStale({ harness, fast, idleResetMinutes, now: () => now().getTime() }, conversation, key, context) } : {}),
 	};
 	for (const step of UPGRADES) {
-		const { changed } = await step.run({ storage: options.storage, line, trigger }, context);
+		const { changed } = await step.run({ storage: options.storage, line, trigger, catalog: options.agents }, context);
 		if (changed > 0) log("upgrade", { unit: step.unit, name: step.name, changed });
 	}
 	await bindRepo(harness, options.memory?.repo, context);
 	await reconcileDream(harness, dream, dreaming, options.scheduling, context);
 	index.replaceNotes(sortedNotes(await readMemory(harness, context)));
-	return { harness, root, registry, classify: options.classify, line, trigger };
+	return { harness, root, registry, classify: options.classify, line, trigger, catalog: options.agents };
 }
 
 const notConnected = async (): Promise<never> => {

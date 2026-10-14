@@ -28,7 +28,7 @@ mochi.harness.resume();
 if (!existsSync(join(dir, "added"))) {
 	writeFileSync(join(dir, "added"), "");
 	const daily = { kind: "cron", id: "daily", cron: "0 9 * * *", tz: "Asia/Kolkata", prompt: "Summarize." } as const;
-	await mochi.harness.commit((tx) => addTrigger(tx, mochi.trigger, { trigger: daily, origin: "model" }, []), context);
+	await mochi.harness.commit((tx) => addTrigger(tx, mochi.trigger, { trigger: daily, origin: "model" }, [], mochi.catalog), context);
 }
 let task: TriggerRecord | undefined;
 while (task?.state.checkpoint?.last?.at !== SLOT) {

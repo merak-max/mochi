@@ -62,7 +62,7 @@ export async function seed(dataDir: string, scenario: Scenario): Promise<void> {
 		// Without a daemon the trigger waits, and drive.ts fires it.
 		const local = await openTestMochi(dataDir, faux, channels, undefined, [], { scheduling: "local" });
 		const at = new Date(now - 60_000).toISOString();
-		await local.harness.commit((tx) => addTrigger(tx, local.trigger, { trigger: { kind: "once", id: trigger.id, at, prompt: trigger.prompt }, origin: "model" }, []), BACKGROUND_CONTEXT);
+		await local.harness.commit((tx) => addTrigger(tx, local.trigger, { trigger: { kind: "once", id: trigger.id, at, prompt: trigger.prompt }, origin: "model" }, [], local.catalog), BACKGROUND_CONTEXT);
 		await local.close();
 	}
 }

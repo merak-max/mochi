@@ -142,7 +142,7 @@ export async function threadHandoff(root: Conversation, fast: FastCompletion, co
 }
 
 // reset() has no requestId. This is its exact ResetEntry write with a replay key.
-export async function keyedReset(root: Conversation, key: string, handoff: string | undefined, now: number, context: Context): Promise<SubmissionId> {
+export async function keyedReset(root: Pick<Conversation, "submit">, key: string, handoff: string | undefined, now: number, context: Context): Promise<SubmissionId> {
 	const submission = await root.submit({
 		type: "write",
 		requestId: key,

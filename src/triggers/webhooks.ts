@@ -124,9 +124,9 @@ function reply(response: ServerResponse, status: number, text: string): void {
 }
 
 /** The daemon's triggers component: reconcile the config seeds, then serve webhooks. Trigger tasks run on their own. */
-export async function triggersComponent({ harness, trigger, classify }: Mochi, config: Config, context: Context): Promise<void> {
+export async function triggersComponent({ harness, trigger, classify, catalog }: Mochi, config: Config, context: Context): Promise<void> {
 	const seeds = parseSeeds(config.file, config.users);
-	await reconcileSeeds(harness, trigger, seeds, context);
+	await reconcileSeeds(harness, trigger, seeds, catalog, context);
 	const listen = { host: config.env.MOCHI_BIND_HOST || "127.0.0.1", port: Number(config.env.MOCHI_HOOKS_PORT || 8788) };
 	const { address } = await startWebhookServer({ harness, classify, log }, listen, context);
 	log("triggers.started", { seeds: seeds.map((seed) => seed.id), hooks: `${address.address}:${address.port}` });

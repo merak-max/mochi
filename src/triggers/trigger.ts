@@ -3,10 +3,9 @@ import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
-import { type Static, Type } from "@earendil-works/pi-ai";
-import { type ConversationId, ConversationBusy, configure, defineTask, defineTool, type Harness, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { type ModelThinkingLevel, type Static, Type } from "@earendil-works/pi-ai";
+import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, configure, defineTask, defineTool, type Harness, type ModelRef, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { admits, checkGate, type Classify } from "../brain/classifier.ts";
-import { bifrostRef } from "../brain/models.ts";
 import type { ChannelId } from "../channels/types.ts";
 import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
@@ -14,8 +13,10 @@ import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
 import { createSeatConversation } from "../seats.ts";
 import { type ChatUser, OWNER_ID } from "../config.ts";
-import { formatStamp } from "../text.ts";
-import { LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
+import { formatStamp, messageText } from "../text.ts";
+import { keyedReset } from "../turn/lifecycle.ts";
+import { answerText, LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
+import type { AgentCatalog } from "../agents/catalog.ts";
 import { assertTimeZone, nextCronSlot, parseCron } from "./cron.ts";
 import { GateSchema, SeedsSchema, type Trigger, TriggerSchema } from "./types.ts";
 
@@ -73,8 +74,9 @@ export function defineTrigger({
 	timeZone,
 	deadlineMs,
 	log,
+	harness,
 	check = runCheck,
-}: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly check?: typeof runCheck }): TriggerTask {
+}: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit">; readonly check?: typeof runCheck }): TriggerTask {
 	const wait = (last: LastSlot): NextTaskState<TriggerState, null> => ({ status: "running", checkpoint: { phase: "wait", last } });
 	return defineTask<TriggerInput, TriggerState, null>({
 		name: "mochi.trigger",
@@ -127,15 +129,11 @@ export function defineTrigger({
 					payload = `\n<check_output source="${trigger.id}">\n${found.out}\n</check_output>`;
 				}
 				const conversation = (await runtime.conversation(runtime.conversationId, context))!;
+				const requestId = `${trigger.kind}:${trigger.id}:${iso(slot)}`;
+				await freshRun(harness(), conversation, requestId, runtime.now(), context);
 				const content = `[${trigger.kind} ${trigger.id}] Current time: ${formatStamp(new Date(slot), timeZone)}\n${trigger.prompt}${payload}`;
-				let submission;
-				try {
-					submission = await conversation.submit({ type: "input", content, requestId: `${trigger.kind}:${trigger.id}:${iso(slot)}`, whenBusy: "reject" }, context);
-				} catch (error) {
-					if (!(error instanceof ConversationBusy)) throw error;
-					log("trigger.skipped_busy", { id: trigger.id, slot: iso(slot) });
-					return runtime.commit(() => wait({ at: slot, result: "skipped-busy" }), context);
-				}
+				// A slot that finds the last run still going queues behind it; the deadline still ends a hung run.
+				const submission = await conversation.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context);
 				const race = withCancel(context);
 				const settled = await Promise.race([submission.wait(race.context), runtime.sleep(deadline, race.context).then(() => undefined)]).finally(() => race.cancel());
 				if (settled === undefined) {
@@ -163,8 +161,35 @@ export const liveTrigger = async (tx: Pick<Tx, "scanTasks">, id: string): Promis
 const INSTRUCTIONS =
 	"This conversation is an unattended trigger run, not a chat with the owner. Nobody reads your answers here. " +
 	"The only way to reach the owner is the notify tool; call it only when something needs the owner's attention, " +
-	"and otherwise finish with a one-line note of what you checked. Read your earlier runs here before repeating anything. " +
-	"End a trigger that has served its purpose with tools.trigger_remove in code.";
+	"and otherwise finish with a short note of what you checked and what you already reported. Each run starts fresh " +
+	"from the last run's note; use recall for anything older. End a trigger that has served its purpose with tools.trigger_remove in code.";
+
+/** The last run's closing words: its final text, else what it notified; past the last reset, that reset's note carried on. */
+async function lastRunNote(tx: Tx, conversationId: ConversationId): Promise<string> {
+	const recent = (await tx.scanEntries({ conversationId, order: "descending" }, 32)).items;
+	for (const entry of recent) {
+		if (entry.kind === ResetEntry.kind) return messageText(entry.model?.[0] ?? { role: "user", content: "", timestamp: 0 }).trim();
+		if (entry.kind !== AssistantEntry.kind) continue;
+		const text = await answerText(tx, entry.id);
+		if (text !== "") return text;
+		const notified = (entry.model ?? []).flatMap((message) => message.role === "assistant" ? message.content : []).find((part) => part.type === "toolCall" && part.name === "notify");
+		if (notified?.type === "toolCall") return `Notified the owner: ${String(notified.arguments.text)}`;
+	}
+	return "";
+}
+
+/**
+ * Starts each run from a fresh context that carries only the last run's closing note, so a run never resends the
+ * trigger's whole history. A slot that finds the last run still going keeps its context and queues behind it.
+ */
+async function freshRun(harness: Pick<Harness, "commit">, conversation: Pick<Conversation, "id" | "submit">, requestId: string, now: number, context: Context): Promise<void> {
+	const { busy, note } = await harness.commit(async (tx) => ({ busy: (await tx.doc(LiveDoc, conversation.id)).run !== undefined, note: await lastRunNote(tx, conversation.id) }), context);
+	if (busy || note === "") return;
+	const handoff = note.startsWith(CARRIED) ? note : `${CARRIED}\n${note}`;
+	await keyedReset(conversation, `reset:${requestId}`, handoff, now, context);
+}
+
+const CARRIED = "Your previous run of this trigger ended with:";
 
 /**
  * Creates the trigger task in the caller's commit; `existing` is `scanTriggers`, read before the commit's first write.
@@ -176,17 +201,34 @@ export async function addTrigger(
 	task: TriggerTask,
 	input: TriggerInput,
 	existing: readonly TriggerRecord[],
+	catalog: AgentCatalog,
 	conversation?: ConversationId,
 ): Promise<{ readonly id: TaskId; readonly replaced: TaskId | undefined }> {
 	const previous = existing.findLast((record) => record.input.trigger.id === input.trigger.id);
-	const { model, thinking } = input.trigger;
-	const agent = { ...(model === undefined ? {} : { model: bifrostRef(model) }), ...(thinking === undefined ? {} : { thinkingLevel: thinking }) };
+	const { agent, instructions } = runAgent(input.trigger, catalog);
 	const reused = conversation ?? previous?.conversationId;
-	// The definition owns the run's model: a re-added trigger applies it to the conversation it keeps.
-	if (reused !== undefined && Object.keys(agent).length > 0) await configure(tx, reused, agent);
-	const conversationId = reused ?? (await createSeatConversation(tx, "run", { kind: "ownerless" }, { instructions: `${INSTRUCTIONS}\nTrigger: ${input.trigger.id}.`, ...agent }));
+	// The definition owns the run's model and role: a re-added trigger applies them to the conversation it keeps.
+	if (reused !== undefined) await configure(tx, reused, { ...agent, instructions });
+	const conversationId = reused ?? (await createSeatConversation(tx, "run", { kind: "ownerless" }, { instructions, ...agent }));
 	const id = await tx.createTask(task, input, { ownership: { kind: "conversation" }, conversationId, background: true });
 	return { id, replaced: previous !== undefined && live(previous) ? previous.id : undefined };
+}
+
+
+/**
+ * A run's model and instructions. The trigger's own `model` and `thinking` win, then its `role` (an agents/<role>.md
+ * type), then the fast tier: a routine that needs judgment names a role or a model.
+ */
+export function runAgent(trigger: Trigger, catalog: AgentCatalog): { readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly instructions: string } {
+	const role = trigger.role === undefined ? undefined : catalog.types.get(trigger.role);
+	if (trigger.role !== undefined && role === undefined) throw new Error(`Unknown role "${trigger.role}". Use ${[...catalog.types.keys()].join(", ")}.`);
+	const model = catalog.model(trigger.model ?? role?.model ?? "fast");
+	const thinking = trigger.thinking ?? role?.thinking;
+	const header = `${INSTRUCTIONS}\nTrigger: ${trigger.id}.`;
+	return {
+		agent: { model, ...(thinking === undefined ? {} : { thinkingLevel: thinking }) },
+		instructions: role === undefined || role.instructions === "" ? header : `${header}\n\n${role.instructions}`,
+	};
 }
 
 /** Throws a readable error for a cron expression, time zone or `once` time a trigger cannot run with. */
@@ -220,7 +262,7 @@ export function parseSeeds(file: Readonly<Record<string, unknown>>, users: reado
  * is gone is aborted, and so is any live trigger a newer one with its id replaced. A model trigger is touched only when
  * config claims its id.
  */
-export async function reconcileSeeds(harness: Harness, task: TriggerTask, seeds: readonly Trigger[], context: Context): Promise<void> {
+export async function reconcileSeeds(harness: Harness, task: TriggerTask, seeds: readonly Trigger[], catalog: AgentCatalog, context: Context): Promise<void> {
 	const stale = await harness.commit(async (tx) => {
 		const existing = await scanTriggers(tx);
 		const current = new Map<string, TriggerRecord>();
@@ -235,7 +277,7 @@ export async function reconcileSeeds(harness: Harness, task: TriggerTask, seeds:
 		for (const seed of seeds) {
 			const record = current.get(seed.id);
 			if (record?.input.origin === "config" && JSON.stringify(record.input.trigger) === JSON.stringify(seed)) continue;
-			const { replaced } = await addTrigger(tx, task, { trigger: seed, origin: "config" }, existing);
+			const { replaced } = await addTrigger(tx, task, { trigger: seed, origin: "config" }, existing, catalog);
 			if (replaced !== undefined) stale.push(replaced);
 		}
 		return stale;
@@ -253,19 +295,21 @@ const AddParams = Type.Object({
 	admitWhen: Type.Optional(GateSchema),
 	notifyWhen: Type.Optional(GateSchema),
 	notify: Type.Optional(Type.Array(Type.String())),
+	role: Type.Optional(Id),
+	model: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 function parseWhen(args: Static<typeof AddParams>, timeZone: string, users: readonly ChatUser[]): Trigger {
-	const { id, prompt, when, admitWhen, notifyWhen, notify } = args;
+	const { id, prompt, when, admitWhen, notifyWhen, notify, role, model } = args;
 	if (admitWhen !== undefined && when !== "webhook") throw new Error("admitWhen applies only to webhook triggers.");
 	if (notify !== undefined) checkRecipients(notify, users);
 	const secret = randomBytes(32).toString("hex");
 	const draft =
 		when === "webhook"
-			? { kind: "webhook", id, prompt, admitWhen, notifyWhen, notify, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
+			? { kind: "webhook", id, prompt, admitWhen, notifyWhen, notify, role, model, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
 			: when.trim().split(/\s+/).length === 5
-				? { kind: "cron", id, prompt, notifyWhen, notify, cron: when.trim(), tz: args.tz ?? timeZone }
-				: { kind: "once", id, prompt, notifyWhen, notify, at: when };
+				? { kind: "cron", id, prompt, notifyWhen, notify, role, model, cron: when.trim(), tz: args.tz ?? timeZone }
+				: { kind: "once", id, prompt, notifyWhen, notify, role, model, at: when };
 	return validateTrigger(parseWith(TriggerSchema, JSON.parse(JSON.stringify(draft)), "trigger"));
 }
 
@@ -284,6 +328,7 @@ function listed({ input: { trigger, origin }, state }: TriggerRecord, now: numbe
 
 export interface TriggerFnDeps {
 	readonly task: TriggerTask;
+	readonly catalog: AgentCatalog;
 	readonly triggers: (context: Context) => Promise<TriggerRecord[]>;
 	readonly abortTask: (id: TaskId, context: Context) => Promise<unknown>;
 	/** `MOCHI_PUBLIC_URL`, the origin webhook senders call. */
@@ -299,11 +344,10 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 		defineTool({
 			name: "trigger_add",
 			description:
-				"Run a prompt later in its own conversation. The run is silent unless it calls notify, which goes to the ids in notify (default user1). " +
-				"when is a cron 'm h dom mon dow' in the owner's time zone, an ISO time with an offset, or 'webhook'. A webhook returns its URL " +
-				"and secret (hmac checks GitHub's X-Hub-Signature-256; bearer checks the Authorization header). admitWhen and notifyWhen are yes/no " +
-				"classifier questions: admitWhen is asked of each payload and notifyWhen of each notify text, and yes lets it through. " +
-				"Adding an existing id replaces that trigger and keeps its conversation.",
+				"Run a prompt later, each run fresh from the last run's note. Silent unless it calls notify (to notify ids, default user1). " +
+				"when: cron 'm h dom mon dow' in the owner's zone, ISO time+offset, or 'webhook' (returns URL and secret; hmac checks " +
+				"X-Hub-Signature-256, bearer the Authorization header). admitWhen/notifyWhen: yes/no classifier gates on each payload/notify text. " +
+				"role: agent type giving the run its instructions and model; model overrides; default fast. Same id replaces.",
 			parameters: AddParams,
 			structuredOutputSchema: Type.Object({ id: Type.String(), next: Type.Optional(Type.String()), url: Type.Optional(Type.String()), secret: Type.Optional(Type.String()) }),
 			replay: "safe",
@@ -314,7 +358,7 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 				await api.commit(async (tx) => {
 					const existing = await scanTriggers(tx);
 					const { id, created } = await journaled(tx, api.taskId, "trigger", async () => {
-						const added = await addTrigger(tx, deps.task, { trigger: draft, origin: "model" }, existing);
+						const added = await addTrigger(tx, deps.task, { trigger: draft, origin: "model" }, existing, deps.catalog);
 						replaced = added.replaced;
 						return added.id;
 					});

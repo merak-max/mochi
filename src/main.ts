@@ -133,7 +133,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			memory: { repo: resolve(config.file.memory?.repo ?? join(config.dataDir, "memory")), ...(config.file.memory?.dreaming === undefined ? {} : { dreaming: config.file.memory.dreaming }) },
 			index,
 			skillsDir: join(REPO, "skills"),
-			agents: await AgentCatalog.load(join(REPO, "agents")),
+			agents: await AgentCatalog.load(join(REPO, "agents"), join(config.dataDir, "agents")),
 			workDir,
 			channels,
 			users: config.users,

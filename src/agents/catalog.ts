@@ -32,11 +32,15 @@ export class AgentCatalog {
 		this.#models = models;
 	}
 
-	static async load(dir: string): Promise<AgentCatalog> {
-		const files = (await readdir(dir)).filter((file) => file.endsWith(".md")).sort();
-		const types = await Promise.all(files.map(async (file) => parseAgentFile(basename(file, ".md"), await readFile(join(dir, file), "utf8"))));
+	/** `dir` holds the bundled types and models.json; each `<own>/<name>.md` adds a type or replaces the bundled one of that name. */
+	static async load(dir: string, own?: string): Promise<AgentCatalog> {
+		const types = new Map<string, AgentType>();
+		for (const from of own === undefined ? [dir] : [dir, own]) {
+			const files = (await readdir(from).catch(() => [] as string[])).filter((file) => file.endsWith(".md")).sort();
+			for (const file of files) types.set(basename(file, ".md"), parseAgentFile(basename(file, ".md"), await readFile(join(from, file), "utf8")));
+		}
 		const models = parseWith(ModelsFileSchema, JSON.parse(await readFile(join(dir, "models.json"), "utf8")), "agents/models.json");
-		return new AgentCatalog(types, models);
+		return new AgentCatalog([...types.values()], models);
 	}
 
 	/** A tier (fast, default, strongest), an alias (opus, sonnet, fable, haiku), or a full provider/id. */

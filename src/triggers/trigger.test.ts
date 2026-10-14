@@ -7,7 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { AssistantEntry, type ConversationId, ROOT_CONVERSATION_ID, UserEntry } from "@earendil-works/pi-durable";
+import { AgentDoc, AssistantEntry, type ConversationId, ROOT_CONVERSATION_ID, UserEntry } from "@earendil-works/pi-durable";
 import { NOTIFY_ENTRY, UserDoc } from "../turn/turn.ts";
 import { messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
@@ -27,7 +27,7 @@ const clockAt = (at: number) => {
 	let skew = at - Date.now();
 	return Object.assign(() => new Date(Date.now() + skew), { set: (to: number) => void (skew = to - Date.now()) });
 };
-const add = (mochi: TestMochi, trigger: Trigger) => (mochi.harness.resume(), mochi.harness.commit(async (tx) => addTrigger(tx, mochi.trigger, { trigger, origin: "model" }, await scanTriggers(tx)), context));
+const add = (mochi: TestMochi, trigger: Trigger) => (mochi.harness.resume(), mochi.harness.commit(async (tx) => addTrigger(tx, mochi.trigger, { trigger, origin: "model" }, await scanTriggers(tx), mochi.catalog), context));
 
 async function until(mochi: TestMochi, check: (task: TriggerRecord) => boolean): Promise<TriggerRecord> {
 	for (;;) {
@@ -242,15 +242,15 @@ test("seeds reconcile idempotently, keep their conversation when changed, and ne
 	await add(mochi, { kind: "once", id: "mine", at: "2026-10-06T00:00:00Z", prompt: "Mine." });
 	const news = parseSeeds({ triggers: [{ kind: "cron", id: "news", cron: "0 8 * * *", tz: "UTC", prompt: "Old." }] }, []);
 	const live = async () => (await mochi.harness.commit((tx) => scanTriggers(tx), context)).filter((task) => task.state.status !== "terminal" && !task.abortRequested);
-	await reconcileSeeds(mochi.harness, mochi.trigger, news, context);
+	await reconcileSeeds(mochi.harness, mochi.trigger, news, mochi.catalog, context);
 	const first = await live();
-	await reconcileSeeds(mochi.harness, mochi.trigger, news, context);
+	await reconcileSeeds(mochi.harness, mochi.trigger, news, mochi.catalog, context);
 	assert.deepEqual((await live()).map((task) => task.id), first.map((task) => task.id));
-	await reconcileSeeds(mochi.harness, mochi.trigger, [{ ...news[0]!, prompt: "New." }], context);
+	await reconcileSeeds(mochi.harness, mochi.trigger, [{ ...news[0]!, prompt: "New." }], mochi.catalog, context);
 	const changed = (await live()).find((task) => task.input.trigger.id === "news")!;
 	assert.equal(changed.input.trigger.prompt, "New.");
 	assert.equal(changed.conversationId, first.find((task) => task.input.trigger.id === "news")!.conversationId);
-	await reconcileSeeds(mochi.harness, mochi.trigger, [], context);
+	await reconcileSeeds(mochi.harness, mochi.trigger, [], mochi.catalog, context);
 	assert.deepEqual((await live()).map((task) => [task.input.trigger.id, task.input.origin]), [["mine", "model"]]);
 	assert.throws(() => parseSeeds({ triggers: [{ kind: "cron", id: "x", cron: "* *", tz: "UTC", prompt: "p" }] }, []), /5 fields/);
 	assert.throws(() => parseSeeds({ triggers: [{ kind: "cron", id: "x", cron: "* * * * *", tz: "Mars/Base", prompt: "p" }] }, []), /time zone/);
@@ -317,5 +317,40 @@ test("a failing cron check skips the slot as check-failed and never reaches the 
 	const failed = await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
 	assert.equal(failed.state.checkpoint?.last?.result, "check-failed");
 	assert.equal(faux.state.callCount, 0);
+	await mochi.close();
+});
+
+test("each run starts fresh from the last run's note, runs on its role's model and instructions, and a plain run uses fast", async () => {
+	const seen: string[][] = [];
+	const faux = newFaux();
+	const answer = (text: string) => async (request: { messages: { role: string; content: unknown }[] }) => {
+		seen.push(request.messages.map((message) => `${message.role}: ${JSON.stringify(message.content)}`));
+		return fauxAssistantMessage(text);
+	};
+	faux.setResponses([answer("Inbox clear; told nobody."), answer("Two new bills; reported none yet.")]);
+	const relay = { name: "relay", instructions: "You are relay. You own mail.", model: "sonnet" };
+	const dir = await tempDir();
+	let mochi = await openTestMochi(dir, faux, undefined, undefined, [relay], { now: clockAt(S - 200) });
+	const sweep: Trigger = { kind: "cron", id: "sweep", cron: "* * * * *", tz: "Asia/Kolkata", prompt: "Sweep mail.", role: "relay" };
+	await add(mochi, sweep);
+	await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
+	await mochi.close();
+	mochi = await openTestMochi(dir, faux, undefined, undefined, [relay], { now: clockAt(S + MIN - 200) });
+	mochi.harness.resume();
+	const second = await until(mochi, (task) => task.state.checkpoint?.last?.at === S + MIN);
+	assert.equal(second.state.checkpoint?.last?.result, "done");
+	assert.equal(seen.length, 2);
+	const agent = await mochi.harness.snapshot(AgentDoc, second.conversationId, context);
+	assert.match(agent?.instructions ?? "", /unattended trigger run[\s\S]*Trigger: sweep\.\n\nYou are relay\. You own mail\./);
+	assert.deepEqual(agent?.model, mochi.catalog.model("sonnet"));
+	const secondRun = seen[1]!.filter((line) => !line.startsWith("system:")).join("\n");
+	assert.match(secondRun, /previous run of this trigger ended with:\\nInbox clear; told nobody\./);
+	assert.doesNotMatch(secondRun, /assistant:/, "the second run does not resend the first run's turns");
+	assert.equal((secondRun.match(/Sweep mail\./g) ?? []).length, 1);
+
+	const { runAgent } = await import("./trigger.ts");
+	const { role: _role, ...plain } = sweep;
+	assert.deepEqual(runAgent(plain, mochi.catalog).agent.model, mochi.catalog.model("fast"));
+	assert.throws(() => runAgent({ ...sweep, role: "nobody" }, mochi.catalog), /Unknown role "nobody"\. Use worker, relay\./);
 	await mochi.close();
 });

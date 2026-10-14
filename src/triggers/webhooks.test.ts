@@ -28,7 +28,7 @@ test("webhook server: HMAC and bearer auth, 404, 413, duplicate delivery submitt
 	const faux = newFaux();
 	faux.setResponses([fauxAssistantMessage("ok"), fauxAssistantMessage("ok"), fauxAssistantMessage("ok"), fauxAssistantMessage("ok")]);
 	const mochi = await openTestMochi(await tempDir(), faux);
-	await reconcileSeeds(mochi.harness, mochi.trigger, TRIGGERS, context);
+	await reconcileSeeds(mochi.harness, mochi.trigger, TRIGGERS, mochi.catalog, context);
 	const stop = new AbortController();
 	t.after(async () => {
 		stop.abort();
@@ -81,7 +81,7 @@ test("admitWhen: a no is acknowledged without a run; a yes or a classifier error
 		const faux = newFaux();
 		faux.setResponses([fauxAssistantMessage("ok")]);
 		const mochi = await openTestMochi(await tempDir(), faux);
-		await reconcileSeeds(mochi.harness, mochi.trigger, [trigger], context);
+		await reconcileSeeds(mochi.harness, mochi.trigger, [trigger], mochi.catalog, context);
 		const stop = new AbortController();
 		const running = withAbortSignal(stop.signal, context);
 		const classify = fixedClassify(outcome);
@@ -111,7 +111,7 @@ test("a hung webhook run is aborted at its deadline, so the next delivery runs i
 		new Promise((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
 	faux.setResponses([hang, fauxAssistantMessage("ok")]);
 	const mochi = await openTestMochi(await tempDir(), faux);
-	await reconcileSeeds(mochi.harness, mochi.trigger, [trigger], context);
+	await reconcileSeeds(mochi.harness, mochi.trigger, [trigger], mochi.catalog, context);
 	const stop = new AbortController();
 	t.after(async () => {
 		stop.abort();

@@ -1,11 +1,12 @@
 import type { Context } from "@earendil-works/chord";
 import type { JsonValue } from "@earendil-works/chord";
-import { type ConversationId, defineDoc, defineDocFamily, LiveDoc, ROOT_CONVERSATION_ID, type Storage, type SubmissionId } from "@earendil-works/pi-durable";
+import { AgentDoc, configure, type ConversationId, defineDoc, defineDocFamily, LiveDoc, ROOT_CONVERSATION_ID, type Storage, type SubmissionId } from "@earendil-works/pi-durable";
 import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
 import type { ChannelId } from "./channels/types.ts";
 import { allPages } from "./pages.ts";
 import { seatRoot } from "./seats.ts";
-import { addTrigger, type TriggerTask } from "./triggers/trigger.ts";
+import type { AgentCatalog } from "./agents/catalog.ts";
+import { addTrigger, runAgent, scanTriggers, type TriggerTask } from "./triggers/trigger.ts";
 import type { Trigger } from "./triggers/types.ts";
 import { type Line, openTurn } from "./turn/turn.ts";
 
@@ -15,7 +16,7 @@ import { type Line, openTurn } from "./turn/turn.ts";
 export interface UpgradeStep {
 	readonly unit: string;
 	readonly name: string;
-	run(host: { readonly storage: Storage; readonly line: Line; readonly trigger: TriggerTask }, context: Context): Promise<{ readonly changed: number }>;
+	run(host: { readonly storage: Storage; readonly line: Line; readonly trigger: TriggerTask; readonly catalog: AgentCatalog }, context: Context): Promise<{ readonly changed: number }>;
 }
 
 type Route = { submissionId: SubmissionId; channel: ChannelId; messageId: string; recorded: boolean };
@@ -81,14 +82,14 @@ export const TriggersDoc = defineDoc<{ items: Record<string, LegacyTrigger> }>({
 export const triggersToTasks: UpgradeStep = {
 	unit: "U8",
 	name: "triggers-to-tasks",
-	async run({ line, trigger }, context) {
+	async run({ line, trigger, catalog }, context) {
 		const old = await line.harness.snapshot(TriggersDoc, ROOT_CONVERSATION_ID, context);
 		if (old === undefined) return { changed: 0 };
 		return line.harness.commit(async (tx) => {
 			let changed = 1;
 			for (const record of Object.values(old.items)) {
 				if (record.trigger.kind === "once" && record.last !== null) continue;
-				await addTrigger(tx, trigger, { trigger: record.trigger, origin: record.origin }, [], record.conversationId ?? undefined);
+				await addTrigger(tx, trigger, { trigger: record.trigger, origin: record.origin }, [], catalog, record.conversationId ?? undefined);
 				changed++;
 			}
 			await tx.retireDoc(TriggersDoc, ROOT_CONVERSATION_ID);
@@ -177,5 +178,29 @@ export const codeToCodemode: UpgradeStep = {
 	},
 };
 
+/**
+ * Each live trigger's conversation runs with the model and instructions its definition gives now (`runAgent`): its
+ * role, else the fast tier. Runs on every boot, so an edited role file or the new defaults reach model-made triggers too.
+ */
+export const triggerAgents: UpgradeStep = {
+	unit: "U14",
+	name: "trigger-agents",
+	async run({ line: { harness }, catalog }, context) {
+		return harness.commit(async (tx) => {
+			let changed = 0;
+			for (const task of await scanTriggers(tx)) {
+				if (task.state.status === "terminal" || task.abortRequested) continue;
+				const { agent, instructions } = runAgent(task.input.trigger, catalog);
+				const current = await tx.doc(AgentDoc, task.conversationId!);
+				const same = JSON.stringify(current.model) === JSON.stringify(agent.model) && current.instructions === instructions && current.thinkingLevel === (agent.thinkingLevel ?? current.thinkingLevel);
+				if (same) continue;
+				await configure(tx, task.conversationId!, { ...agent, instructions });
+				changed++;
+			}
+			return { changed };
+		}, context);
+	},
+};
+
 /** In unit order. */
-export const UPGRADES: readonly UpgradeStep[] = [outboxToTurns, rootSeat, triggersToTasks, drainAgentKinds, retireRollover, codeToCodemode];
+export const UPGRADES: readonly UpgradeStep[] = [outboxToTurns, rootSeat, triggersToTasks, drainAgentKinds, retireRollover, codeToCodemode, triggerAgents];
