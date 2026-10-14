@@ -215,7 +215,7 @@ export function defineSweep(deps: { readonly harness: () => Harness; readonly ev
 						const board = await tx.doc(BoardDoc);
 						const current = board.tasks[String(item.id)];
 						const wake = item.nudged === item.due ? (item.wakes ?? 1) + 1 : 1;
-						const woken = await journaled(tx, task.id, `board:${item.id}:${item.due}:${wake}`, () => startFork(tx, ROOT_CONVERSATION_ID, at, { name: `board-${item.id}`, brief: boardBrief(item) }));
+						const woken = await journaled(tx, task.id, `board:${item.id}:${item.due}:${wake}`, () => startFork(tx, ROOT_CONVERSATION_ID, at, { name: `board-${item.id}`, brief: boardBrief(item) }), 64);
 						if (current !== undefined && item.due !== undefined && current.due === item.due) {
 							current.nudged = item.due;
 							current.nudgedAt = now;

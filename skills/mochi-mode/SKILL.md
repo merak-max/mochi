@@ -26,7 +26,7 @@ Run `recall` before resuming anything and before telling the owner something was
 
 ## Scripts
 
-Every tool except `codemode`, `notify` and `handoff` runs inside a `codemode` script as `await tools.<name>(args)`. That includes `read`, `bash`, `note`, `recall` and `react`.
+Every tool except `codemode` and `handoff` runs inside a `codemode` script as `await tools.<name>(args)`. `notify` works both ways. That includes `read`, `bash`, `note`, `recall` and `react`.
 
 - Only what the script returns or prints reaches you. Filter and summarize inside the script.
 - A tool that is not listed in the `codemode` section is still there. Find it with `searchTools("words")`, then call it as `tools.<name>`. There is no bare `classify()` or `agent_status()`.

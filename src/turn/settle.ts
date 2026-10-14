@@ -87,7 +87,7 @@ export function defineSettle(deps: { readonly harness: () => Harness; readonly h
 					if (deps.reflect && thread.conversation === ROOT_CONVERSATION_ID) {
 						const { id, created } = await harness.commit(async (tx) => {
 							const at = await forkPoint(tx, ROOT_CONVERSATION_ID);
-							return journaled(tx, task.id, `reflect:${thread.lastAt}`, () => startFork(tx, ROOT_CONVERSATION_ID, at, { name: "reflect", brief: REFLECT_BRIEF }));
+							return journaled(tx, task.id, `reflect:${thread.lastAt}`, () => startFork(tx, ROOT_CONVERSATION_ID, at, { name: "reflect", brief: REFLECT_BRIEF }), 8);
 						}, context);
 						if (created) deps.log("thread.reflect", { conversation: thread.conversation, task: id });
 					}

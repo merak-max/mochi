@@ -42,7 +42,7 @@ export const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 /** Caps, in characters, on each seat's tool schemas and each prompt section. A description that grows past one fails the build. */
 export const BUDGET: { readonly tools: Readonly<Record<Seat, number>>; readonly sections: Readonly<Record<string, number>> } = {
 	tools: { agent: 3600, trigger: 3000, peer: 2600, user: 3000 },
-	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000, codemode: 9500 },
+	sections: { identity: 2000, channels: 700, owner: 4000, "notes-index": 1500, "skills-index": 2000, codemode: 9700 },
 };
 
 /** Every tool scripts call as `tools.<name>`, and the seats that get it. The `codemode` section declares the inline ones; scripts find the rest with `searchTools()`. */
@@ -132,8 +132,9 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 	const disagree = [...drift([...modelTools.map((each) => each.name), "codemode"], SURFACE), ...drift(library.map((each) => each.name), LIBRARY)];
 	if (disagree.length > 0) throw new Error(`SURFACE, LIBRARY and the definitions disagree on ${disagree.join(", ")}.`);
 	return SEATS.map((seat) => {
-		// Direct tools carry `control`, which a script call cannot use, so scripts do not see them.
-		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat)).map((each): ToolRegistration => ({ ...each, callers: ["model"] }));
+		// handoff's `control` works only on a model-issued call, so scripts do not see it. notify sends from a script too;
+		// only its early end of the run is lost there, and trigger runs have alerted the owner from scripts.
+		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat)).map((each): ToolRegistration => (each.name === "handoff" ? { ...each, callers: ["model"] } : each));
 		const scripted: ToolRegistration[] = [];
 		for (const each of library) {
 			const entry = LIBRARY[each.name]!;

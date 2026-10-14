@@ -237,6 +237,20 @@ test("a trigger without notify sends only to the owner", async () => {
 	await mochi.close();
 });
 
+test("a trigger run's script can notify the owner, as mail-watch does", async () => {
+	const faux = newFaux();
+	faux.setResponses([call("codemode", { code: `await tools.notify({ channel: "imessage", text: "Rent is due." }); return "checked"` }), fauxAssistantMessage("ok")]);
+	const imessage = recordingChannel("imessage");
+	const now = clockAt(S);
+	const mochi = await openTestMochi(await tempDir(), faux, new Map([["imessage", imessage.channel]]), undefined, [], { now });
+	now.set(S - 200);
+	await add(mochi, DAILY);
+	await until(mochi, (task) => task.state.checkpoint?.last?.at === S);
+	await turnsSettled(mochi.harness);
+	assert.deepEqual(imessage.sent, ["Rent is due."]);
+	await mochi.close();
+});
+
 test("seeds reconcile idempotently, keep their conversation when changed, and never touch a model trigger", async () => {
 	const mochi = await openTestMochi(await tempDir(), newFaux(), undefined, undefined, [], { now: clockAt(S - DAY) });
 	await add(mochi, { kind: "once", id: "mine", at: "2026-10-06T00:00:00Z", prompt: "Mine." });

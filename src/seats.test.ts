@@ -3,11 +3,12 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { AgentDoc, createRegistry, defineDoc, defineExtension, defineTask, defineTool, Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
+import { AgentDoc, createRegistry, defineDoc, defineExtension, defineTask, defineTool, Harness, ROOT_CONVERSATION_ID, type TaskId } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { measureSurface } from "../eval/surface.ts";
+import { Journal, journaled } from "./journal.ts";
 import { BUDGET, createSeatConversation, FORBIDDEN_TOOL_NAME, LIBRARY, SEATS, seatExtensions, selection } from "./seats.ts";
 import { FAUX, newFaux, openTestMochi, tempDir } from "./test-support.ts";
 
@@ -109,4 +110,17 @@ test("a live nightly Dreaming task is settled and its document retired once", as
 	const again: unknown[] = [];
 	await (await openTestMochi(dir, newFaux(), new Map(), undefined, [], { log: (event) => again.push(event) })).close();
 	assert.deepEqual(again, []);
+});
+
+test("a long-lived task's journal keeps only the newest keys of a prefix, and a rerun of the newest finds its task", async () => {
+	const mochi = await openTestMochi(await tempDir(), newFaux());
+	const owner = await mochi.harness.commit(async (tx) => (await tx.scanTasks({ kind: "mochi.settle" }, 1)).items[0]?.id ?? (await tx.scanTasks({}, 1)).items[0]!.id, context);
+	let made = 0;
+	const create = async () => ++made as unknown as TaskId;
+	for (let i = 1; i <= 5; i++) await mochi.harness.commit((tx) => journaled(tx, owner, `reflect:${i}`, create, 2), context);
+	await mochi.harness.commit((tx) => journaled(tx, owner, "other:1", create, 2), context);
+	const again = await mochi.harness.commit((tx) => journaled(tx, owner, "reflect:5", create, 2), context);
+	assert.equal(again.created, false);
+	assert.deepEqual(Object.keys((await mochi.harness.snapshot(Journal, owner, context))!.created).sort(), ["other:1", "reflect:4", "reflect:5"]);
+	await mochi.close();
 });
