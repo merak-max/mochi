@@ -56,19 +56,16 @@ export function unknownKeys(file: Readonly<Record<string, unknown>>): string[] {
 	return Object.keys(file).filter((key) => !known.has(key));
 }
 
-/** The web service: the key variable it reads, its key when set, an API url other than the default, and the browser profile. */
 export type WebConfig = { readonly keyEnv: string; readonly key: string | undefined; readonly url?: string; readonly browserProfile?: string };
 
 export interface Config {
 	readonly home: Home;
 	readonly appsUrl: string | undefined;
 	readonly modelSetup: ModelSetup;
-	/** Absent: the web functions in `code` fail with a clear error. */
 	readonly web: WebConfig;
 	readonly timeZone: string;
 	/** `file.users` with each handle normalized as the iMessage adapter compares senders. */
 	readonly users: readonly ChatUser[];
-	/** `file.a2a.peers` with each token read from its env variable. */
 	readonly a2aPeers: A2APeers;
 	readonly file: FileConfig;
 	readonly env: Readonly<Record<string, string | undefined>>;

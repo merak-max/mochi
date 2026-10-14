@@ -8,7 +8,6 @@ interface SkillLine {
 	readonly description: string;
 }
 
-/** `<dir>/<name>/SKILL.md` frontmatter, sorted by name. */
 async function readSkills(dir: string): Promise<readonly SkillLine[]> {
 	const names = (await readdir(dir).catch(() => [])).sort();
 	const skills: SkillLine[] = [];

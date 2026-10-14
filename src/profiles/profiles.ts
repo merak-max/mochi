@@ -101,7 +101,6 @@ export function agentOf(profile: Profile, profiles: Profiles, header: string): R
 	};
 }
 
-/** Each profile's standing conversation, by name. */
 const ProfileDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
 	kind: "mochi.profile",
 	version: 1,

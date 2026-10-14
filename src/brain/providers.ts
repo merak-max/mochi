@@ -66,7 +66,6 @@ const DEFAULTS = {
 	classifier: { url: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "typesafe/jev-1.13" },
 } as const;
 
-/** The url and key variable of a `[providers]` entry, with the protocol's defaults filled in. */
 export function providerEndpoint(name: string, providers: Readonly<Record<string, ProviderConfig>> = {}): { baseUrl: string; keyEnv: string } {
 	const config = providers[name];
 	if (config === undefined) throw new Error(`Provider "${name}" is not in [providers]. Configured: ${Object.keys(providers).join(", ") || "none"}.`);

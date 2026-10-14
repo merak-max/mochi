@@ -66,7 +66,6 @@ async function allConversations(harness: Harness, context: Context): Promise<Con
 	return (await allPages((cursor) => harness.commit((tx) => tx.scanConversations({}, PAGE, cursor), context))).map((record) => record.id);
 }
 
-/** Oldest first. */
 async function entriesAfter(harness: Harness, conversationId: ConversationId, after: number, context: Context): Promise<EntryRecord[]> {
 	const query = { conversationId, minEntryId: (after + 1) as EntryRecord["id"] };
 	const entries = await allPages((cursor) => harness.commit((tx) => tx.scanEntries(query, PAGE, cursor), context));

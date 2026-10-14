@@ -61,16 +61,13 @@ interface MochiOptions {
 	readonly workDir: string;
 	readonly channels: Channels;
 	readonly timeZone: string;
-	/** `MOCHI_PUBLIC_URL`, the origin webhook senders call. */
 	readonly publicUrl: string | undefined;
 	/** `daemon` installs the Turn task kind; `local` (a terminal with no daemon) leaves Turns waiting for one. */
 	readonly scheduling: "daemon" | "local";
 	readonly log: Log;
 	/** Root's own instructions (`<home>/instructions.md`), rendered after every section; absent leaves root's as they are. */
 	readonly instructions?: string;
-	/** Users who may write on iMessage, with normalized handles. */
 	readonly users: readonly ChatUser[];
-	/** The owner's other agents that root and runs may call over A2A. */
 	readonly a2aPeers: A2APeers;
 }
 

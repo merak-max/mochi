@@ -209,17 +209,16 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	};
 }
 
-/** `<home>/instructions.md`, root's own instructions; no file leaves root's as they are. */
 async function readInstructions(home: Home): Promise<{ instructions?: string }> {
 	const text = await readFile(home.instructionsFile, "utf8").catch(() => undefined);
 	return text === undefined || text.trim() === "" ? {} : { instructions: text.trim() };
 }
 
-/** `<dataDir>/mochi.sock`, or a short path in the temp directory when that exceeds the Unix socket limit. */
-function socketPath(dataDir: string): string {
-	const path = join(dataDir, "mochi.sock");
+/** `<home>/mochi.sock`, or a short path in the temp directory when that exceeds the Unix socket limit. */
+function socketPath(homeDir: string): string {
+	const path = join(homeDir, "mochi.sock");
 	if (Buffer.byteLength(path) <= 100) return path;
-	return join(tmpdir(), `mochi-${createHash("sha256").update(dataDir).digest("hex").slice(0, 16)}.sock`);
+	return join(tmpdir(), `mochi-${createHash("sha256").update(homeDir).digest("hex").slice(0, 16)}.sock`);
 }
 
 /** The outside services mochi calls. Models and the web need a key; without a classifier, classify steps fail. */
@@ -235,7 +234,6 @@ function services(config: Pick<Config, "modelSetup" | "web" | "home" | "appsUrl"
 	];
 }
 
-/** Every ready adapter, and one readiness line per adapter. */
 function configuredChannels(env: Env, users: readonly ChatUser[]): { readonly channels: Channels; readonly report: readonly string[] } {
 	const setups = (Object.keys(ADAPTERS) as ChatChannelId[]).map((id) => [id, ADAPTERS[id](env, users)] as const);
 	const channels = new Map(setups.flatMap(([id, setup]) => (setup.kind === "ready" ? [[id, setup.value] as const] : [])));

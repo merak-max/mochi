@@ -9,7 +9,6 @@ const literals = <T extends string>(values: readonly T[]) => Type.Union(values.m
 const SearchHit = Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() });
 type SearchHit = Static<typeof SearchHit>;
 
-/** Web hits deduped by URL. */
 function searchHits(web: WebHit[]): SearchHit[] {
 	const hits: SearchHit[] = [];
 	const seen = new Set<string>();
