@@ -346,7 +346,7 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 		defineTool({
 			name: "trigger_add",
 			description:
-				"Run a prompt later, each run fresh from the last run's note. Silent unless it calls notify (to notify ids, default user1). " +
+				"Run a prompt on a schedule or a webhook, each run fresh from the last run's note; a one-off reminder or follow-up is board_add. Silent unless it calls notify (to notify ids, default user1). " +
 				"when: cron 'm h dom mon dow' in the owner's zone, ISO time+offset, or 'webhook' (returns URL and secret; hmac checks " +
 				"X-Hub-Signature-256, bearer the Authorization header). admitWhen/notifyWhen: yes/no classifier gates on each payload/notify text. " +
 				"role: agent type giving the run its instructions and model; model overrides; default fast. Same id replaces.",

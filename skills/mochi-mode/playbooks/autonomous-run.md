@@ -4,7 +4,7 @@
 
 1. Before the first step, state the exit condition as something checkable, such as "all 12 receipts filed and the total matches the bank statement".
 2. Set up `data/work/<slug>/` with `todo.md` and a decision log per `show-me-your-work`.
-3. Choose how you resume. A background agent or fork never posts back to you; read its answer with `agent_status`. Waiting on the world (a reply, a delivery, a page update) uses a `cron` or `once` trigger whose prompt says how to continue. Don't poll inside the conversation.
+3. Choose how you resume. A background agent or fork never posts back to you; read its answer with `agent_status`. Waiting on the world once (a reply, a delivery) is a board task with a `due`; watching something that keeps changing (a page, a price) is a `cron` trigger whose prompt says how to continue. Don't poll inside the conversation.
 4. Take the smallest step the evidence justifies, check it, then take the next. Log forks, pivots and checks.
 5. Problems along the way are yours. Work around a broken site, retry a flaky tool once, apply a sensible default and log it. Stop only for a fact only the owner has (a password) or a real dead end. Then ask once and continue whatever doesn't depend on the answer.
 6. Stop when the condition is met. A plateau is not a stop, so change approach. Never redefine done to finish.

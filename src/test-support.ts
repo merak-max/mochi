@@ -67,6 +67,7 @@ export async function openTestMochi(
 		readonly procPollMs?: number;
 		readonly settleLookMs?: number;
 		readonly settleMinTokens?: number;
+		readonly sweepEveryMs?: number;
 		readonly users?: readonly ChatUser[];
 		readonly a2aPeers?: A2APeers;
 	} = {},

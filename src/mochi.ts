@@ -42,6 +42,7 @@ import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
 import { bindRepo, PublisherTask } from "./memory/publication.ts";
 import { type A2APeers, a2aFns } from "./a2a/tools.ts";
+import { boardFns, defineSweep, ensureSweep, SWEEP_EVERY_MS } from "./board/board.ts";
 import { defineSettle, ensureSettle, LOOK_EVERY_MS, SETTLE_MIN_TOKENS } from "./turn/settle.ts";
 import { profileFns } from "./profiles/profiles.ts";
 import { type Home, homeAt } from "./home.ts";
@@ -74,6 +75,8 @@ export interface MochiOptions {
 	readonly settleLookMs?: number;
 	/** A quiet thread smaller than this many prompt tokens is not compacted. */
 	readonly settleMinTokens?: number;
+	/** How often the board sweep looks for due tasks. */
+	readonly sweepEveryMs?: number;
 	readonly index: SearchIndex;
 	/** Bundled skills, `<skillsDir>/<name>/SKILL.md`, listed in the prompt and opened with `read`. */
 	readonly skillsDir: string;
@@ -151,6 +154,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 		...a2aFns(a2aPeers),
 		...profileFns({ home: options.home ?? homeAt(options.workDir), repo: resolve(import.meta.dirname, "..") }),
+		...boardFns({ by: "root", now: () => now().getTime() }),
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),
@@ -208,6 +212,9 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		const settle = defineSettle({ harness: () => harness, handles: users.map((user) => user.handle), cacheMs, lookEveryMs: options.settleLookMs ?? LOOK_EVERY_MS, minTokens: options.settleMinTokens ?? SETTLE_MIN_TOKENS, reflect: options.memory?.reflect ?? true, log });
 		registry.install(defineExtension({ name: "settle", tasks: [settle] }));
 		await ensureSettle(harness, settle, lineId, context);
+		const sweep = defineSweep({ harness: () => harness, everyMs: options.sweepEveryMs ?? SWEEP_EVERY_MS, log });
+		registry.install(defineExtension({ name: "board", tasks: [sweep] }));
+		await ensureSweep(harness, sweep, context);
 	}
 	const idleResetMinutes = options.idleResetMinutes ?? 60;
 	line = {

@@ -23,6 +23,7 @@ export const LOOK_EVERY_MS = 30_000;
 export const REFLECT_BRIEF =
 	"This conversation is about to be compacted, and its detail will be lost. Look back over it and save what is worth keeping with tools.note: " +
 	"lasting facts about the owner, their people, projects and preferences, standing rules they gave, and corrections to notes that are now wrong. " +
+	"Also put every open promise on the board with tools.board_add and a due: anything you or the owner said would happen later that board_list does not already show. " +
 	"Update an existing note rather than adding a near-copy. Skip one-off tasks and anything already saved. Do not message anyone. " +
 	"Answer with one line naming what you saved, or nothing new.";
 
