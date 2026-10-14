@@ -5,7 +5,6 @@ import type { Context, JsonValue } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
 import { type ModelThinkingLevel, type Static, Type } from "@earendil-works/pi-ai";
 import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, configure, defineTask, defineTool, type Harness, type ModelRef, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
-import { admits, checkGate, type Classify } from "../brain/classifier.ts";
 import type { ChannelId } from "../channels/types.ts";
 import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
@@ -18,7 +17,7 @@ import { keyedReset } from "../turn/lifecycle.ts";
 import { answerText, LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
 import type { AgentCatalog } from "../agents/catalog.ts";
 import { assertTimeZone, nextCronSlot, parseCron } from "./cron.ts";
-import { GateSchema, Id, type Trigger, TriggerSchema } from "./types.ts";
+import { Id, type Trigger, TriggerSchema } from "./types.ts";
 
 const LATE_MS = 15 * 60_000;
 export const RUN_DEADLINE_MS = 30 * 60_000;
@@ -41,7 +40,6 @@ const late = (trigger: Trigger, slot: number, now: number): boolean => trigger.k
 
 export function plan(trigger: Trigger, last: LastSlot | null, now: number): Plan {
 	if (trigger.kind === "webhook") return { kind: "listen" };
-	if (trigger.kind === "once") return last === null ? { kind: "fire", slot: Date.parse(trigger.at) } : { kind: "done" };
 	const cron = parseCron(trigger.cron);
 	let due: number | undefined;
 	let next = nextCronSlot(cron, trigger.tz, new Date(last?.at ?? now));
@@ -204,7 +202,6 @@ function validateTrigger(trigger: Trigger): Trigger {
 		parseCron(trigger.cron);
 		assertTimeZone(trigger.tz);
 	}
-	if (trigger.kind === "once" && Number.isNaN(Date.parse(trigger.at))) throw new Error(`Invalid time "${trigger.at}"; use ISO 8601 with an offset.`);
 	return trigger;
 }
 
@@ -252,24 +249,19 @@ const AddParams = Type.Object({
 	when: Type.String({ minLength: 1 }),
 	tz: Type.Optional(Type.String()),
 	auth: Type.Optional(Type.Union([Type.Literal("hmac"), Type.Literal("bearer")])),
-	admitWhen: Type.Optional(GateSchema),
-	notifyWhen: Type.Optional(GateSchema),
 	notify: Type.Optional(Type.Array(Type.String())),
 	role: Type.Optional(Id),
 	model: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 function parseWhen(args: Static<typeof AddParams>, timeZone: string, users: readonly ChatUser[]): Trigger {
-	const { id, prompt, when, admitWhen, notifyWhen, notify, role, model } = args;
-	if (admitWhen !== undefined && when !== "webhook") throw new Error("admitWhen applies only to webhook triggers.");
+	const { id, prompt, when, notify, role, model } = args;
 	if (notify !== undefined) checkRecipients(notify, users);
 	const secret = randomBytes(32).toString("hex");
 	const draft =
 		when === "webhook"
-			? { kind: "webhook", id, prompt, admitWhen, notifyWhen, notify, role, model, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
-			: when.trim().split(/\s+/).length === 5
-				? { kind: "cron", id, prompt, notifyWhen, notify, role, model, cron: when.trim(), tz: args.tz ?? timeZone }
-				: { kind: "once", id, prompt, notifyWhen, notify, role, model, at: when };
+			? { kind: "webhook", id, prompt, notify, role, model, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
+			: { kind: "cron", id, prompt, notify, role, model, cron: when.trim(), tz: args.tz ?? timeZone };
 	return validateTrigger(parseWith(TriggerSchema, JSON.parse(JSON.stringify(draft)), "trigger"));
 }
 
@@ -281,7 +273,7 @@ const nextSlot = (trigger: Trigger, last: LastSlot | null, now: number): string 
 function listed({ input: { trigger, origin }, state }: TriggerRecord, now: number): JsonValue {
 	const { checkpoint } = state;
 	const next = checkpoint !== undefined && checkpoint.phase !== "wait" ? iso(checkpoint.slot) : nextSlot(trigger, checkpoint?.last ?? null, now);
-	const when = trigger.kind === "cron" ? `${trigger.cron} ${trigger.tz}` : trigger.kind === "once" ? trigger.at : `webhook (${trigger.auth.kind})`;
+	const when = trigger.kind === "cron" ? `${trigger.cron} ${trigger.tz}` : `webhook (${trigger.auth.kind})`;
 	const last = checkpoint?.last == null ? undefined : `${checkpoint.last.result} at ${iso(checkpoint.last.at)}`;
 	return JSON.parse(JSON.stringify({ id: trigger.id, when, origin, next, last }));
 }
@@ -354,13 +346,9 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 	];
 }
 
-const GATE_MEMO = "notify.gate";
-
 interface NotifyDeps {
 	readonly line: () => Pick<Line, "id" | "turn">;
 	readonly channels: readonly ChannelId[];
-	readonly classify: Classify;
-	readonly log: Log;
 	readonly users: readonly ChatUser[];
 }
 
@@ -379,19 +367,6 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 		execute: async (args, api, context) => {
 			if (api.conversationId === ROOT_CONVERSATION_ID) throw new Error("This is the owner's own thread: your reply reaches them. notify is for agents working out of their sight.");
 			const trigger = await api.commit(async (tx) => (await scanTriggers(tx, api.conversationId)).at(-1)?.input.trigger, context);
-			if (trigger?.notifyWhen !== undefined) {
-				let held = await api.memo<number | null>(GATE_MEMO, context);
-				if (held === undefined) {
-					const verdict = await checkGate(deps.classify, trigger.notifyWhen, { trigger: trigger.id, purpose: trigger.prompt, message: args.text }, context);
-					if (verdict.kind === "failed-open") deps.log("notify.gate_failed_open", { trigger: trigger.id, error: verdict.error });
-					held = await api.memo<number | null>(GATE_MEMO, admits(verdict) ? null : verdict.probability, context);
-				}
-				if (held !== null) {
-					deps.log("notify.filtered", { trigger: trigger.id, probability: held });
-					const text = `Not sent: this trigger's notifyWhen gate judged it does not meet "${trigger.notifyWhen.question}" (p=${held.toFixed(2)}). Finish without notifying.`;
-					return { output: [{ type: "text", text }] };
-				}
-			}
 			const last = (await api.snapshot(LastInboundDoc, context))?.last?.channel;
 			const channel = (args.channel as ChannelId | undefined) ?? (last !== undefined && deps.channels.includes(last) ? last : (deps.channels[0] ?? "cli"));
 			const from = trigger === undefined ? ({ kind: "conversation", id: api.conversationId } as const) : ({ kind: "trigger", id: trigger.id } as const);

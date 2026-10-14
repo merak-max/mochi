@@ -4,7 +4,6 @@ import type { AddressInfo } from "node:net";
 import { ConversationBusy, type Harness } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
-import { admits, checkGate, type Classify } from "../brain/classifier.ts";
 import { readBody, safeEqual, validSha256Signature } from "../http.ts";
 import type { Config } from "../config.ts";
 import { type Log, log } from "../log.ts";
@@ -14,12 +13,10 @@ import { liveTrigger, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds } from "./trig
 import type { WebhookAuth } from "./types.ts";
 
 const BODY_LIMIT = 1024 * 1024;
-export const PAYLOAD_CHARS = 20_000;
 const DELIVERY_HEADERS = ["x-github-delivery", "x-request-id", "webhook-id"];
 
 interface WebhookDeps {
 	readonly harness: Pick<Harness, "commit" | "conversation">;
-	readonly classify: Classify;
 	readonly log: Log;
 	readonly deadlineMs?: number;
 }
@@ -42,13 +39,8 @@ function deliveryId(headers: Headers, body: Buffer): string {
 	return createHash("sha256").update(body).digest("hex");
 }
 
-function payloadText(body: Buffer): string {
-	const text = body.toString("utf8");
-	return text.length > PAYLOAD_CHARS ? `${text.slice(0, PAYLOAD_CHARS)}\n[truncated, ${text.length} characters in total]` : text;
-}
-
-export function webhookContent(id: string, prompt: string, body: Buffer): string {
-	return `${prompt}\n<webhook_payload source="${id}">\n${payloadText(body)}\n</webhook_payload>`;
+function webhookContent(id: string, prompt: string, body: Buffer): string {
+	return `${prompt}\n<webhook_payload source="${id}">\n${body.toString("utf8")}\n</webhook_payload>`;
 }
 
 const single = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
@@ -89,14 +81,6 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	}
 	const delivery = deliveryId(request.headers, body);
 	const requestId = `webhook:${id}:${delivery}`;
-	if (trigger.admitWhen !== undefined) {
-		const verdict = await checkGate(deps.classify, trigger.admitWhen, { webhook: id, purpose: trigger.prompt, payload: payloadText(body) }, context);
-		if (!admits(verdict)) {
-			deps.log("webhook.filtered", { id, delivery, probability: verdict.probability });
-			return reply(response, 202, "accepted");
-		}
-		if (verdict.kind === "failed-open") deps.log("webhook.gate_failed_open", { id, delivery, error: verdict.error });
-	}
 	const conversation = await deps.harness.conversation(found.conversationId, context);
 	try {
 		const submission = await conversation!.submit({ type: "input", content: webhookContent(id, trigger.prompt, body), requestId, whenBusy: "reject" }, context);
@@ -119,10 +103,10 @@ function reply(response: ServerResponse, status: number, text: string): void {
 	response.end(`${text}\n`);
 }
 
-export async function triggersComponent({ harness, trigger, classify, catalog }: Mochi, config: Config, context: Context): Promise<void> {
+export async function triggersComponent({ harness, trigger, catalog }: Mochi, config: Config, context: Context): Promise<void> {
 	const seeds = parseSeeds(config.file, config.users);
 	await reconcileSeeds(harness, trigger, seeds, catalog, context);
 	const listen = { host: config.env.MOCHI_BIND_HOST || "127.0.0.1", port: Number(config.env.MOCHI_HOOKS_PORT || 8788) };
-	const { address } = await startWebhookServer({ harness, classify, log }, listen, context);
+	const { address } = await startWebhookServer({ harness, log }, listen, context);
 	log("triggers.started", { seeds: seeds.map((seed) => seed.id), hooks: `${address.address}:${address.port}` });
 }

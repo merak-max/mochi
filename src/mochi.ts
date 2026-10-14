@@ -127,7 +127,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		return line;
 	};
 	const modelTools: ToolRegistration[] = [
-		notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users }),
+		notifyTool({ line: lineOf, channels: [...options.channels.keys()], users }),
 		handoffTool(),
 	];
 	const now = options.now ?? (() => new Date());

@@ -55,7 +55,7 @@ Everything that is yours lives in `~/.mochi` (or `MOCHI_HOME`). The repository h
 
 ## Models
 
-Any provider works, through one of three protocols. A gateway such as LiteLLM or Bifrost is one provider per protocol it serves.
+Any provider works, through one of three protocols. A gateway is one provider per protocol it serves.
 
 ```toml
 [providers.gateway]

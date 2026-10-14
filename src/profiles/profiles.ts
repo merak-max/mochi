@@ -78,7 +78,8 @@ function withPeerToken(env: Env, name: string, token: string | undefined): Env {
 
 const tokenEnv = (name: string): string => `${name.toUpperCase().replaceAll("-", "_")}_A2A_TOKEN`;
 
-const MODEL_KEYS = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|OPENROUTER_API_KEY|BIFROST_[A-Z_]+|FIRECRAWL_API_KEY|DEEPGRAM_API_KEY|EXECUTOR_URL)$/;
+/** A profile has its own channels, address and peers; every other key of its parent carries over. */
+const OWN_KEYS = /^(MOCHI_|WHATSAPP_|PHOTON_|IMESSAGE_)|_A2A_TOKEN$/;
 
 interface ProfileDeps {
 	readonly home: Home;
@@ -189,7 +190,7 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 				const parentPort = Number(parentEnv.MOCHI_A2A_PORT || 8789);
 
 				await mkdir(home.dir, { recursive: true, mode: 0o700 });
-				const keys = Object.fromEntries(Object.entries({ ...process.env, ...parentEnv }).filter(([key, value]) => MODEL_KEYS.test(key) && value !== undefined)) as Env;
+				const keys = Object.fromEntries(Object.entries(parentEnv).filter(([key]) => !OWN_KEYS.test(key)));
 				await writeEnv(home, {
 					...keys,
 					MOCHI_A2A_AGENT_NAME: name,

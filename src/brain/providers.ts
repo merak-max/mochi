@@ -15,7 +15,7 @@ import { JEV } from "./classifier.ts";
  *   anthropic  Anthropic Messages (Anthropic, or a gateway's Anthropic route)
  *   responses  OpenAI Responses (OpenAI, Azure, or a gateway's OpenAI route)
  *   chat       OpenAI chat completions (OpenRouter, Ollama, vLLM, LiteLLM, most gateways)
- * A gateway such as Bifrost or LiteLLM is one provider per protocol it serves. A model is `<provider>/<model id>`,
+ * A gateway is one provider per protocol it serves. A model is `<provider>/<model id>`,
  * and the id is sent as written, so a gateway's own ids (`anthropic/claude-opus-5-5`) work unchanged.
  */
 export const ProviderSchema = Type.Object(

@@ -13,7 +13,7 @@ On-demand instructions for mochi. The prompt's skills index shows each skill's `
 | `reflect`, `automate-me` | Learning from a run, and learning the owner's style into notes. |
 | `unslop`, `technical-writing`, `bro` | Writing rules, document structure, and plain restatement. |
 
-Subagent types live in `../agents/`: `mochi` for delegated work that needs judgment and `worker` for an exact brief. `../agents/models.json` maps the tiers `fast`, `default`, `strongest` and `panel` to Bifrost model ids.
+Subagent types live in `../agents/`: `mochi` for delegated work that needs judgment and `worker` for an exact brief. Tiers and aliases come from `[models]` in the owner's `config.toml`.
 
 ## Adding or editing a skill
 
