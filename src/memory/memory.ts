@@ -14,6 +14,7 @@ import {
 	type Harness,
 	hook,
 	LiveDoc,
+	AgentDoc,
 	ROOT_CONVERSATION_ID,
 	section,
 	type Tx,
@@ -171,6 +172,17 @@ async function foldTurns(harness: Harness, fast: FastCompletion, conversation: C
 	}
 }
 
+/**
+ * A trigger run starts each run from a reset and a fork lives for one task, so neither ever compacts a long history;
+ * only the conversations that do get a turn log.
+ */
+async function keepsHistory(harness: Harness, conversation: ConversationId, context: Context): Promise<boolean> {
+	const record = await harness.commit((tx) => tx.conversation(conversation), context);
+	if (record?.owner !== undefined) return false;
+	const extensions = (await harness.snapshot(AgentDoc, conversation, context))?.extensions;
+	return !(Array.isArray(extensions) && extensions.includes("seat-trigger"));
+}
+
 /** Builds every block that is due, smallest first, one commit each, so a crash resumes at the next missing block. */
 async function buildBlocks(read: () => Promise<Tree>, write: (key: string, summary: string) => Promise<void>, fast: FastCompletion, context: Context): Promise<void> {
 	for (;;) {
@@ -203,6 +215,7 @@ export async function maintain(harness: Harness, fast: FastCompletion, owners: r
 		);
 	}
 	for (const conversation of conversations) {
+		if (!(await keepsHistory(harness, conversation, context))) continue;
 		await foldTurns(harness, fast, conversation, context);
 		await buildBlocks(
 			async () => (await harness.snapshot(TurnLog, conversation, context)) ?? empty(),
