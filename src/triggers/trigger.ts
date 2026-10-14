@@ -202,7 +202,7 @@ export async function inputPasses(
 	for (const [index, step] of stepsOf(trigger).entries()) {
 		if ("model" in step) return true;
 		if (step.classify.on === "output") continue;
-		const yes = (await memo(`classify:${index}`)) ?? (await memo(`classify:${index}`, await classifyYes(classify, step.classify, { trigger: trigger.id, input }, context)))!;
+		const yes = (await memo(`classify:${index}`)) ?? (await memo(`classify:${index}`, await classifyYes(classify, step.classify, { trigger: trigger.id, input }, log, context)))!;
 		if (yes < (step.classify.threshold ?? 0.5)) {
 			log("trigger.stopped", { id: trigger.id, step: index, yes });
 			return false;
@@ -400,7 +400,7 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 			const trigger = await api.commit(async (tx) => (await scanTriggers(tx, api.conversationId)).at(-1)?.input.trigger, context);
 			for (const [index, step] of (trigger === undefined ? [] : outputSteps(trigger)).entries()) {
 				const key = `classify:${index}`;
-				const yes = (await api.memo<number>(key, context)) ?? (await api.memo(key, await classifyYes(deps.classify, step, { trigger: trigger!.id, purpose: trigger!.prompt, message: args.text }, context), context));
+				const yes = (await api.memo<number>(key, context)) ?? (await api.memo(key, await classifyYes(deps.classify, step, { trigger: trigger!.id, purpose: trigger!.prompt, message: args.text }, deps.log, context), context));
 				if (yes < (step.threshold ?? 0.5)) {
 					deps.log("notify.stopped", { trigger: trigger!.id, step: index, yes });
 					return { output: [{ type: "text", text: `Not sent: the trigger's classify step judged no to "${step.question}" (p=${yes.toFixed(2)}). Finish without notifying.` }] };

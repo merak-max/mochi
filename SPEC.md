@@ -134,7 +134,7 @@ type Step =
   | { model: {} };
 ```
 
-A run is the ordered `steps`. A classify step before the model step asks the classifier about the input (a webhook body, a check script's output, or the prompt) and stops the run when P(yes) is below `threshold` (default 0.5), so the model never starts for junk. A classify step with `on: "output"` judges each `notify` text instead. The model step runs the prompt under the trigger's `profile` (its instructions, model, tools and memory), else its `model`, else the fast tier. A trigger without `steps` is one model step. A stored `notifyWhen` reads as an output classify step and `admitWhen` as one before the model, and `role` reads as `profile`, so triggers stored before steps run as they did.
+A run is the ordered `steps`. A classify step before the model step asks the classifier about the input (a webhook body, a check script's output, or the prompt) and stops the run when P(yes) is below `threshold` (default 0.5), so the model never starts for junk. A classifier that fails passes and logs `classify.failed`, so an outage lets alerts through instead of silencing them. A classify step with `on: "output"` judges each `notify` text instead. The model step runs the prompt under the trigger's `profile` (its instructions, model, tools and memory), else its `model`, else the fast tier. A trigger without `steps` is one model step. A stored `notifyWhen` reads as an output classify step and `admitWhen` as one before the model, and `role` reads as `profile`, so triggers stored before steps run as they did.
 
 - A cron `check` script runs first. Empty output ends the run `quiet` with no model call.
 - Each run starts from a keyed reset whose handoff is the last run's closing note, so a run never resends its history.

@@ -1,6 +1,7 @@
 import type { Context } from "@earendil-works/chord";
 import type { ClassifierAnswer, ClassifierQuestion, JsonObject, Models } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
+import type { Log } from "../log.ts";
 
 
 export type Classified = { readonly ok: true; readonly answers: Readonly<Record<string, ClassifierAnswer>> } | { readonly ok: false; readonly error: string };
@@ -22,11 +23,14 @@ export function createClassify(models: Models, classifier: ModelRef | undefined)
 
 export type ClassifyStep = { readonly question: string; readonly yes: string; readonly no: string; readonly threshold?: number };
 
-/** P(yes) for one yes/no question over `state`. A classifier failure throws, so a broken gate shows instead of passing. */
-export async function classifyYes(classify: Classify, step: ClassifyStep, state: JsonObject, context: Context): Promise<number> {
+/**
+ * P(yes) for one yes/no question over `state`. A failed classifier passes (1) and logs `classify.failed`, so an outage
+ * lets an alert through instead of silencing every gated trigger.
+ */
+export async function classifyYes(classify: Classify, step: ClassifyStep, state: JsonObject, log: Log, context: Context): Promise<number> {
 	const result = await classify(state, { gate: { type: "bool", instructions: step.question, criteria: { true: step.yes, false: step.no } } }, context);
-	if (!result.ok) throw new Error(`classify step failed: ${result.error}`);
-	const answer = result.answers.gate;
-	if (answer?.type !== "bool") throw new Error("classify step got no yes/no answer.");
-	return answer.probability;
+	const answer = result.ok ? result.answers.gate : undefined;
+	if (answer?.type === "bool") return answer.probability;
+	log("classify.failed", { question: step.question, error: result.ok ? "no yes/no answer" : result.error });
+	return 1;
 }
