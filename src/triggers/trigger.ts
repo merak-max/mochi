@@ -17,14 +17,15 @@ import { keyedReset } from "../turn/lifecycle.ts";
 import { answerText, LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
 import type { AgentCatalog } from "../agents/catalog.ts";
 import { assertTimeZone, nextCronSlot, parseCron } from "./cron.ts";
-import { Id, type Trigger, TriggerSchema } from "./types.ts";
+import { jevYes, type Classify, type JevStep } from "../brain/classifier.ts";
+import { Id, type Step, StepSchema, stepsOf, type Trigger, TriggerSchema } from "./types.ts";
 
 const LATE_MS = 15 * 60_000;
 export const RUN_DEADLINE_MS = 30 * 60_000;
 const DAY_MS = 86_400_000;
 const CHECK_TIMEOUT_MS = 5 * 60_000;
 
-export type LastSlot = { readonly at: number; readonly result: "done" | "unanswered" | "skipped-busy" | "missed" | "timed-out" | "quiet" | "check-failed" };
+export type LastSlot = { readonly at: number; readonly result: "done" | "unanswered" | "skipped-busy" | "missed" | "timed-out" | "quiet" | "check-failed" | "stopped" };
 
 const run = promisify(execFile);
 
@@ -59,7 +60,7 @@ export type TriggerRecord = TaskRecord<TriggerInput, TriggerState, null>;
 
 const iso = (at: number): string => new Date(at).toISOString();
 
-export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit">; readonly catalog: AgentCatalog }): TriggerTask {
+export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, classify }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit">; readonly catalog: AgentCatalog; readonly classify: Classify }): TriggerTask {
 	const wait = (last: LastSlot): NextTaskState<TriggerState, null> => ({ status: "running", checkpoint: { phase: "wait", last } });
 	const missed = (trigger: Trigger, slot: number): NextTaskState<TriggerState, null> => {
 		log("trigger.missed", { id: trigger.id, slot: iso(slot) });
@@ -109,6 +110,8 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog }: {
 					if (found.out === null) return runtime.commit(() => wait({ at: slot, result: "quiet" }), context);
 					payload = `\n<check_output source="${trigger.id}">\n${found.out}\n</check_output>`;
 				}
+				const memo = (key: string, value?: number) => (value === undefined ? runtime.memo<number>(`${key}:${iso(slot)}`, context) : runtime.memo(`${key}:${iso(slot)}`, value, context));
+				if (!(await inputPasses(trigger, payload === "" ? trigger.prompt : payload, classify, memo, log, context))) return runtime.commit(() => wait({ at: slot, result: "stopped" }), context);
 				const conversation = (await runtime.conversation(runtime.conversationId, context))!;
 				const requestId = `${trigger.kind}:${trigger.id}:${iso(slot)}`;
 				const { agent, instructions } = runAgent(trigger, catalog);
@@ -185,9 +188,38 @@ export async function addTrigger(
 	return { id, replaced: previous !== undefined && live(previous) ? previous.id : undefined };
 }
 
+/**
+ * Runs the jev steps before the model step on `input`, in order, each verdict memoized under `jev:<index>` so a replay
+ * decides the same way. False when one judges no: the chain stops and the model never runs.
+ */
+export async function inputPasses(
+	trigger: Trigger,
+	input: string,
+	classify: Classify,
+	memo: (key: string, value?: number) => Promise<number | undefined>,
+	log: Log,
+	context: Context,
+): Promise<boolean> {
+	for (const [index, step] of stepsOf(trigger).entries()) {
+		if ("model" in step) return true;
+		if (step.jev.on === "output") continue;
+		const yes = (await memo(`jev:${index}`)) ?? (await memo(`jev:${index}`, await jevYes(classify, step.jev, { trigger: trigger.id, input }, context)))!;
+		if (yes < (step.jev.threshold ?? 0.5)) {
+			log("trigger.stopped", { id: trigger.id, step: index, yes });
+			return false;
+		}
+	}
+	return true;
+}
+
+/** The jev steps that judge a trigger's notify text, in order. */
+export const outputSteps = (trigger: Trigger): readonly JevStep[] =>
+	stepsOf(trigger).flatMap((step: Step) => ("jev" in step && step.jev.on === "output" ? [step.jev] : []));
+
 export function runAgent(trigger: Trigger, catalog: AgentCatalog): { readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly instructions: string } {
-	const role = trigger.role === undefined ? undefined : catalog.types.get(trigger.role);
-	if (trigger.role !== undefined && role === undefined) throw new Error(`Unknown role "${trigger.role}". Use ${[...catalog.types.keys()].join(", ")}.`);
+	const name = trigger.profile ?? trigger.role;
+	const role = name === undefined ? undefined : catalog.types.get(name);
+	if (name !== undefined && role === undefined) throw new Error(`Unknown profile "${name}". Use ${[...catalog.types.keys()].join(", ")}.`);
 	const model = catalog.model(trigger.model ?? role?.model ?? "fast");
 	const thinking = trigger.thinking ?? role?.thinking;
 	const header = `${INSTRUCTIONS}\nTrigger: ${trigger.id}.`;
@@ -250,18 +282,19 @@ const AddParams = Type.Object({
 	tz: Type.Optional(Type.String()),
 	auth: Type.Optional(Type.Union([Type.Literal("hmac"), Type.Literal("bearer")])),
 	notify: Type.Optional(Type.Array(Type.String())),
-	role: Type.Optional(Id),
+	steps: Type.Optional(Type.Array(StepSchema, { minItems: 1 })),
+	profile: Type.Optional(Id),
 	model: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 function parseWhen(args: Static<typeof AddParams>, timeZone: string, users: readonly ChatUser[]): Trigger {
-	const { id, prompt, when, notify, role, model } = args;
+	const { id, prompt, when, notify, steps, profile, model } = args;
 	if (notify !== undefined) checkRecipients(notify, users);
 	const secret = randomBytes(32).toString("hex");
 	const draft =
 		when === "webhook"
-			? { kind: "webhook", id, prompt, notify, role, model, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
-			: { kind: "cron", id, prompt, notify, role, model, cron: when.trim(), tz: args.tz ?? timeZone };
+			? { kind: "webhook", id, prompt, notify, steps, profile, model, auth: args.auth === "bearer" ? { kind: "bearer", token: secret } : { kind: "hmac-sha256", header: "X-Hub-Signature-256", secret } }
+			: { kind: "cron", id, prompt, notify, steps, profile, model, cron: when.trim(), tz: args.tz ?? timeZone };
 	return validateTrigger(parseWith(TriggerSchema, JSON.parse(JSON.stringify(draft)), "trigger"));
 }
 
@@ -295,9 +328,10 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 			name: "trigger_add",
 			description:
 				"Run a prompt on a schedule or a webhook, each run fresh from the last run's note; a one-off reminder or follow-up is board_add. Silent unless it calls notify (to notify ids, default user1). " +
-				"when: cron 'm h dom mon dow' in the owner's zone, ISO time+offset, or 'webhook' (returns URL and secret; hmac checks " +
-				"X-Hub-Signature-256, bearer the Authorization header). admitWhen/notifyWhen: yes/no classifier gates on each payload/notify text. " +
-				"role: agent type giving the run its instructions and model; model overrides; default fast. Same id replaces.",
+				"when: cron 'm h dom mon dow' in the owner's zone, or 'webhook' (returns URL and secret; hmac checks X-Hub-Signature-256, bearer the Authorization header). " +
+				"steps: an ordered chain; {model:{}} is the run of prompt, a jev step is a ~300 ms yes/no classifier that stops the chain on no, so the model never runs for junk. " +
+				"Gate example: steps [{jev:{question:'Does this payload need the owner?',yes:'a person waits or money is due',no:'newsletter, receipt, noise',threshold:0.6}},{model:{}}]; " +
+				"add on:'output' to judge the notify text instead. Without steps it is one model step. profile: whose instructions, model and memory the run uses; model overrides; default fast. Same id replaces.",
 			parameters: AddParams,
 			structuredOutputSchema: Type.Object({ id: Type.String(), next: Type.Optional(Type.String()), url: Type.Optional(Type.String()), secret: Type.Optional(Type.String()) }),
 			replay: "safe",
@@ -349,6 +383,8 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 interface NotifyDeps {
 	readonly line: () => Pick<Line, "id" | "turn">;
 	readonly channels: readonly ChannelId[];
+	readonly classify: Classify;
+	readonly log: Log;
 	readonly users: readonly ChatUser[];
 }
 
@@ -367,6 +403,14 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 		execute: async (args, api, context) => {
 			if (api.conversationId === ROOT_CONVERSATION_ID) throw new Error("This is the owner's own thread: your reply reaches them. notify is for agents working out of their sight.");
 			const trigger = await api.commit(async (tx) => (await scanTriggers(tx, api.conversationId)).at(-1)?.input.trigger, context);
+			for (const [index, step] of (trigger === undefined ? [] : outputSteps(trigger)).entries()) {
+				const key = `jev:${index}`;
+				const yes = (await api.memo<number>(key, context)) ?? (await api.memo(key, await jevYes(deps.classify, step, { trigger: trigger!.id, purpose: trigger!.prompt, message: args.text }, context), context));
+				if (yes < (step.threshold ?? 0.5)) {
+					deps.log("notify.stopped", { trigger: trigger!.id, step: index, yes });
+					return { output: [{ type: "text", text: `Not sent: the trigger's jev step judged no to "${step.question}" (p=${yes.toFixed(2)}). Finish without notifying.` }] };
+				}
+			}
 			const last = (await api.snapshot(LastInboundDoc, context))?.last?.channel;
 			const channel = (args.channel as ChannelId | undefined) ?? (last !== undefined && deps.channels.includes(last) ? last : (deps.channels[0] ?? "cli"));
 			const from = trigger === undefined ? ({ kind: "conversation", id: api.conversationId } as const) : ({ kind: "trigger", id: trigger.id } as const);

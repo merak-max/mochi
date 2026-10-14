@@ -117,11 +117,11 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		return line;
 	};
 	const modelTools: ToolRegistration[] = [
-		notifyTool({ line: lineOf, channels: [...options.channels.keys()], users }),
+		notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users }),
 		handoffTool(),
 	];
 	const now = options.now ?? (() => new Date());
-	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.agents });
+	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: options.triggerDeadlineMs ?? RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.agents, classify: options.classify });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: options.procPollMs ?? PROC_POLL_MS, log });
 	const library: ToolRegistration[] = [

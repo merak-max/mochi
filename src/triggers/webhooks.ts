@@ -9,7 +9,8 @@ import type { Config } from "../config.ts";
 import { type Log, log } from "../log.ts";
 import type { Mochi } from "../mochi.ts";
 import { pause } from "../pause.ts";
-import { liveTrigger, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds } from "./trigger.ts";
+import type { Classify } from "../brain/classifier.ts";
+import { inputPasses, liveTrigger, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds } from "./trigger.ts";
 import type { WebhookAuth } from "./types.ts";
 
 const BODY_LIMIT = 1024 * 1024;
@@ -18,6 +19,7 @@ const DELIVERY_HEADERS = ["x-github-delivery", "x-request-id", "webhook-id"];
 interface WebhookDeps {
 	readonly harness: Pick<Harness, "commit" | "conversation">;
 	readonly log: Log;
+	readonly classify: Classify;
 	readonly deadlineMs?: number;
 }
 
@@ -81,6 +83,9 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	}
 	const delivery = deliveryId(request.headers, body);
 	const requestId = `webhook:${id}:${delivery}`;
+	const memo = new Map<string, number>();
+	const remember = async (key: string, value?: number) => (value === undefined ? memo.get(key) : (memo.set(key, value), value));
+	if (!(await inputPasses(trigger, body.toString("utf8"), deps.classify, remember, deps.log, context))) return reply(response, 202, "accepted");
 	const conversation = await deps.harness.conversation(found.conversationId, context);
 	try {
 		const submission = await conversation!.submit({ type: "input", content: webhookContent(id, trigger.prompt, body), requestId, whenBusy: "reject" }, context);
@@ -103,10 +108,10 @@ function reply(response: ServerResponse, status: number, text: string): void {
 	response.end(`${text}\n`);
 }
 
-export async function triggersComponent({ harness, trigger, catalog }: Mochi, config: Config, context: Context): Promise<void> {
+export async function triggersComponent({ harness, trigger, catalog, classify }: Mochi, config: Config, context: Context): Promise<void> {
 	const seeds = parseSeeds(config.file, config.users);
 	await reconcileSeeds(harness, trigger, seeds, catalog, context);
 	const listen = { host: config.env.MOCHI_BIND_HOST || "127.0.0.1", port: Number(config.env.MOCHI_HOOKS_PORT || 8788) };
-	const { address } = await startWebhookServer({ harness, log }, listen, context);
+	const { address } = await startWebhookServer({ harness, log, classify }, listen, context);
 	log("triggers.started", { seeds: seeds.map((seed) => seed.id), hooks: `${address.address}:${address.port}` });
 }

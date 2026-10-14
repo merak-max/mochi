@@ -19,3 +19,14 @@ export function createClassify(models: Models): Classify {
 		return { ok: true, answers: result.answers };
 	};
 }
+
+export type JevStep = { readonly question: string; readonly yes: string; readonly no: string; readonly threshold?: number };
+
+/** P(yes) for one yes/no question over `state`. A classifier failure throws, so a broken gate shows instead of passing. */
+export async function jevYes(classify: Classify, step: JevStep, state: JsonObject, context: Context): Promise<number> {
+	const result = await classify(state, { gate: { type: "bool", instructions: step.question, criteria: { true: step.yes, false: step.no } } }, context);
+	if (!result.ok) throw new Error(`jev step failed: ${result.error}`);
+	const answer = result.answers.gate;
+	if (answer?.type !== "bool") throw new Error("jev step got no yes/no answer.");
+	return answer.probability;
+}
