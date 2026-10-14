@@ -78,7 +78,7 @@ export function connectApps(connect: Connect, log: Log): Apps & { run(context: C
 	};
 	const execute = async (code: string, context: Context): Promise<JsonValue> => completedValue(await tool("execute", { code }, context));
 	return {
-		search: (query, context) => execute(`return await tools.search(${JSON.stringify({ query })});`, context),
+		search: (query, context) => execute(searchProgram(query), context),
 		call: (path, args, context) => execute(`return await ${toolExpression(path)}(${JSON.stringify(args)});`, context),
 		skills: async (app, context) => {
 			const value = await tool("skills", app === undefined ? {} : { app }, context);
@@ -129,6 +129,24 @@ async function open(connect: Connect): Promise<Link> {
 
 /** An error result from an Executor tool: the call reached Executor and failed there. */
 class ExecutorResultError extends Error {}
+
+/**
+ * An Executor program that searches, then adds each item's full signature from `tools.search.describe`.
+ * Search returns only the input type; an item that describe misses gets a signature built from it.
+ */
+export function searchProgram(query: string): string {
+	return `const found = await tools.search(${JSON.stringify({ query })});
+const items = found.items ?? [];
+const described = items.length === 0 ? { items: [] } : await tools.search.describe({ paths: items.map((item) => item.path) });
+const signatures = new Map();
+for (const item of described.items ?? []) signatures.set(item.path, item.signature);
+for (const item of items) {
+  const signature = signatures.get(item.path) ?? item.signature ?? \`(input: \${item.input ?? "unknown"}) => Promise<unknown>\`;
+  item.signature = signature;
+  delete item.input;
+}
+return found;`;
+}
 
 /** A path as apps_search returns it ("tools[\"a-b\"].x") or without the prefix ("gmail.send", "[\"a-b\"].x"), as a callable expression. */
 export function toolExpression(path: string): string {

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { type JsonRpcMessage, type JsonRpcRequest, McpSessionExpiredError, type McpTransport } from "@earendil-works/pi-mcp";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
-import { type Connect, connectApps, toolExpression } from "./apps.ts";
+import { type Connect, connectApps, searchProgram, toolExpression } from "./apps.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -122,6 +122,32 @@ test("an expired Executor session reconnects and retries the call once", async (
 	assert.equal(calls, 1);
 	assert.ok(logs.includes("executor.reconnecting"));
 	await stop();
+});
+
+test("the search program gives every item a path and signature when Executor's search returns only an input type", async () => {
+	const described: unknown[] = [];
+	const search = Object.assign(
+		async () => ({
+			items: [
+				{ path: "tools.email.send", description: "Send mail", input: "{ to: string }" },
+				{ path: 'tools["cal-com"].book', description: "Book", input: "{ start: string }" },
+			],
+			namespaces: [],
+		}),
+		{
+			describe: async ({ paths }: { paths: string[] }) => {
+				described.push(paths);
+				return { items: [{ path: "tools.email.send", description: "Send mail", signature: "(input: { to: string }) => Promise<unknown>" }], missing: [] };
+			},
+		},
+	);
+	const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
+	const result = await new AsyncFunction("tools", searchProgram("mail"))({ search });
+	assert.deepEqual(described, [["tools.email.send", 'tools["cal-com"].book']]);
+	assert.deepEqual(result.items, [
+		{ path: "tools.email.send", description: "Send mail", signature: "(input: { to: string }) => Promise<unknown>" },
+		{ path: 'tools["cal-com"].book', description: "Book", signature: "(input: { start: string }) => Promise<unknown>" },
+	]);
 });
 
 test("a path from apps_search, with or without the tools prefix, becomes one callable expression", () => {
