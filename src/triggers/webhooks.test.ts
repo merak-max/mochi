@@ -67,11 +67,9 @@ test("webhook server: HMAC and bearer auth, 404, 413, duplicate delivery submitt
 	const inputs = (await github.entries({}, 50, undefined, context)).items.filter((entry) => UserEntry.is(entry));
 	assert.equal(inputs.length, 1);
 	assert.equal(messageText(inputs[0]!.model![0]!), `A GitHub event.\n<webhook_payload source="github">\n${body}\n</webhook_payload>`);
-	// Without a delivery header the id is the body's SHA-256.
 	const sha = createHash("sha256").update("ping").digest("hex");
 	assert.equal((await mochi.harness.commit((tx) => tx.submissionByRequest(plain.id, `webhook:plain:${sha}`), context))?.status, "done");
 	assert.equal(faux.state.callCount, 2);
-
 });
 
 test("admitWhen: a no is acknowledged without a run; a yes or a classifier error runs", async () => {

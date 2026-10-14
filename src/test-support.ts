@@ -8,20 +8,14 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxProviderHandle, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import type { Harness } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import type { Apps } from "./apps/apps.ts";
 import type { Classified, Classify } from "./brain/classifier.ts";
-import { type Mochi, openMochi } from "./mochi.ts";
+import { type Mochi, type MochiOptions, openMochi } from "./mochi.ts";
 import { IMESSAGE_PROFILE } from "./channels/imessage.ts";
 import type { Channel, ChannelProfile, Channels, ChatChannelId, Reaction } from "./channels/types.ts";
 import { WHATSAPP_PROFILE } from "./channels/whatsapp.ts";
 import { SearchIndex } from "./index/fts.ts";
-import type { Log } from "./log.ts";
 import { allPages } from "./pages.ts";
 import { AgentCatalog, type AgentType } from "./agents/catalog.ts";
-import type { Retry } from "./turn/turn.ts";
-import type { ChatUser } from "./config.ts";
-import type { A2APeers } from "./a2a/tools.ts";
-
 
 export const FAUX = { provider: "faux", modelId: "faux-1" } as const;
 
@@ -52,24 +46,12 @@ export async function openTestMochi(
 	channels: Channels = new Map(),
 	classify: Classify = fixedClassify("no classifier in tests"),
 	agentTypes: readonly AgentType[] = [],
-	overrides: {
-		readonly skillsDir?: string;
-		readonly memory?: NonNullable<import("./mochi.ts").MochiOptions["memory"]>;
-		readonly agents?: AgentCatalog;
-		readonly scheduling?: "daemon" | "local";
-		readonly retry?: Retry;
-		readonly log?: Log;
-		readonly now?: () => Date;
-		readonly apps?: Apps;
-		readonly scriptDeadlineMs?: number;
-		readonly triggerDeadlineMs?: number;
-		readonly procPollMs?: number;
-		readonly settleLookMs?: number;
-		readonly settleMinTokens?: number;
-		readonly sweepEveryMs?: number;
-		readonly users?: readonly ChatUser[];
-		readonly a2aPeers?: A2APeers;
-	} = {},
+	overrides: Partial<
+		Pick<
+			MochiOptions,
+			"skillsDir" | "memory" | "agents" | "scheduling" | "retry" | "log" | "now" | "apps" | "scriptDeadlineMs" | "triggerDeadlineMs" | "procPollMs" | "settleLookMs" | "settleMinTokens" | "sweepEveryMs" | "users" | "a2aPeers"
+		>
+	> = {},
 ): Promise<TestMochi> {
 	const { skillsDir, agents, scheduling, log, ...options } = overrides;
 	await mkdir(join(dir, "work"), { recursive: true });

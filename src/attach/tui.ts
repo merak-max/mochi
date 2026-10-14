@@ -32,13 +32,8 @@ import {
 	VStack,
 } from "@earendil-works/pi-tui";
 import type { AttachClient } from "./client.ts";
-import type { ModelSummary } from "./protocol.ts";
+import type { ConversationSummary, ModelSummary } from "./protocol.ts";
 import { toolRenderers } from "./renderers.ts";
-
-// The terminal UI, ported from pi's experimental durable TUI (coding-agent/src/experimental/durable/tui.ts). It renders
-// the daemon's conversation view and task graph as they arrive over the attach socket. pi-coding-agent exports its
-// message components but not its editor keymap, status indicator, theme controller or tool renderers, so mochi keeps
-// its own key table, a plain status line and the default theme; tool cards take renderers from ./renderers.ts.
 
 type Action = "abort" | "exit" | "model" | "thinking" | "expand" | "followUp";
 
@@ -53,7 +48,6 @@ const KEYS: readonly (readonly [KeyId, Action])[] = [
 ];
 const THINKING = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 
-/** Every slash command, in the order autocomplete lists them. Anything else starting with `/word` is refused, not sent. */
 const COMMANDS = [
 	{ name: "model", description: "Select model", argumentHint: "<provider/model>" },
 	{ name: "thinking", description: "Set thinking level", argumentHint: "<level>" },
@@ -68,7 +62,6 @@ type Command = (typeof COMMANDS)[number]["name"];
 const dim = (text: string) => styleText("dim", text);
 const accent = (text: string) => styleText("cyan", text);
 
-/** An editor that hands mochi's keys to `onAction` before editing. */
 class MochiEditor extends Editor {
 	onAction: (action: Action) => void = () => {};
 
@@ -79,7 +72,6 @@ class MochiEditor extends Editor {
 	}
 }
 
-/** A filterable list in place of the editor. */
 class ListSelector extends Container implements Focusable {
 	readonly #input = new Input();
 	readonly #listContainer = new Container();
@@ -188,7 +180,6 @@ class MochiTui {
 		this.ui.setFocus(this.editor);
 	}
 
-	/** Puts `component` in the editor's place; `mount(this.editor)` restores it. */
 	mount(component: Component & Focusable = this.editor): void {
 		this.#editorSlot.clear();
 		this.#editorSlot.addChild(component);
@@ -364,14 +355,13 @@ class MochiTui {
 
 interface Snapshot {
 	readonly client: AttachClient;
-	readonly conversations: readonly { readonly id: number; readonly label: string; readonly title?: string }[];
+	readonly conversations: readonly ConversationSummary[];
 	readonly models: readonly ModelSummary[];
 	readonly usage: UsageState | undefined;
 	readonly activity: boolean;
 	readonly notices: readonly { readonly text: string; readonly error: boolean }[];
 }
 
-/** Runs until the owner exits. Work in flight keeps running in the daemon. */
 export async function runTui(client: AttachClient, cwd: string): Promise<void> {
 	initTheme();
 	const tui = new MochiTui(cwd);
@@ -391,7 +381,6 @@ export async function runTui(client: AttachClient, cwd: string): Promise<void> {
 	const fail = (error: unknown) => update({ notices: [...state.notices, { text: error instanceof Error ? error.message : String(error), error: true }].slice(-20) });
 	const info = (text: string) => update({ notices: [...state.notices, { text, error: false }].slice(-20) });
 	const shown = () => state.client.view?.conversation.id ?? 0;
-	const agent = () => (state.client.view?.docs["pi.agent"] ?? {}) as AgentState;
 
 	let tasksSeen: TaskGraph | undefined;
 	let refreshing = false;
@@ -491,7 +480,7 @@ export async function runTui(client: AttachClient, cwd: string): Promise<void> {
 				selectModel();
 				return;
 			case "thinking": {
-				const current = agent().thinkingLevel ?? "off";
+				const current = ((state.client.view?.docs["pi.agent"] ?? {}) as AgentState).thinkingLevel ?? "off";
 				const next = THINKING[(THINKING.indexOf(current as (typeof THINKING)[number]) + 1) % THINKING.length] ?? "off";
 				void client.request({ op: "configure", conversationId: shown(), thinkingLevel: next }).catch(fail);
 				return;
@@ -558,7 +547,6 @@ function totalUsage(state: UsageState): { readonly input: number; readonly outpu
 	return { input: sum((usage) => usage.input), output: sum((usage) => usage.output), cacheRead: sum((usage) => usage.cacheRead), cost: sum((usage) => usage.cost.total) };
 }
 
-/** Context size from the newest successful answer after the newest compaction. */
 function contextTokens(entries: readonly EntryRecord[]): number | undefined {
 	const compacted = Math.max(0, ...entries.filter((entry) => entry.kind === "pi.compaction").map((entry) => entry.id));
 	for (const entry of [...entries].reverse()) {

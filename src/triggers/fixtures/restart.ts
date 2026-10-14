@@ -1,6 +1,4 @@
-// One daemon life for the trigger restart test: node src/triggers/fixtures/restart.ts <dir> <clock ISO> <kill point | none>
-// The clock starts at <clock> and runs at real speed. The first life adds a daily 09:00 IST trigger. A life with a kill
-// point SIGKILLs itself there; the last life waits for the 09:00 slot of 2026-10-05 to settle and prints a summary.
+// Usage: node src/triggers/fixtures/restart.ts <dir> <clock ISO> <kill point | none>
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";

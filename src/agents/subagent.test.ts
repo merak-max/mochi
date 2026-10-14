@@ -16,10 +16,8 @@ import { AgentCatalog, parseAgentFile } from "./catalog.ts";
 const tool = (name: string, args: JsonObject) => fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
 const hang = (_t: TranscriptContext, options?: { signal?: AbortSignal }) => new Promise<AssistantMessage>((_, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
 
-/** Each conversation answers its latest scripted input: one step before a tool result, one after. */
 type Seen = { direct: string[]; scripted: string[] };
 
-/** The tools a request offers: the model's own, and the ones the `codemode` section lists for scripts. */
 function toolsOf(transcript: TranscriptContext): Seen {
 	const direct: string[] = [];
 	let section = "";

@@ -13,7 +13,7 @@ import { messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import { TriggersDoc } from "../upgrade.ts";
 import { fixedClassify, newFaux, openTestMochi, recordingChannel, type TestMochi, tempDir, turnsSettled } from "../test-support.ts";
-import { addTrigger, type LastSlot, parseSeeds, type Plan, plan, reconcileSeeds, scanTriggers, type TriggerRecord } from "./trigger.ts";
+import { addTrigger, type LastSlot, parseSeeds, type Plan, plan, reconcileSeeds, runAgent, scanTriggers, type TriggerRecord } from "./trigger.ts";
 import type { Trigger } from "./types.ts";
 
 const S = Date.parse("2026-10-05T03:30:00Z");
@@ -22,7 +22,6 @@ const DAY = 1440 * MIN;
 const DAILY: Trigger = { kind: "cron", id: "daily", cron: "0 9 * * *", tz: "Asia/Kolkata", prompt: "Summarize." };
 const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
 const scriptOutput = (text: string) => text.replace(/^Script completed\nWall time [\d.]+ seconds\nOutput:\n\n/, "");
-/** Runs at real speed from `at`; `set` moves it, so a slot can be placed just after a slow open. */
 const clockAt = (at: number) => {
 	let skew = at - Date.now();
 	return Object.assign(() => new Date(Date.now() + skew), { set: (to: number) => void (skew = to - Date.now()) });
@@ -301,7 +300,6 @@ test("the upgrade turns each live mochi.triggers item into a task with its origi
 test("a cron check gates the slot: empty stdout runs no model, output becomes the run's payload, and each slot checks once", async () => {
 	const dir = await tempDir();
 	const counter = join(dir, "check-count");
-	// Prints nothing on its first call and "new mail: 1" after, counting every call in a file.
 	const script = `n=$(cat '${counter}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '${counter}'; [ $n -ge 2 ] && echo "new mail: 1"; true`;
 	const watch: Trigger = { kind: "cron", id: "watch", cron: "* * * * *", tz: "Asia/Kolkata", prompt: "Triage this.", check: ["/bin/sh", "-c", script] };
 	const faux = newFaux();
@@ -362,7 +360,6 @@ test("each run starts fresh from the last run's note, runs on its role's model a
 	assert.doesNotMatch(secondRun, /assistant:/, "the second run does not resend the first run's turns");
 	assert.equal((secondRun.match(/Sweep mail\./g) ?? []).length, 1);
 
-	const { runAgent } = await import("./trigger.ts");
 	const { role: _role, ...plain } = sweep;
 	assert.deepEqual(runAgent(plain, mochi.catalog).agent.model, mochi.catalog.model("fast"));
 	assert.throws(() => runAgent({ ...sweep, role: "nobody" }, mochi.catalog), /Unknown role "nobody"\. Use worker, relay\./);

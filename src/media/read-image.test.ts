@@ -10,7 +10,6 @@ import { newFaux, openTestMochi, tempDir } from "../test-support.ts";
 
 type Part = { type: string; text?: string; data?: string; mimeType?: string };
 
-/** Root runs one codemode script; returns the result's parts as the model sees them. */
 async function runScript(dir: string, code: string): Promise<Part[]> {
 	const faux = newFaux();
 	faux.setResponses([fauxAssistantMessage(fauxToolCall("codemode", { code }), { stopReason: "toolUse" }), fauxAssistantMessage("done")]);

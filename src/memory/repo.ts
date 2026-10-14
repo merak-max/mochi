@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
+import type { Stats } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
-import { promisify } from "node:util";
-import type { Memory } from "./memory.ts";
-import { OWNER_KINDS, type Note } from "../notes/schema.ts";
+import { type Memory, sortedNotes } from "./memory.ts";
+import { OWNER_KINDS } from "../notes/schema.ts";
 
-const run = promisify(execFile);
 const GIT_ARGS = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", "-c", "core.fsmonitor=false"];
 export type Files = Record<string, string>;
 export type PublicationPlan = {
@@ -15,14 +14,25 @@ export type PublicationPlan = {
 };
 
 const line = (value: string): string => JSON.stringify(value).slice(1, -1);
-const metadata = (note: Note): string =>
-	`[source: ${note.source === undefined ? "durable note" : `mochi://conversation/${note.source.conversation}/entry/${note.source.entry}`}; added: ${note.updated}]`;
+const gitHash = (type: string, bytes: Buffer): string => createHash("sha1").update(`${type} ${bytes.length}\0`).update(bytes).digest("hex");
+const isMissing = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "ENOENT";
+
+async function lstatOrNull(path: string): Promise<Stats | null> {
+	try {
+		return await lstat(path);
+	} catch (error) {
+		if (isMissing(error)) return null;
+		throw error;
+	}
+}
+
 export function renderRepo(memory: Memory): Files {
 	const files: Files = {};
 	const owner: string[] = [];
 	const index: string[] = [];
-	for (const note of Object.values(memory.notes).sort((a, b) => a.slug.localeCompare(b.slug))) {
-		const body = `- ${line(note.body)} ${metadata(note)}\n`;
+	for (const note of sortedNotes(memory)) {
+		const source = note.source === undefined ? "durable note" : `mochi://conversation/${note.source.conversation}/entry/${note.source.entry}`;
+		const body = `- ${line(note.body)} [source: ${source}; added: ${note.updated}]\n`;
 		if (OWNER_KINDS.has(note.kind)) owner.push(`### ${note.slug}: ${line(note.subject)} (${note.kind})\n${body}`);
 		else {
 			const path = `${note.kind}/${note.slug}.md`;
@@ -39,7 +49,6 @@ export class MemoryGit {
 	constructor(repo: string) { this.repo = resolve(repo); }
 	async git(args: string[], input?: Buffer | string, index?: string): Promise<string> {
 		const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", GIT_ATTR_NOSYSTEM: "1", GIT_NO_REPLACE_OBJECTS: "1", ...(index === undefined ? {} : { GIT_INDEX_FILE: index }) };
-		if (input === undefined) return (await run("git", [...GIT_ARGS, ...args], { cwd: this.repo, env, maxBuffer: 16 * 1024 * 1024 })).stdout.trimEnd();
 		return new Promise((accept, reject) => {
 			const child = execFile("git", [...GIT_ARGS, ...args], { cwd: this.repo, env, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => error === null ? accept(stdout.trimEnd()) : reject(error));
 			child.stdin!.end(input);
@@ -50,8 +59,7 @@ export class MemoryGit {
 		if (full !== this.repo && !full.startsWith(this.repo + sep)) throw new Error("Unsafe memory path");
 		let part = full;
 		for (;;) {
-			try { if ((await lstat(part)).isSymbolicLink()) throw new Error("Memory repo symlink refused"); }
-			catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+			if ((await lstatOrNull(part))?.isSymbolicLink()) throw new Error("Memory repo symlink refused");
 			if (part === dirname(part)) break;
 			part = dirname(part);
 		}
@@ -60,9 +68,7 @@ export class MemoryGit {
 		await this.safePath("");
 		await mkdir(this.repo, { recursive: true });
 		if (await realpath(this.repo) !== this.repo) throw new Error("Unsafe memory repo root");
-		try { await lstat(join(this.repo, ".git")); }
-		catch (error) {
-			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+		if (await lstatOrNull(join(this.repo, ".git")) === null) {
 			if ((await readdir(this.repo)).length !== 0) throw new Error("Nonempty memory directory is not app-owned");
 			await this.git(["init", "--object-format=sha1", "-b", "main"]);
 		}
@@ -73,8 +79,7 @@ export class MemoryGit {
 		const config = await this.git(["config", "--local", "--list"]);
 		if (/^(filter\.|core\.(worktree|bare|symlinks|attributesfile)|extensions\.|include)/m.test(config.replace(/^core.bare=false$/m, ""))) throw new Error("Unsafe memory Git configuration");
 		for (const path of [".gitattributes", ".git/info/attributes", ".git/objects/info/alternates", ".git/info/grafts", ".git/refs/replace"]) {
-			try { await lstat(join(this.repo, path)); throw new Error(`Memory ${path} refused`); }
-			catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+			if (await lstatOrNull(join(this.repo, path)) !== null) throw new Error(`Memory ${path} refused`);
 		}
 	}
 	async lock<T>(work: () => Promise<T>): Promise<T> {
@@ -121,7 +126,7 @@ export class MemoryGit {
 		if (Object.keys(blobs).some((path) => path.endsWith(".gitattributes"))) throw new Error("Memory attributes refused");
 		const objects: PublicationPlan["objects"] = [];
 		const object = (type: "blob" | "tree" | "commit", bytes: Buffer): string => {
-			const hash = createHash("sha1").update(Buffer.from(`${type} ${bytes.length}\0`)).update(bytes).digest("hex");
+			const hash = gitHash(type, bytes);
 			objects.push({ type, bytes: bytes.toString("base64"), hash }); return hash;
 		};
 		for (const path of Object.keys(previous)) delete blobs[path];
@@ -159,12 +164,12 @@ export class MemoryGit {
 		const baseTree = await this.tree(plan.base);
 		const targetTree = { ...baseTree };
 		for (const path of Object.keys(plan.previous)) delete targetTree[path];
-		for (const [path, value] of Object.entries(plan.files)) targetTree[path] = createHash("sha1").update(`blob ${Buffer.byteLength(value)}\0`).update(value).digest("hex");
+		for (const [path, value] of Object.entries(plan.files)) targetTree[path] = gitHash("blob", Buffer.from(value));
 		for (const path of paths) {
 			await this.safePath(path);
 			let value: Buffer | null;
 			try { value = await readFile(join(this.repo, path)); } catch (error) {
-				if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+				if (!isMissing(error)) throw error;
 				value = null;
 			}
 			const matches = (expected: string | undefined): boolean => expected === undefined ? value === null : value !== null && value.equals(Buffer.from(expected));
@@ -179,7 +184,7 @@ export class MemoryGit {
 			if (paths.has(path)) continue;
 			await this.safePath(path);
 			const value = await readFile(join(this.repo, path));
-			if (createHash("sha1").update(`blob ${value.length}\0`).update(value).digest("hex") !== hash) throw new Error("Dirty unrelated tracked memory file");
+			if (gitHash("blob", value) !== hash) throw new Error("Dirty unrelated tracked memory file");
 		}
 		for (const obj of plan.objects) if (await this.git(["hash-object", "-w", "-t", obj.type, "--stdin"], Buffer.from(obj.bytes, "base64")) !== obj.hash) throw new Error("Memory object hash mismatch");
 		await crash?.("objects");

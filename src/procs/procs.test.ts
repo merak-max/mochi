@@ -12,7 +12,6 @@ import { newFaux, openTestMochi, recordingChannel, tempDir, type TestMochi, turn
 
 const DEMO = "sh -c 'echo ready; sleep 0.2; exit 3'";
 
-/** Root runs `go` as one code call, then answers "ok" to every later input, wake-ups included. */
 function scripted(code: string) {
 	const faux = newFaux();
 	const results: string[] = [];

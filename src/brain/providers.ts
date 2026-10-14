@@ -7,6 +7,7 @@ import { createModels, createProvider, type MutableModels } from "@earendil-work
 import { getBuiltinClassifierModel, getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { type Static, Type } from "typebox";
+import type { Env } from "../notes/secrets.ts";
 import { JEV } from "./classifier.ts";
 
 /**
@@ -26,7 +27,7 @@ export const ProviderSchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-export type ProviderConfig = Static<typeof ProviderSchema>;
+type ProviderConfig = Static<typeof ProviderSchema>;
 
 const ModelOverrideSchema = Type.Object(
 	{
@@ -54,7 +55,7 @@ export const ModelsSchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-export type ModelsConfig = Static<typeof ModelsSchema>;
+type ModelsConfig = Static<typeof ModelsSchema>;
 
 const DEFAULTS = {
 	anthropic: { url: "https://api.anthropic.com", keyEnv: "ANTHROPIC_API_KEY" },
@@ -73,10 +74,8 @@ export interface ModelSetup {
 	readonly missing: readonly string[];
 }
 
-type Env = Readonly<Record<string, string | undefined>>;
-
 /** No `[providers]`: Anthropic with ANTHROPIC_API_KEY, else OpenAI with OPENAI_API_KEY. */
-export function defaultProviders(env: Env): Record<string, ProviderConfig> {
+function defaultProviders(env: Env): Record<string, ProviderConfig> {
 	if (!env.ANTHROPIC_API_KEY && env.OPENAI_API_KEY) return { openai: { api: "responses" } };
 	return { anthropic: { api: "anthropic" } };
 }

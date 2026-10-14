@@ -1,5 +1,3 @@
-const FIRECRAWL_V2_BASE_URL = "https://api.firecrawl.dev/v2";
-
 export interface SearchRequest {
 	query: string;
 	limit?: number | undefined;
@@ -9,18 +7,16 @@ export interface SearchRequest {
 	tbs?: string | undefined;
 }
 
-export interface SearchHit {
+interface SearchHit {
 	url: string;
 	title?: string | undefined;
 	description?: string | undefined;
 }
 
-export interface ScrapedPage {
+interface ScrapedPage {
 	markdown?: string | undefined;
 	html?: string | undefined;
-	/** The source's HTTP status, 0 when Firecrawl gives none. */
 	status: number;
-	/** The source's error, else its page title. */
 	error?: string | undefined;
 }
 
@@ -46,12 +42,11 @@ function data(payload: unknown, label: string): Record<string, unknown> {
 	return value;
 }
 
-/** Firecrawl v2 search, scrape and map, reading only the fields mochi uses. */
 export class FirecrawlClient {
 	readonly #apiKey: string;
 	readonly #baseUrl: string;
 
-	constructor(apiKey: string, baseUrl = FIRECRAWL_V2_BASE_URL) {
+	constructor(apiKey: string, baseUrl = "https://api.firecrawl.dev/v2") {
 		this.#apiKey = apiKey;
 		this.#baseUrl = baseUrl.replace(/\/+$/, "");
 	}

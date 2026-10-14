@@ -40,7 +40,7 @@ export async function browse(deps: BrowserDeps, args: Static<typeof BrowseInput>
 		const human = result.output.trimStart().startsWith("MOCHI_NEEDS_HUMAN");
 		const link = human || args.keepOpen ? result.interactiveLiveViewUrl : undefined;
 		if (result.killed || (result.exitCode !== undefined && result.exitCode !== 0)) throw new Error("Firecrawl browser interaction was interrupted; inspect before retrying.");
-		retain = link !== undefined && (human || args.keepOpen === true);
+		retain = link !== undefined;
 		const answer = result.output.replace(/^\s*MOCHI_(NEEDS_HUMAN|CONTINUE)\s*/, "").trim();
 		const output = result.output.trimStart().startsWith("MOCHI_CONTINUE") ? `Stopped after three prompt calls with unfinished work. ${answer}` : answer;
 		if (human && link === undefined) return { output: `Human takeover required, but Firecrawl returned no interactive link. ${output}` };

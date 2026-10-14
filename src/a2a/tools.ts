@@ -5,11 +5,9 @@ import { parseResponse, PROTOCOL_VERSION, type ReadResult, readResult } from "./
 
 const CARD_TIMEOUT_MS = 5_000;
 
-/** A peer from `a2a.peers` in data/config.json, with its token read from the env variable it names. */
 export interface A2APeer {
 	readonly name: string;
 	readonly url: string;
-	/** Absent when the named env variable is unset; calls then fail with the variable's name. */
 	readonly token: string | undefined;
 	readonly tokenEnv: string;
 	readonly timeoutMs: number;
@@ -27,7 +25,6 @@ function peerOf(peers: A2APeers, name: string): A2APeer & { readonly token: stri
 	return { ...peer, token: peer.token };
 }
 
-/** One JSON-RPC call to a peer. Throws on an HTTP error, a JSON-RPC error, or a result that is no task or message. */
 async function call(peer: A2APeer & { readonly token: string }, method: string, params: object, signal: AbortSignal | undefined): Promise<ReadResult> {
 	const response = await fetch(peer.url, {
 		method: "POST",
@@ -61,7 +58,6 @@ const Ask = Type.Object({
 	contextId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
-/** The owner's other agents over A2A, as script functions: list, ask, send and status. */
 export function a2aFns(peers: A2APeers): readonly ToolRegistration[] {
 	return [
 		defineTool({

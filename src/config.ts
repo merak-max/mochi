@@ -1,9 +1,10 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { type Static, Type } from "typebox";
 import { createModelSetup, type ModelSetup, ModelsSchema, ProviderSchema } from "./brain/providers.ts";
-import { type Home, loadHomeEnv, resolveHome } from "./home.ts";
+import { type Home, resolveHome } from "./home.ts";
 import { MediaConfigSchema } from "./media/media.ts";
 import { parseWith } from "./parse.ts";
 import { normalizeHandle } from "./channels/imessage.ts";
@@ -50,7 +51,7 @@ const FileSchema = Type.Object(
 	},
 	{ additionalProperties: true },
 );
-export type FileConfig = Static<typeof FileSchema>;
+type FileConfig = Static<typeof FileSchema>;
 
 export interface Config {
 	readonly home: Home;
@@ -71,17 +72,14 @@ export interface Config {
 	readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-/** The host's own time zone, so a fresh install needs no setting. */
-const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-
 /**
  * Resolves the home, loads its `.env`, and reads its config. Pass `home` to read a profile or a test directory;
  * otherwise `MOCHI_HOME` (or `MOCHI_DATA_DIR`) or `~/.mochi`.
  */
 export async function loadConfig(env: Readonly<Record<string, string | undefined>>, home: Home = resolveHome(env)): Promise<Config> {
-	if (env === process.env) loadHomeEnv(home);
-	const file = parseWith(FileSchema, await readConfigFile(home), configName(home));
-	const timeZone = file.timeZone ?? hostTimeZone();
+	if (env === process.env && existsSync(home.envFile)) process.loadEnvFile(home.envFile);
+	const file = parseWith(FileSchema, await readConfigFile(home), home.configFile.endsWith(".toml") ? "config.toml" : "config.json");
+	const timeZone = file.timeZone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 	assertTimeZone(timeZone);
 	const openRouterKey = env.OPENROUTER_API_KEY || undefined;
 	return {
@@ -119,8 +117,6 @@ function a2aPeers(file: FileConfig, env: Readonly<Record<string, string | undefi
 	}
 	return peers;
 }
-
-const configName = (home: Home): string => (home.configFile.endsWith(".toml") ? "config.toml" : "config.json");
 
 /** `config.toml`, else the older `config.json`, else nothing: every field has a default. */
 async function readConfigFile(home: Home): Promise<unknown> {

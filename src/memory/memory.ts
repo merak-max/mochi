@@ -17,15 +17,10 @@ import {
 } from "@earendil-works/pi-durable";
 import type { SearchIndex } from "../index/fts.ts";
 import { type Note, type NoteDraft, NoteDraftSchema, NoteKindSchema, OWNER_CAP_CHARS, OWNER_KINDS, SlugSchema } from "../notes/schema.ts";
-import { type Env, findSecret, secretRejection } from "../notes/secrets.ts";
+import { findSecret, secretRejection } from "../notes/secrets.ts";
 import { parseWith } from "../parse.ts";
 import { memoryChanged, replayed, RepoDoc } from "./publication.ts";
 
-/**
- * The owner's memory: one rewindable document on the root conversation that every conversation writes through. A write
- * commits with its source entry id, `snapshotAsOf` reads what mochi believed when any root entry was written, and the
- * prompt renders it live (pi-durable sends only a changed section, which keeps the provider cache).
- */
 export type Memory = { notes: Record<string, Note> };
 
 export const MemoryDoc = defineDoc<Memory>({
@@ -35,7 +30,6 @@ export const MemoryDoc = defineDoc<Memory>({
 	history: "rewindable",
 	fork: "current",
 	initial: () => ({ notes: {} }),
-	/** v1 also carried `imported`, the hashes of the `data/notes` files it had read. */
 	migrate: (value) => ({ notes: (value.notes ?? {}) as Memory["notes"] }),
 });
 
@@ -45,15 +39,11 @@ export const INDEX_EMPTY = "no other notes yet";
 
 const MAX_ROW_CHARS = 2000;
 
-/** Committed reads plus a read-only commit for scanning entries; a Harness and a tool api both fit. */
-export type MemoryReader = DocumentReader & Pick<Harness, "commit">;
-
 export async function readMemory(read: DocumentReader, context: Context): Promise<Memory> {
 	return (await read.snapshot(MemoryDoc, ROOT_CONVERSATION_ID, context)) ?? MemoryDoc.definition.initial();
 }
 
-/** Memory as of `date` (ISO date or timestamp): the document when the newest root entry at or before it committed. */
-export async function memoryAsOf(harness: MemoryReader, date: string, context: Context): Promise<Memory> {
+export async function memoryAsOf(harness: DocumentReader & Pick<Harness, "commit">, date: string, context: Context): Promise<Memory> {
 	const at = Date.parse(date.length === 10 ? `${date}T23:59:59.999Z` : date);
 	if (Number.isNaN(at)) throw new Error(`Not a date: ${date}.`);
 	let cursor: Cursor | undefined;
@@ -74,7 +64,6 @@ export function sortedNotes(memory: Memory): Note[] {
 	return Object.values(memory.notes).sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
-/** Create or replace a note as mochi. Owner notes are read-only, and owner-kind bodies share one cap. */
 export async function writeNote(tx: Tx, input: NoteDraft, source: Note["source"], today: string, key?: string): Promise<Note> {
 	const receipt = await replayed(tx, key);
 	if (receipt?.note != null) return { ...receipt.note };
@@ -101,7 +90,6 @@ export async function writeNote(tx: Tx, input: NoteDraft, source: Note["source"]
 	return note;
 }
 
-/** Remove a note mochi wrote; owner notes stay. Undefined when there was none. */
 export async function forgetNote(tx: Tx, slug: string, key?: string): Promise<Note | undefined> {
 	const receipt = await replayed(tx, key);
 	if (receipt !== undefined) return receipt.note === null ? undefined : { ...receipt.note };
@@ -113,7 +101,6 @@ export async function forgetNote(tx: Tx, slug: string, key?: string): Promise<No
 	return existing;
 }
 
-/** The assistant entry whose tool call is running: this call's, or for a script's call, its codemode call's. */
 async function sourceOf(api: Pick<ToolExecutionApi, "getTask" | "taskId" | "conversationId">, context: Context): Promise<Note["source"]> {
 	let input = (await api.getTask(api.taskId, context))?.input as ToolTaskInput | undefined;
 	if (input?.kind === "nested") input = (await api.getTask(input.parent, context))?.input as ToolTaskInput | undefined;
@@ -123,8 +110,8 @@ async function sourceOf(api: Pick<ToolExecutionApi, "getTask" | "taskId" | "conv
 
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 
-export function noteTool(deps: { readonly index: SearchIndex; readonly today: () => string; readonly env?: Env }) {
-	const { index, today, env = process.env } = deps;
+export function noteTool(deps: { readonly index: SearchIndex; readonly today: () => string }) {
+	const { index, today } = deps;
 	return defineTool({
 		name: "note",
 		description:
@@ -140,8 +127,6 @@ export function noteTool(deps: { readonly index: SearchIndex; readonly today: ()
 				const status = await publicationStatus(api, context);
 				return text((gone === undefined ? `No note ${args.slug}; nothing to forget.` : `Forgot note ${args.slug}.`) + status);
 			}
-			const secret = findSecret(`${args.subject}\n${args.body}`, env);
-			if (secret !== undefined) throw new Error(secretRejection(secret));
 			const source = await sourceOf(api, context);
 			const note = await api.commit((tx) => writeNote(tx, args, source, today(), `tool:${api.taskId}`), context);
 			index.replaceNotes(sortedNotes(await readMemory(api, context)));
@@ -175,7 +160,7 @@ export function recallTool(index: SearchIndex) {
 			if (args.entry !== undefined) {
 				const rows = index.scroll(args.entry, 5);
 				if (rows === undefined) throw new Error(`Entry ${args.entry} is not in the chat index.`);
-				return text(rows.map((row) => `--- entry ${row.ref} ${row.kind} ${row.at}\n${clip(row.text)}`).join("\n"));
+				return text(rows.map((row) => `--- entry ${row.ref} ${row.kind} ${row.at}\n${row.text.length > MAX_ROW_CHARS ? `${row.text.slice(0, MAX_ROW_CHARS)}…` : row.text}`).join("\n"));
 			}
 			if (args.asOf !== undefined) {
 				const notes = sortedNotes(await memoryAsOf(api, args.asOf, context));
@@ -202,10 +187,8 @@ export function recallTool(index: SearchIndex) {
 	});
 }
 
-/** The most rows one `history` call returns; a longer span is read in pages by `after`. */
-export const HISTORY_LIMIT = 2000;
+const HISTORY_LIMIT = 2000;
 
-/** Past chat as data for a script: rows stay in the script, and only what it prints reaches the model. */
 export function historyTool(index: SearchIndex) {
 	return defineTool({
 		name: "history",
@@ -227,9 +210,6 @@ export function historyTool(index: SearchIndex) {
 	});
 }
 
-const clip = (value: string): string => (value.length > MAX_ROW_CHARS ? `${value.slice(0, MAX_ROW_CHARS)}…` : value);
-
-/** `owner`: every user and rule note in full. `notes-index`: one line per other note. Sorted by slug, so equal memory renders equal bytes. */
 export function notesExtension(): Extension {
 	const notes = async (read: DocumentReader, context: Context, owner: boolean): Promise<Note[]> =>
 		sortedNotes(await readMemory(read, context)).filter((note) => OWNER_KINDS.has(note.kind) === owner);

@@ -116,7 +116,7 @@ export const SCRIPT_DEADLINE_MS = 10 * 60_000;
 const SCRIPT_MEMORY_BYTES = 256 * 1024 * 1024;
 
 /** A script with no options line gets the default deadline, so a hung call never holds a turn forever. */
-export function withDeadline(code: string, deadlineMs: number): string {
+function withDeadline(code: string, deadlineMs: number): string {
 	if (code.trimStart().startsWith("// @options:")) return code;
 	return `// @options: {"timeout_ms": ${deadlineMs}}\n${code}`;
 }
@@ -148,7 +148,7 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 /** The host default, for anything that reaches a conversation without a seat: the least capable one. */
 export const defaultSelection = (installed: (name: string) => Extension | undefined): Extension[] => selection("user").flatMap((name) => installed(name) ?? []);
 
-export interface SeatChange {
+interface SeatChange {
 	readonly instructions?: string;
 	/** Absent: root's, read in the same commit. */
 	readonly model?: ModelRef;

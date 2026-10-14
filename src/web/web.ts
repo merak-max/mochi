@@ -6,16 +6,13 @@ import { cleanFirecrawlHtml, extractFirecrawlContent } from "./content.ts";
 const EXTRACT_CHARS = 12_000;
 const RECENCY = ["hour", "day", "week", "month", "year"] as const;
 
-export interface WebDeps {
-	/** `FIRECRAWL_API_KEY`; absent, every web function fails with a clear error. Bash never gets it. */
+interface WebDeps {
 	readonly apiKey: string | undefined;
 	readonly models: Models;
-	/** Runs web_fetch's `instruction`. */
 	readonly fast: ModelRef;
 	readonly baseUrl?: string;
 }
 
-/** Firecrawl v2 search, fetch and map on mochi's own key, as script functions. */
 export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 	const client = (): FirecrawlClient => {
 		if (deps.apiKey === undefined) throw new Error("Firecrawl is not configured: FIRECRAWL_API_KEY is unset.");

@@ -10,7 +10,6 @@ import {
 	type ModelRef,
 	type Registry,
 	type Storage,
-	type TaskId,
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";

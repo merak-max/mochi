@@ -10,12 +10,10 @@ import { messageText } from "../text.ts";
 import { due, SETTLE_AFTER_MS, SETTLE_MIN_TOKENS } from "./settle.ts";
 
 const CACHE = 300_000;
-const thread = (quietMs: number, tokens: number, busy = false) => ({ conversation: ROOT_CONVERSATION_ID, lastAt: 1_000_000, tokens, busy, now: 1_000_000 + quietMs });
 
 test("a thread is compacted once it has been quiet past the settle time but before its cache expires, and only when it is large and idle", () => {
 	const check = (quietMs: number, tokens: number, busy = false, settled?: number) => {
-		const { now, ...rest } = thread(quietMs, tokens, busy);
-		return due(rest, settled, now, CACHE);
+		return due({ conversation: ROOT_CONVERSATION_ID, lastAt: 1_000_000, tokens, busy }, settled, 1_000_000 + quietMs, CACHE);
 	};
 	assert.equal(check(SETTLE_AFTER_MS, SETTLE_MIN_TOKENS), true);
 	assert.equal(check(SETTLE_AFTER_MS - 1, SETTLE_MIN_TOKENS), false, "still in conversation");

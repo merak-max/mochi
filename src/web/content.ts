@@ -8,14 +8,12 @@ function boundExtractionInput(markdown: string): string {
 	if (markdown.length <= MAX_EXTRACTION_INPUT_CHARS) return markdown;
 	const marker = `\n\n[Middle of page omitted for focused extraction; ${markdown.length} chars total]\n\n`;
 	const head = Math.floor((MAX_EXTRACTION_INPUT_CHARS - marker.length) * 0.75);
-	const tail = Math.max(0, MAX_EXTRACTION_INPUT_CHARS - marker.length - head);
+	const tail = MAX_EXTRACTION_INPUT_CHARS - marker.length - head;
 	return `${markdown.slice(0, head)}${marker}${markdown.slice(-tail)}`;
 }
 
-/** Main content of a page as Markdown, or undefined when Defuddle finds none. */
 export async function cleanFirecrawlHtml(html: string, url: string): Promise<string | undefined> {
 	try {
-		// Loaded on first fetch: defuddle pulls in linkedom and its parser tree.
 		const { Defuddle } = await import("defuddle/node");
 		const result = await Defuddle(html, url, { markdown: true, removeImages: true, useAsync: false });
 		const markdown = result.contentMarkdown ?? result.content;
@@ -25,7 +23,6 @@ export async function cleanFirecrawlHtml(html: string, url: string): Promise<str
 	}
 }
 
-/** Runs `instruction` over the page on the fast model. Undefined when the model fails, so the caller returns the page. */
 export async function extractFirecrawlContent(options: {
 	readonly models: Models;
 	readonly model: ModelRef;

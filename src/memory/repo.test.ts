@@ -69,7 +69,8 @@ test("direct and concurrent edits queue individually; replay after later edit ne
 	await mochi.harness.commit((tx) => forgetNote(tx, "dog", "forget-1"), context);
 	await publishNext(mochi.harness, context);
 	assert.equal(await new MemoryGit(repo).git(["rev-list", "--count", "HEAD"]), "4");
-	assert.deepEqual(await new MemoryGit(repo).tree(await new MemoryGit(repo).head()), { "MEMORY.md": (await new MemoryGit(repo).tree(await new MemoryGit(repo).head()))["MEMORY.md"] });
+	const git = new MemoryGit(repo);
+	assert.deepEqual(Object.keys(await git.tree(await git.head())), ["MEMORY.md"]);
 	await mochi.close();
 });
 test("dirty owned, unrelated, staged files and foreign branches block without overwrite", async () => {

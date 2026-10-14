@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { defineExtension, type Extension, section } from "@earendil-works/pi-durable";
 import { parse } from "yaml";
 
-export interface SkillLine {
+interface SkillLine {
 	readonly name: string;
 	readonly description: string;
 }
@@ -11,7 +11,7 @@ export interface SkillLine {
 const DESCRIPTION_CHARS = 120;
 
 /** `<dir>/<name>/SKILL.md` frontmatter, sorted by name. */
-export async function readSkills(dir: string): Promise<readonly SkillLine[]> {
+async function readSkills(dir: string): Promise<readonly SkillLine[]> {
 	const names = (await readdir(dir).catch(() => [])).sort();
 	const skills: SkillLine[] = [];
 	for (const name of names) {

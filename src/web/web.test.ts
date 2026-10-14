@@ -8,7 +8,6 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import { FAUX, newFaux } from "../test-support.ts";
 import { webFns } from "./web.ts";
 
-/** A stand-in Firecrawl v2 API that records request bodies. */
 async function fakeFirecrawl(t: { after(fn: () => void): void }, routes: Record<string, unknown>) {
 	const requests: { path: string; body: unknown; auth: string | undefined }[] = [];
 	const server = createServer((request, response) => {

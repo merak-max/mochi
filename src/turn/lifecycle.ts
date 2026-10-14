@@ -5,7 +5,6 @@ import {
 	type Conversation,
 	defineExtension,
 	defineTool,
-	type EntryRecord,
 	type Harness,
 	hook,
 	LiveDoc,
@@ -36,7 +35,7 @@ export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assi
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
 
-export const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work. If the conversation starts with an earlier summary, preserve its information and fold the newer messages into it.
+const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work. If the conversation starts with an earlier summary, preserve its information and fold the newer messages into it.
 
 Use this EXACT format:
 
@@ -106,7 +105,6 @@ export function compactionExtension(fast: FastCompletion) {
 						prompt: `<conversation>\n${serializeConversation(input.messages)}\n</conversation>\n\n${SUMMARIZATION_PROMPT}${focus}`,
 						maxTokens: 12_000,
 					}, context);
-					if (summary.trim() === "") return undefined;
 					return { summary: await api.memo("mochi.compaction.summary", summary, context) };
 				} catch {
 					return undefined;
@@ -115,15 +113,6 @@ export function compactionExtension(fast: FastCompletion) {
 		})],
 	});
 }
-
-export const newestEntryTime = (entries: readonly EntryRecord[]): number | undefined => {
-	const newest = entries.at(-1);
-	if (newest === undefined) return undefined;
-	const timestamps = (newest.model ?? []).map((message) => message.timestamp);
-	if (timestamps.length > 0) return Math.max(...timestamps);
-	if (newest.data !== null && typeof newest.data === "object" && "at" in newest.data && typeof newest.data.at === "number") return newest.data.at;
-	return undefined;
-};
 
 export async function threadHandoff(root: Conversation, fast: FastCompletion, context: Context): Promise<string | undefined> {
 	try {
@@ -173,7 +162,10 @@ export async function idleResetIfStale(
 	const live = await deps.harness.snapshot(LiveDoc, conversation.id, context);
 	if (live?.run !== undefined) return false;
 	const view = await conversation.context(context);
-	const at = newestEntryTime(view.entries);
+	const newest = view.entries.at(-1);
+	let at: number | undefined;
+	if (newest?.model !== undefined && newest.model.length > 0) at = Math.max(...newest.model.map((message) => message.timestamp));
+	else if (newest?.data !== null && typeof newest?.data === "object" && "at" in newest.data && typeof newest.data.at === "number") at = newest.data.at;
 	if (at === undefined || deps.now() - at <= deps.idleResetMinutes * 60_000) return false;
 	const handoff = await threadHandoff(conversation, deps.fast, context);
 	const current = await conversation.context(context);

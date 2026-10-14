@@ -22,20 +22,14 @@ export function createClassify(models: Models): Classify {
 	};
 }
 
-export type GateVerdict =
+type GateVerdict =
 	| { readonly kind: "pass"; readonly probability: number }
 	| { readonly kind: "block"; readonly probability: number }
 	| { readonly kind: "failed-open"; readonly error: string };
 
 /** Whether the gated work goes ahead. A failed classifier admits: a gate never loses a delivery. */
 export function admits(verdict: GateVerdict): verdict is Exclude<GateVerdict, { kind: "block" }> {
-	switch (verdict.kind) {
-		case "pass":
-		case "failed-open":
-			return true;
-		case "block":
-			return false;
-	}
+	return verdict.kind !== "block";
 }
 
 /** One bool question over `state`. Fails open: a classifier error passes, with the error kept for the log. */

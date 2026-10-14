@@ -1,13 +1,11 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { type ModelThinkingLevel, type Static, Type } from "@earendil-works/pi-ai";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
-import { parseWith } from "../parse.ts";
 
 export const THINKING = ["low", "medium", "high", "xhigh", "max"] as const satisfies readonly ModelThinkingLevel[];
 type Thinking = (typeof THINKING)[number];
 
-/** One `agents/<name>.md`: its body becomes the child's instructions; `model` and `thinking` are its defaults. */
 export interface AgentType {
 	readonly name: string;
 	readonly instructions: string;
@@ -15,7 +13,6 @@ export interface AgentType {
 	readonly thinking?: Thinking;
 }
 
-/** The agent types by file name, and how a model name in one (a tier, an alias, or provider/id) becomes a model. */
 export class AgentCatalog {
 	readonly types: ReadonlyMap<string, AgentType>;
 	readonly #ref: (name: string) => ModelRef;
@@ -25,7 +22,7 @@ export class AgentCatalog {
 		this.#ref = ref;
 	}
 
-	/** `dir` holds the bundled types; each `<own>/<name>.md` adds a type or replaces the bundled one of that name. */
+	/** Each `<own>/<name>.md` adds a type or replaces the bundled one of that name. */
 	static async load(dir: string, own: string | undefined, ref: (name: string) => ModelRef): Promise<AgentCatalog> {
 		const types = new Map<string, AgentType>();
 		for (const from of own === undefined ? [dir] : [dir, own]) {
@@ -35,7 +32,6 @@ export class AgentCatalog {
 		return new AgentCatalog([...types.values()], ref);
 	}
 
-	/** `brain` (or `default`), `fast`, `strongest`, an alias from config.toml's [models.aliases], or provider/id. */
 	model(name: string): ModelRef {
 		return this.#ref(name);
 	}
@@ -48,18 +44,14 @@ export function parseAgentFile(name: string, text: string): AgentType {
 		const pair = /^([\w-]+):\s*(.*)$/.exec(line);
 		if (pair?.[1] !== undefined) fields.set(pair[1], (pair[2] ?? "").trim());
 	}
-	const thinking = fields.get("thinking");
+	const thinkingText = fields.get("thinking");
+	const thinking = THINKING.find((level) => level === thinkingText);
+	if (thinkingText !== undefined && thinking === undefined) throw new Error(`agents/${name}.md: thinking "${thinkingText}" is not one of ${THINKING.join(", ")}.`);
 	const model = fields.get("model") || undefined;
 	return {
 		name,
 		instructions: (match?.[2] ?? text).trim(),
 		...(model === undefined ? {} : { model }),
-		...(thinking === undefined ? {} : { thinking: parseThinking(thinking, `agents/${name}.md`) }),
+		...(thinking === undefined ? {} : { thinking }),
 	};
-}
-
-function parseThinking(value: string, where: string): Thinking {
-	const level = THINKING.find((candidate) => candidate === value);
-	if (level === undefined) throw new Error(`${where}: thinking "${value}" is not one of ${THINKING.join(", ")}.`);
-	return level;
 }

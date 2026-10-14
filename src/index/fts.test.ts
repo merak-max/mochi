@@ -28,11 +28,11 @@ test("BM25 ranks the closer match first and root above other conversations", asy
 	index.close();
 });
 
-test("notes are searchable and replaced by slug", async () => {
+test("replacing notes drops the old bodies from search", async () => {
 	const index = new SearchIndex(join(await tempDir(), "index.sqlite"));
 	const note = { slug: "dog", kind: "fact", subject: "dog", writtenBy: "mochi", updated: "2026-10-05", body: "Dog is Biscuit." } as const;
 	index.replaceNotes([note]);
-	index.replaceNote({ ...note, body: "Dog is Pancake." });
+	index.replaceNotes([{ ...note, body: "Dog is Pancake." }]);
 	assert.deepEqual(index.search({ query: "Biscuit", limit: 5 }), []);
 	assert.equal(index.search({ query: "pancake", limit: 5 })[0]?.ref, "note:dog");
 	index.close();

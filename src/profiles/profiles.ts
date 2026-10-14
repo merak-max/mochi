@@ -4,36 +4,28 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { parse, stringify } from "smol-toml";
 import { adoptInstructions, type Home, homeAt } from "../home.ts";
 
-// A profile is another mochi with a home of its own under `<home>/profiles/<name>`, so the tree of profiles is the
-// directory tree and a path such as `poteto/relay` addresses one. Each runs as its own service and talks to its parent
-// over A2A. Any mochi manages only the profiles below its own home; nothing is ever deleted, a removed home is archived.
-
 const run = promisify(execFile);
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const PathSchema = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*(/[a-z0-9]+(-[a-z0-9]+)*)*$", maxLength: 120 });
 
-/** The home of the profile at `path` below `root`: `poteto/relay` is `<root>/profiles/poteto/profiles/relay`. */
-export function profileHome(root: Home, path: string): Home {
+function profileHome(root: Home, path: string): Home {
 	const parts = path.split("/");
 	if (parts.some((part) => !NAME.test(part))) throw new Error(`Profile path "${path}" must be lowercase names joined by "/".`);
 	return homeAt(join(root.dir, ...parts.flatMap((part) => ["profiles", part])));
 }
 
-/** `poteto/relay` from a home below `root`. */
 const pathOf = (root: Home, home: Home): string => relative(root.dir, home.dir).split(sep).filter((part, i) => i % 2 === 1).join("/");
 
-/** The user service that runs a profile. Each home path gives one unit name, at any depth. */
 export const unitName = (root: Home, home: Home): string => `mochi-${pathOf(root, home).replaceAll("/", "--")}.service`;
 
-/** Every profile below `home`, depth first, parents before children. */
-export async function listHomes(home: Home): Promise<Home[]> {
+async function listHomes(home: Home): Promise<Home[]> {
 	const names = (await readdir(home.profilesDir).catch(() => [] as string[])).filter((name) => NAME.test(name)).sort();
 	const found: Home[] = [];
 	for (const name of names) {
@@ -78,7 +70,6 @@ const readToml = async (home: Home): Promise<Record<string, unknown>> => {
 
 const writeToml = (home: Home, config: Record<string, unknown>): Promise<void> => writeFile(home.configFile, `${stringify(config)}\n`, { mode: 0o600 });
 
-/** Adds or removes `name:token` in a home's MOCHI_A2A_PEER_TOKENS. */
 function withPeerToken(env: Env, name: string, token: string | undefined): Env {
 	const pairs = (env.MOCHI_A2A_PEER_TOKENS ?? "").split(",").map((pair) => pair.trim()).filter((pair) => pair !== "" && !pair.startsWith(`${name}:`));
 	if (token !== undefined) pairs.push(`${name}:${token}`);
@@ -87,16 +78,12 @@ function withPeerToken(env: Env, name: string, token: string | undefined): Env {
 
 const tokenEnv = (name: string): string => `${name.toUpperCase().replaceAll("-", "_")}_A2A_TOKEN`;
 
-/** Models, gateways and the classifier: what a profile needs to think. Channel keys are never copied. */
 const MODEL_KEYS = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|OPENROUTER_API_KEY|BIFROST_[A-Z_]+|FIRECRAWL_API_KEY|DEEPGRAM_API_KEY|EXECUTOR_URL)$/;
 
-export interface ProfileDeps {
+interface ProfileDeps {
 	readonly home: Home;
-	/** The repository the daemon runs from, so a profile runs the same code. */
 	readonly repo: string;
-	/** Runs systemctl --user; replaced in tests. */
 	readonly systemctl?: (args: readonly string[]) => Promise<string>;
-	/** Where user units go: `~/.config/systemd/user`. */
 	readonly unitDir?: string;
 }
 
@@ -148,13 +135,6 @@ async function status(deps: ProfileDeps, home: Home): Promise<string> {
 	}
 }
 
-const resolveInside = (root: Home, path: string): Home => {
-	const home = profileHome(root, path);
-	if (!resolve(home.dir).startsWith(resolve(root.profilesDir) + sep)) throw new Error(`Profile ${path} is outside this mochi's profiles.`);
-	return home;
-};
-
-/** The parent of `path`: this mochi for a top-level profile, else the profile one level up. */
 const parentOf = (root: Home, path: string): { home: Home; name: string } => {
 	const parts = path.split("/");
 	return parts.length === 1 ? { home: root, name: "parent" } : { home: profileHome(root, parts.slice(0, -1).join("/")), name: parts.at(-2)! };
@@ -196,7 +176,7 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 			structuredOutputSchema: Type.Object({ path: Type.String(), home: Type.String(), unit: Type.String(), a2a: Type.String() }),
 			replay: "unsafe",
 			execute: async ({ path, instructions, models, env }) => {
-				const home = resolveInside(root, path);
+				const home = profileHome(root, path);
 				if (existsSync(home.dir)) throw new Error(`Profile ${path} exists. Use profile_update.`);
 				const parent = parentOf(root, path);
 				if (!existsSync(parent.home.dir)) throw new Error(`Its parent ${path.split("/").slice(0, -1).join("/")} does not exist.`);
@@ -229,7 +209,6 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 				await writeToml(home, childConfig);
 				await writeFile(home.instructionsFile, `${instructions.trim()}\n`);
 
-				// The parent learns the child: it accepts the child's token and may call it.
 				await writeEnv(parent.home, { ...withPeerToken(parentEnv, name, toParent), [tokenEnv(name)]: toChild });
 				const peers = ((parentConfig.a2a as { peers?: Record<string, unknown> } | undefined)?.peers ?? {}) as Record<string, unknown>;
 				await writeToml(parent.home, { ...parentConfig, a2a: { peers: { ...peers, [name]: { url: `http://127.0.0.1:${a2aPort}`, tokenEnv: tokenEnv(name) } } } });
@@ -245,7 +224,7 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 			structuredOutputSchema: Type.Object({ path: Type.String(), restarted: Type.Array(Type.String()) }),
 			replay: "safe",
 			execute: async ({ path, instructions, config }) => {
-				const home = resolveInside(root, path);
+				const home = profileHome(root, path);
 				if (!existsSync(home.dir)) throw new Error(`No profile ${path}. Use profile_list.`);
 				if (instructions !== undefined) {
 					adoptInstructions(home);
@@ -267,11 +246,10 @@ export function profileFns(deps: ProfileDeps): ToolRegistration[] {
 			structuredOutputSchema: Type.Object({ archived: Type.String(), stopped: Type.Array(Type.String()) }),
 			replay: "safe",
 			execute: async ({ path }) => {
-				const home = resolveInside(root, path);
+				const home = profileHome(root, path);
 				if (!existsSync(home.dir)) throw new Error(`No profile ${path}. Use profile_list.`);
 				const systemctl = systemctlOf(deps);
 				const stopped: string[] = [];
-				// Children first, so no profile outlives the one it reports to.
 				for (const each of [...(await listHomes(home))].reverse().concat(home)) {
 					const unit = unitName(root, each);
 					await systemctl(["disable", "--now", unit]).catch(() => "");

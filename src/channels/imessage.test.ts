@@ -18,16 +18,6 @@ function channelWith(app: IMessageApp, deps: IMessageDeps = {}): Channel {
 	return setup.value;
 }
 
-describe("imessage config", () => {
-	it("is off with no variable and broken naming the missing ones with some", () => {
-		assert.deepEqual(createIMessageChannel({}), { kind: "off" });
-		assert.deepEqual(createIMessageChannel({ PHOTON_PROJECT_ID: "p", PHOTON_PROJECT_SECRET: "s" }), {
-			kind: "broken",
-			fix: "IMESSAGE_OWNER is not set. Fix: export it where mochi starts",
-		});
-	});
-});
-
 describe("imessage message mapping", () => {
 	const log = fx.events();
 

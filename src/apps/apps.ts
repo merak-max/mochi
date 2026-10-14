@@ -10,14 +10,11 @@ import { pause } from "../pause.ts";
 const RETRY_MS = 60_000;
 const CALL_TIMEOUT_MS = 15 * 60_000;
 const MAX_APPROVALS = 20;
-/** How long a call whose MCP session expired waits for `run` to reconnect before its one retry. */
 const RECONNECT_WAIT_MS = 15_000;
 const ACCEPT = { action: "accept", content: {} };
 
-/** Resolves to undefined when mochi holds no Executor tokens. */
 export type Connect = () => Promise<McpTransport | undefined>;
 
-/** The owner's apps through Executor. Each method throws one line while Executor is not up. */
 export interface Apps {
 	search(query: string, context: Context): Promise<JsonValue>;
 	call(path: string, args: JsonValue, context: Context): Promise<JsonValue>;
@@ -29,14 +26,12 @@ type Link =
 	| { readonly status: "down"; readonly error: string }
 	| { readonly status: "up"; readonly client: McpClient };
 
-/** One Executor connection for the daemon's life; `run` reconnects every 60 s. Nothing the model sees changes with it. */
 export function connectApps(connect: Connect, log: Log): Apps & { run(context: Context): Promise<void> } {
 	let link: Link = { status: "down", error: "not connected yet" };
 	const connected = (): McpClient => {
-		const current = link;
-		if (current.status === "unauthorized") throw new Error(`Executor is not authorized; the owner runs \`${AUTH_COMMAND}\`.`);
-		if (current.status === "down") throw new Error(`Executor is down (${current.error}), retrying every 60 s.`);
-		return current.client;
+		if (link.status === "unauthorized") throw new Error(`Executor is not authorized; the owner runs \`${AUTH_COMMAND}\`.`);
+		if (link.status === "down") throw new Error(`Executor is down (${link.error}), retrying every 60 s.`);
+		return link.client;
 	};
 	const reconnected = async (old: McpClient, context: Context): Promise<McpClient> => {
 		for (let waited = 0; waited < RECONNECT_WAIT_MS; waited += 250) {
@@ -127,10 +122,8 @@ async function open(connect: Connect): Promise<Link> {
 	return { status: "up", client };
 }
 
-/** An error result from an Executor tool: the call reached Executor and failed there. */
 class ExecutorResultError extends Error {}
 
-/** A path as apps_search returns it ("tools[\"a-b\"].x") or without the prefix ("gmail.send", "[\"a-b\"].x"), as a callable expression. */
 export function toolExpression(path: string): string {
 	const trimmed = path.trim();
 	if (trimmed.startsWith("tools.") || trimmed.startsWith("tools[")) return trimmed;
@@ -140,7 +133,6 @@ export function toolExpression(path: string): string {
 
 type ToolResult = Awaited<ReturnType<McpClient["callTool"]>>;
 
-/** A tool result as JSON: structured content, else parsed text, else the text. An error result throws its text. */
 function parseResult(result: ToolResult): JsonValue {
 	const text = result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
 	if (result.isError === true) throw new ExecutorResultError(text);
@@ -152,17 +144,12 @@ function parseResult(result: ToolResult): JsonValue {
 	}
 }
 
-/** The requestId of an `execute` or `resume` result that paused for approval (model elicitation mode). */
 function approvalRequest(value: JsonValue): string | undefined {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
 	if (value.status !== "approval-required") return undefined;
 	return typeof value.requestId === "string" ? value.requestId : undefined;
 }
 
-/**
- * The program's value from an `execute` or `resume` result. Executor wraps it as
- * `{ status: "completed", execution: { ok, value | error } }`; older Executors return the value raw.
- */
 function completedValue(value: JsonValue): JsonValue {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
 	if (value.status !== "completed") return value;

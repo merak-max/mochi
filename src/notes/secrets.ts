@@ -1,4 +1,4 @@
-export type SecretMatch = { readonly kind: "pattern"; readonly id: string } | { readonly kind: "env"; readonly name: string };
+type SecretMatch = { readonly kind: "pattern"; readonly id: string } | { readonly kind: "env"; readonly name: string };
 
 export type Env = Readonly<Record<string, string | undefined>>;
 
@@ -26,7 +26,9 @@ const MIN_TOKEN_ENTROPY_BITS = 4.2;
 export function findSecret(text: string, env: Env): SecretMatch | undefined {
 	for (const { id, pattern } of PATTERNS) if (pattern.test(text)) return { kind: "pattern", id };
 	for (const run of text.match(TOKEN_RUN) ?? []) {
-		if (isRandomToken(run)) return { kind: "pattern", id: "high-entropy token" };
+		// Mixed case and digits with near-uniform characters: random tokens, not words, paths or slugs.
+		if (!/[a-z]/.test(run) || !/[A-Z]/.test(run) || !/[0-9]/.test(run)) continue;
+		if (entropyBits(run) >= MIN_TOKEN_ENTROPY_BITS) return { kind: "pattern", id: "high-entropy token" };
 	}
 	for (const [name, value] of Object.entries(env)) {
 		if (value !== undefined && value.length >= MIN_ENV_VALUE_CHARS && SECRET_ENV_NAME.test(name) && text.includes(value)) {
@@ -40,12 +42,6 @@ export function secretRejection(match: SecretMatch): string {
 	const what = match.kind === "env" ? `the value of the environment variable ${match.name}` : `a credential (${match.id})`;
 	const example = match.kind === "env" ? `"the key is in env ${match.name}"` : `"deepgram key is in env DEEPGRAM_API_KEY"`;
 	return `Not saved: the note contains ${what}. Notes must never hold secrets. Store a reference instead, such as ${example}.`;
-}
-
-/** Mixed case and digits with near-uniform characters: random tokens, not words, paths or slugs. */
-function isRandomToken(run: string): boolean {
-	if (!/[a-z]/.test(run) || !/[A-Z]/.test(run) || !/[0-9]/.test(run)) return false;
-	return entropyBits(run) >= MIN_TOKEN_ENTROPY_BITS;
 }
 
 function entropyBits(text: string): number {

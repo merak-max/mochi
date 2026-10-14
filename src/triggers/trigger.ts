@@ -18,34 +18,27 @@ import { keyedReset } from "../turn/lifecycle.ts";
 import { answerText, LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
 import type { AgentCatalog } from "../agents/catalog.ts";
 import { assertTimeZone, nextCronSlot, parseCron } from "./cron.ts";
-import { GateSchema, SeedsSchema, type Trigger, TriggerSchema } from "./types.ts";
+import { GateSchema, Id, type Trigger, TriggerSchema } from "./types.ts";
 
-// A trigger is a background task of its own ownerless conversation: the input is the definition and the checkpoint the
-// next slot, so the task record is the only copy of the schedule. Nothing owns the conversation, so /stop on root never
-// reaches it, and trigger_remove aborts the task, not the conversation, so a run that removes its own trigger finishes.
-
-/** A cron slot this late is recorded missed. A once trigger always fires, late if it must. */
-export const LATE_MS = 15 * 60_000;
-/** A run still going this long after it started is aborted, so a hung run cannot turn every later slot into skipped-busy. */
+const LATE_MS = 15 * 60_000;
 export const RUN_DEADLINE_MS = 30 * 60_000;
 const DAY_MS = 86_400_000;
+const CHECK_TIMEOUT_MS = 5 * 60_000;
 
 export type LastSlot = { readonly at: number; readonly result: "done" | "unanswered" | "skipped-busy" | "missed" | "timed-out" | "quiet" | "check-failed" };
 
-const CHECK_TIMEOUT_MS = 5 * 60_000;
 const run = promisify(execFile);
 
-/** A cron trigger's `check`: its stdout when it has something, `null` for nothing to do. A failing check throws. */
-export async function runCheck(argv: readonly string[]): Promise<string | null> {
+async function runCheck(argv: readonly string[]): Promise<string | null> {
 	const [file, ...args] = argv as [string, ...string[]];
 	const { stdout } = await run(file, args, { timeout: CHECK_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
 	return stdout.trim() === "" ? null : stdout.trim();
 }
+
 export type Plan = { readonly kind: "fire" | "miss"; readonly slot: number } | { readonly kind: "listen" | "done" };
 
-export const late = (trigger: Trigger, slot: number, now: number): boolean => trigger.kind === "cron" && now - slot > LATE_MS;
+const late = (trigger: Trigger, slot: number, now: number): boolean => trigger.kind === "cron" && now - slot > LATE_MS;
 
-/** What a trigger does next. Without a last slot only slots after `now` count. */
 export function plan(trigger: Trigger, last: LastSlot | null, now: number): Plan {
 	if (trigger.kind === "webhook") return { kind: "listen" };
 	if (trigger.kind === "once") return last === null ? { kind: "fire", slot: Date.parse(trigger.at) } : { kind: "done" };
@@ -57,26 +50,18 @@ export function plan(trigger: Trigger, last: LastSlot | null, now: number): Plan
 	return next === undefined ? { kind: "done" } : { kind: "fire", slot: next.getTime() };
 }
 
-export type TriggerState =
+type TriggerState =
 	| { readonly phase: "wait"; readonly last: LastSlot | null }
-	/** Sleeping to `slot`, so a restart sleeps to the same instant. */
 	| { readonly phase: "fire"; readonly slot: number; readonly last: LastSlot | null }
 	| { readonly phase: "run"; readonly slot: number; readonly deadline: number; readonly last: LastSlot | null };
 
-/** `origin` lets seed reconcile touch only seeds, never a trigger the model made. */
-export type TriggerInput = { readonly trigger: Trigger; readonly origin: "model" | "config" };
+type TriggerInput = { readonly trigger: Trigger; readonly origin: "model" | "config" };
 export type TriggerTask = Task<TriggerInput, TriggerState, null, object>;
 export type TriggerRecord = TaskRecord<TriggerInput, TriggerState, null>;
 
 const iso = (at: number): string => new Date(at).toISOString();
 
-export function defineTrigger({
-	timeZone,
-	deadlineMs,
-	log,
-	harness,
-	check = runCheck,
-}: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit">; readonly check?: typeof runCheck }): TriggerTask {
+export function defineTrigger({ timeZone, deadlineMs, log, harness }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit"> }): TriggerTask {
 	const wait = (last: LastSlot): NextTaskState<TriggerState, null> => ({ status: "running", checkpoint: { phase: "wait", last } });
 	return defineTask<TriggerInput, TriggerState, null>({
 		name: "mochi.trigger",
@@ -113,12 +98,10 @@ export function defineTrigger({
 				const { slot, deadline } = task.state.checkpoint;
 				let payload = "";
 				if (trigger.kind === "cron" && trigger.check !== undefined) {
-					// Memoized per slot: a check usually advances its own state (mail UIDs), so a restart must not run it twice.
 					const key = `check:${iso(slot)}`;
 					let found = await runtime.memo<{ out: string | null } | { failed: string }>(key, context);
 					if (found === undefined) {
-						const argv = trigger.check;
-						const result = await check(argv).then((out) => ({ out }), (error: unknown) => ({ failed: String(error).slice(0, 500) }));
+						const result = await runCheck(trigger.check).then((out) => ({ out }), (error: unknown) => ({ failed: String(error).slice(0, 500) }));
 						found = await runtime.memo(key, result, context);
 					}
 					if ("failed" in found) {
@@ -132,7 +115,6 @@ export function defineTrigger({
 				const requestId = `${trigger.kind}:${trigger.id}:${iso(slot)}`;
 				await freshRun(harness(), conversation, requestId, runtime.now(), context);
 				const content = `[${trigger.kind} ${trigger.id}] Current time: ${formatStamp(new Date(slot), timeZone)}\n${trigger.prompt}${payload}`;
-				// A slot that finds the last run still going queues behind it; the deadline still ends a hung run.
 				const submission = await conversation.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context);
 				const race = withCancel(context);
 				const settled = await Promise.race([submission.wait(race.context), runtime.sleep(deadline, race.context).then(() => undefined)]).finally(() => race.cancel());
@@ -149,7 +131,6 @@ export function defineTrigger({
 
 const live = (task: TriggerRecord): boolean => task.state.status !== "terminal" && !task.abortRequested;
 
-/** Trigger tasks in creation order, live and settled. */
 export async function scanTriggers(tx: Pick<Tx, "scanTasks">, conversationId?: ConversationId): Promise<TriggerRecord[]> {
 	const query = { kind: "mochi.trigger", ...(conversationId === undefined ? {} : { conversationId }) };
 	return (await allPages((cursor) => tx.scanTasks(query, 256, cursor))) as unknown as TriggerRecord[];
@@ -158,15 +139,12 @@ export async function scanTriggers(tx: Pick<Tx, "scanTasks">, conversationId?: C
 export const liveTrigger = async (tx: Pick<Tx, "scanTasks">, id: string): Promise<TriggerRecord | undefined> =>
 	(await scanTriggers(tx)).findLast((task) => live(task) && task.input.trigger.id === id);
 
-/** How every trigger run's instructions start, so other code can tell a run's conversation apart. */
-export const TRIGGER_RUN = "This conversation is an unattended trigger run";
 const INSTRUCTIONS =
-	`${TRIGGER_RUN}, not a chat with the owner. Nobody reads your answers here. ` +
+	"This conversation is an unattended trigger run, not a chat with the owner. Nobody reads your answers here. " +
 	"The only way to reach the owner is the notify tool; call it only when something needs the owner's attention, " +
 	"and otherwise finish with a short note of what you checked and what you already reported. Each run starts fresh " +
 	"from the last run's note; use recall for anything older. End a trigger that has served its purpose with tools.trigger_remove in code.";
 
-/** The last run's closing words: its final text, else what it notified; past the last reset, that reset's note carried on. */
 async function lastRunNote(tx: Tx, conversationId: ConversationId): Promise<string> {
 	const recent = (await tx.scanEntries({ conversationId, order: "descending" }, 32)).items;
 	for (const entry of recent) {
@@ -180,10 +158,8 @@ async function lastRunNote(tx: Tx, conversationId: ConversationId): Promise<stri
 	return "";
 }
 
-/**
- * Starts each run from a fresh context that carries only the last run's closing note, so a run never resends the
- * trigger's whole history. A slot that finds the last run still going keeps its context and queues behind it.
- */
+const CARRIED = "Your previous run of this trigger ended with:";
+
 async function freshRun(harness: Pick<Harness, "commit">, conversation: Pick<Conversation, "id" | "submit">, requestId: string, now: number, context: Context): Promise<void> {
 	const { busy, note } = await harness.commit(async (tx) => ({ busy: (await tx.doc(LiveDoc, conversation.id)).run !== undefined, note: await lastRunNote(tx, conversation.id) }), context);
 	if (busy || note === "") return;
@@ -191,13 +167,7 @@ async function freshRun(harness: Pick<Harness, "commit">, conversation: Pick<Con
 	await keyedReset(conversation, `reset:${requestId}`, handoff, now, context);
 }
 
-const CARRIED = "Your previous run of this trigger ended with:";
-
-/**
- * Creates the trigger task in the caller's commit; `existing` is `scanTriggers`, read before the commit's first write.
- * The newest earlier trigger with the same id lends its conversation, so an edited trigger keeps its runs to read; a
- * live one is returned for the caller to abort after the commit.
- */
+/** `existing` is `scanTriggers`, read before the commit's first write. A replaced live trigger is for the caller to abort after the commit. */
 export async function addTrigger(
 	tx: Tx,
 	task: TriggerTask,
@@ -209,18 +179,12 @@ export async function addTrigger(
 	const previous = existing.findLast((record) => record.input.trigger.id === input.trigger.id);
 	const { agent, instructions } = runAgent(input.trigger, catalog);
 	const reused = conversation ?? previous?.conversationId;
-	// The definition owns the run's model and role: a re-added trigger applies them to the conversation it keeps.
 	if (reused !== undefined) await configure(tx, reused, { ...agent, instructions });
 	const conversationId = reused ?? (await createSeatConversation(tx, "trigger", { kind: "ownerless" }, { instructions, ...agent }));
 	const id = await tx.createTask(task, input, { ownership: { kind: "conversation" }, conversationId, background: true });
 	return { id, replaced: previous !== undefined && live(previous) ? previous.id : undefined };
 }
 
-
-/**
- * A run's model and instructions. The trigger's own `model` and `thinking` win, then its `role` (an agents/<role>.md
- * type), then the fast tier: a routine that needs judgment names a role or a model.
- */
 export function runAgent(trigger: Trigger, catalog: AgentCatalog): { readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly instructions: string } {
 	const role = trigger.role === undefined ? undefined : catalog.types.get(trigger.role);
 	if (trigger.role !== undefined && role === undefined) throw new Error(`Unknown role "${trigger.role}". Use ${[...catalog.types.keys()].join(", ")}.`);
@@ -233,7 +197,6 @@ export function runAgent(trigger: Trigger, catalog: AgentCatalog): { readonly ag
 	};
 }
 
-/** Throws a readable error for a cron expression, time zone or `once` time a trigger cannot run with. */
 function validateTrigger(trigger: Trigger): Trigger {
 	if (trigger.kind === "cron") {
 		parseCron(trigger.cron);
@@ -250,20 +213,14 @@ function checkRecipients(notify: readonly string[], users: readonly ChatUser[]):
 	}
 }
 
-/** Seeds from data/config.json `triggers`. Each notify id must be the owner or a configured user. */
 export function parseSeeds(file: Readonly<Record<string, unknown>>, users: readonly ChatUser[]): Trigger[] {
-	const seeds = parseWith(SeedsSchema, file.triggers ?? [], "triggers in data/config.json").map(validateTrigger);
+	const seeds = parseWith(Type.Array(TriggerSchema), file.triggers ?? [], "triggers in data/config.json").map(validateTrigger);
 	for (const seed of seeds) {
 		if (seed.notify !== undefined) checkRecipients(seed.notify, users);
 	}
 	return seeds;
 }
 
-/**
- * Idempotent: an equal seed is left alone, a changed one is re-added in its conversation, a config trigger whose seed
- * is gone is aborted, and so is any live trigger a newer one with its id replaced. A model trigger is touched only when
- * config claims its id.
- */
 export async function reconcileSeeds(harness: Harness, task: TriggerTask, seeds: readonly Trigger[], catalog: AgentCatalog, context: Context): Promise<void> {
 	const stale = await harness.commit(async (tx) => {
 		const existing = await scanTriggers(tx);
@@ -287,7 +244,6 @@ export async function reconcileSeeds(harness: Harness, task: TriggerTask, seeds:
 	for (const id of stale) await harness.abortTask(id, context);
 }
 
-const Id = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 64 });
 const AddParams = Type.Object({
 	id: Id,
 	prompt: Type.String({ minLength: 1 }),
@@ -328,16 +284,14 @@ function listed({ input: { trigger, origin }, state }: TriggerRecord, now: numbe
 	return JSON.parse(JSON.stringify({ id: trigger.id, when, origin, next, last }));
 }
 
-export interface TriggerFnDeps {
+interface TriggerFnDeps {
 	readonly task: TriggerTask;
 	readonly catalog: AgentCatalog;
 	readonly triggers: (context: Context) => Promise<TriggerRecord[]>;
 	readonly abortTask: (id: TaskId, context: Context) => Promise<unknown>;
-	/** `MOCHI_PUBLIC_URL`, the origin webhook senders call. */
 	readonly publicUrl: string | undefined;
 	readonly timeZone: string;
 	readonly now: () => number;
-	/** Configured users, whose ids a trigger may notify. */
 	readonly users: readonly ChatUser[];
 }
 
@@ -398,16 +352,13 @@ export function triggerFns(deps: TriggerFnDeps): ToolRegistration[] {
 	];
 }
 
-/** The `notifyWhen` verdict, memoized so a replayed call reaches the same decision. */
 const GATE_MEMO = "notify.gate";
 
-export interface NotifyDeps {
+interface NotifyDeps {
 	readonly line: () => Pick<Line, "id" | "turn">;
-	/** Chat channels running in this process; with none, notify writes only the record in root. */
 	readonly channels: readonly ChannelId[];
 	readonly classify: Classify;
 	readonly log: Log;
-	/** Configured users, the ids a trigger's `notify` may name. */
 	readonly users: readonly ChatUser[];
 }
 
@@ -461,7 +412,6 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 					await journaled(tx, api.taskId, key, () => openTurn(tx, deps.line(), turn));
 				}
 			}, context);
-			// The run is done once its message is queued; ending here skips a model request that would only narrate the send.
 			return { output: [{ type: "text", text: `Queued for ${queued.join(" and ")}; it goes out verbatim.` }], control: { terminate: true } };
 		},
 	});
