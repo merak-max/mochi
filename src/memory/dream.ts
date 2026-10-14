@@ -41,16 +41,14 @@ const ProposalSchema = Type.Union([
 export const BatchSchema = Type.Array(ProposalSchema, { maxItems: 10 });
 export type Batch = Static<typeof BatchSchema>;
 export type Evidence = Static<typeof EvidenceSchema>;
-type Pin = { revision: number; memory: Memory; evidence: Evidence[]; cutoff: number; since?: number; conversation: ConversationId; requestId: string };
-/** A dream that did not apply leaves `since` where it was, so the next one reads the same entries again. */
-const previousCutoff = (pin: Pin): number | undefined => pin.since;
-/** `since`: the newest entry an earlier dream read, so each dream reads only what came after it. */
+type Pin = { revision: number; memory: Memory; evidence: Evidence[]; cutoff: number; conversation: ConversationId; requestId: string };
 type DreamState =
-	| { phase: "wait"; last: number | null; since?: number }
-	| { phase: "fire"; slot: number; since?: number }
+	| { phase: "wait"; last: number | null }
+	| { phase: "fire"; slot: number }
 	| { phase: "run"; slot: number; deadline: number; pin: Pin }
 	| { phase: "apply"; slot: number; deadline: number; pin: Pin; batch: Batch };
-type DreamOwner = { task: TaskId | null; config: DreamConfig | null; last: { slot: number; result: string } | null };
+/** `since`: the newest entry an applied dream read. The next dream reads only what came after it, across config changes. */
+type DreamOwner = { task: TaskId | null; config: DreamConfig | null; last: { slot: number; result: string } | null; since?: number };
 export const DreamDoc = defineDoc<DreamOwner>({ kind: "mochi.dream", version: 1, scope: "session", initial: () => ({ task: null, config: null, last: null }) });
 
 const INSTRUCTIONS =
@@ -69,7 +67,8 @@ export const REVIEW_CHARS = 40_000;
 /** Evidence one slot pins at most, newest kept: about a week of busy chat. */
 const PIN_CHARS = 1_500_000;
 
-async function pinMemory(tx: Tx, model: ModelRef, slot: number, task: TaskId, since: number): Promise<Pin> {
+async function pinMemory(tx: Tx, model: ModelRef, slot: number, task: TaskId): Promise<Pin> {
+	const since = (await tx.doc(DreamDoc)).since ?? 0;
 	const memory: Memory = JSON.parse(JSON.stringify(await tx.doc(MemoryDoc, ROOT_CONVERSATION_ID)));
 	const conversations = await allPages((cursor) => tx.scanConversations({}, 128, cursor));
 	const evidence: Evidence[] = [];
@@ -96,7 +95,7 @@ async function pinMemory(tx: Tx, model: ModelRef, slot: number, task: TaskId, si
 			chars += text.length;
 		}
 	}
-	return { revision: (await tx.doc(RepoDoc)).changed, memory, evidence, cutoff: Math.max(cutoff, since), since, conversation: await restrictedConversation(tx, model), requestId: `dream:${task}:${slot}` };
+	return { revision: (await tx.doc(RepoDoc)).changed, memory, evidence, cutoff: Math.max(cutoff, since), conversation: await restrictedConversation(tx, model), requestId: `dream:${task}:${slot}` };
 }
 
 const MAP_SYSTEM =
@@ -192,41 +191,39 @@ export async function applyDreamBatch(tx: Tx, pin: Pick<Pin, "revision" | "memor
 }
 
 export function defineDream(deps: { models: { brain: ModelRef; fast: ModelRef }; pick: FastCompletion; today: () => string; log: Log }) {
-	const finish = async (runtime: Pick<TaskRuntime<DreamConfig, DreamState, null, object>, "commit">, slot: number, result: string, since: number | undefined, context: Context) => runtime.commit(async (tx) => {
+	const finish = async (runtime: Pick<TaskRuntime<DreamConfig, DreamState, null, object>, "commit">, slot: number, result: string, context: Context) => runtime.commit(async (tx) => {
 		(await tx.doc(DreamDoc)).last = { slot, result };
-		return { status: "running" as const, checkpoint: { phase: "wait" as const, last: slot, ...(since === undefined ? {} : { since }) } };
+		return { status: "running" as const, checkpoint: { phase: "wait" as const, last: slot } };
 	}, context);
 	return defineTask<DreamConfig, DreamState, null>({
 		name: "mochi.dream", version: 1, initial: () => ({ phase: "wait", last: null }),
 		phases: {
 			wait: async (task, runtime, context) => {
-				const { since } = task.state.checkpoint;
 				const next = plan({ kind: "cron", id: "dream", prompt: "", cron: task.input.cron, tz: task.input.tz }, task.state.checkpoint.last === null ? null : { at: task.state.checkpoint.last, result: "done" }, runtime.now());
-				if (next.kind === "miss") return finish(runtime, next.slot, "missed", since, context);
+				if (next.kind === "miss") return finish(runtime, next.slot, "missed", context);
 				if (next.kind !== "fire") return runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
-				return runtime.commit(() => ({ status: "running", checkpoint: { phase: "fire", slot: next.slot, ...(since === undefined ? {} : { since }) } }), context);
+				return runtime.commit(() => ({ status: "running", checkpoint: { phase: "fire", slot: next.slot } }), context);
 			},
 			fire: async (task, runtime, context) => {
-				const { slot, since } = task.state.checkpoint;
+				const { slot } = task.state.checkpoint;
 				await runtime.sleep(slot, context);
-				if (runtime.now() - slot > LATE_MS) return finish(runtime, slot, "missed", since, context);
+				if (runtime.now() - slot > LATE_MS) return finish(runtime, slot, "missed", context);
 				return runtime.commit(async (tx) => ({
-					status: "running", checkpoint: { phase: "run", slot, deadline: runtime.now() + task.input.deadlineMinutes * 60_000, pin: await pinMemory(tx, deps.models[task.input.model], slot, task.id, since ?? 0) },
+					status: "running", checkpoint: { phase: "run", slot, deadline: runtime.now() + task.input.deadlineMinutes * 60_000, pin: await pinMemory(tx, deps.models[task.input.model], slot, task.id) },
 				}), context);
 			},
 			run: async (task, runtime, context) => {
 				const { slot, deadline, pin } = task.state.checkpoint;
 				const conversation = (await runtime.conversation(pin.conversation, context))!;
-				const since = previousCutoff(pin);
 				try {
-					if (runtime.now() >= deadline) { await conversation.abort(context); return finish(runtime, slot, "timed-out", since, context); }
+					if (runtime.now() >= deadline) { await conversation.abort(context); return finish(runtime, slot, "timed-out", context); }
 					const memo = async <T extends JsonValue>(name: string, compute: () => Promise<T>): Promise<T> => (await runtime.memo<T>(name, context)) ?? runtime.memo(name, await compute(), context);
 					const evidence = await narrow(pin.evidence, deps.pick, memo, context);
 					const submission = await conversation.submit({ type: "input", content: JSON.stringify({ memory: pin.memory, cutoff: pin.cutoff, evidence }), requestId: pin.requestId }, context);
 					const race = withCancel(context);
 					const settled = await Promise.race([submission.wait(race.context), runtime.sleep(deadline, race.context).then(() => undefined)]).finally(() => race.cancel());
-					if (settled === undefined) { await conversation.abort(context); return finish(runtime, slot, "timed-out", since, context); }
-					if (settled.status !== "done") return finish(runtime, slot, "failed", since, context);
+					if (settled === undefined) { await conversation.abort(context); return finish(runtime, slot, "timed-out", context); }
+					if (settled.status !== "done") return finish(runtime, slot, "failed", context);
 					let answerText = "";
 					const answerId = settled.answer;
 					if (answerId !== undefined) await runtime.commit(async (tx) => {
@@ -238,23 +235,24 @@ export function defineDream(deps: { models: { brain: ModelRef; fast: ModelRef };
 					return runtime.commit(() => ({ status: "running", checkpoint: { phase: "apply", slot, deadline, pin, batch } }), context);
 				} catch (error) {
 					deps.log("memory.dream.failed", { slot, error: String(error) });
-					return finish(runtime, slot, "failed", since, context);
+					return finish(runtime, slot, "failed", context);
 				}
 			},
 			apply: async (task, runtime, context) => {
 				const { slot, deadline, pin, batch } = task.state.checkpoint;
-				if (runtime.now() >= deadline) return finish(runtime, slot, "timed-out", previousCutoff(pin), context);
+				if (runtime.now() >= deadline) return finish(runtime, slot, "timed-out", context);
 				try {
 					return await runtime.commit(async (tx) => {
 						const owner = await tx.doc(DreamDoc);
 						if (owner.task !== task.id || owner.config?.enabled !== true) throw new Error("Dreaming generation disabled");
 						await applyDreamBatch(tx, pin, batch, deps.today());
 						owner.last = { slot, result: batch.length === 0 ? "empty" : "applied" };
-						return { status: "running", checkpoint: { phase: "wait", last: slot, since: pin.cutoff } };
+						owner.since = pin.cutoff;
+						return { status: "running", checkpoint: { phase: "wait", last: slot } };
 					}, context);
 				} catch (error) {
 					deps.log("memory.dream.rejected", { slot, error: String(error) });
-					return finish(runtime, slot, "rejected", previousCutoff(pin), context);
+					return finish(runtime, slot, "rejected", context);
 				}
 			},
 		},

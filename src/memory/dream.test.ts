@@ -260,7 +260,6 @@ test("Dreaming over more than one review of chat maps the fast model over chunks
 		await until(mochi, (owner) => owner.last?.result === "empty");
 		assert.ok(maps >= 3, `mapped ${maps} chunks`);
 		assert.deepEqual(reviewed.map((entry) => entry.text), ["Fact 0: the owner's sister is Asha.", "Fact 10: the owner's sister is Asha.", "Fact 20: the owner's sister is Asha."]);
-		const task = await mochi.harness.getTask((await mochi.harness.snapshot(DreamDoc, context))!.task!, context);
-		assert.ok(((task!.state as { checkpoint?: { since?: number } }).checkpoint?.since ?? 0) > 0, "the next dream starts after what this one read");
+		assert.ok(((await mochi.harness.snapshot(DreamDoc, context))?.since ?? 0) > 0, "the next dream starts after what this one read");
 	} finally { await mochi.close(); }
 });
