@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
-import { AgentDoc, configure, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { AgentDoc, configure, LiveDoc, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { createSeatConversation } from "../seats.ts";
 import type { Owner } from "../memory/memory.ts";
 import { answerText } from "../turn/turn.ts";
@@ -139,7 +139,9 @@ export async function applyAgent(tx: Tx, conversation: ConversationId, run: RunA
 	else agent.tools = [...run.tools];
 }
 
-const HEADER = (name: string) => `You are the ${name} profile, a standing teammate of mochi. Messages here come from mochi or its other profiles, not the owner. Answer the sender; use notify only when the owner must see something now.`;
+const HEADER = (name: string) =>
+	`You are the ${name} profile, a standing teammate of mochi. Each message here starts with [from <sender>]: root (mochi) or another profile, never the owner. ` +
+	"Answer the sender. Ask any teammate directly with tools.profile_send when you need what they know; profile_list shows who does what. Use notify only when the owner must see something now.";
 
 async function ensureConversation(tx: Tx, profile: Profile, profiles: Profiles): Promise<ConversationId> {
 	const doc = await tx.doc(ProfileDoc, profile.name, null);
@@ -152,12 +154,14 @@ async function ensureConversation(tx: Tx, profile: Profile, profiles: Profiles):
 type Host = Pick<Harness, "commit" | "conversation">;
 
 /** Submits `message` to the profile's standing conversation, creating it the first time. Same requestId, same submission. */
-export async function sendToProfile(host: Host, profiles: Profiles, name: string, message: string, requestId: string, context: Context): Promise<Submission> {
+/** Submits `message` to the profile's standing conversation, creating it the first time. Same requestId, same submission. `busy`: it was mid-turn. */
+export async function sendToProfile(host: Host, profiles: Profiles, name: string, message: string, requestId: string, context: Context): Promise<{ submission: Submission; busy: boolean }> {
 	const profile = await profiles.get(name);
 	const conversation = await host.commit((tx) => ensureConversation(tx, profile, profiles), context);
 	const target = await host.conversation(conversation, context);
 	if (target === undefined) throw new Error(`Profile ${name} has no conversation.`);
-	return target.submit({ type: "input", content: message, requestId, whenBusy: "followUp" }, context);
+	const busy = (await host.commit((tx) => tx.doc(LiveDoc, conversation), context)).run !== undefined;
+	return { submission: await target.submit({ type: "input", content: message, requestId, whenBusy: "followUp" }, context), busy };
 }
 
 export function profileFns(profiles: Profiles, host: () => Host): ToolRegistration[] {
@@ -173,14 +177,19 @@ export function profileFns(profiles: Profiles, host: () => Host): ToolRegistrati
 		defineTool({
 			name: "profile_send",
 			description:
-				"Give a profile a message: a task, a question, or a board item id. It works in its own standing conversation with its own memory. " +
+				"Give a profile a message: a task, a question, or a board item id. Profiles message each other this way too. It works in its own standing conversation with its own memory. " +
 				"Resolves to its answer; with background it returns at once, and the profile calls notify if the owner needs the result.",
 			parameters: Type.Object({ name: Type.String(), message: Type.String({ minLength: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.String(),
 			replay: "unsafe",
 			execute: async ({ name, message, background }, api, context) => {
-				const submission = await sendToProfile(host(), profiles, name, message, `profile:${api.taskId}`, context);
+				const owner = await api.commit((tx) => ownerIn(tx, api.conversationId), context);
+				const sender = owner === "root" ? "root" : owner.profile;
+				if (sender === name) throw new Error(`You are ${name}; send to another profile.`);
+				const { submission, busy } = await sendToProfile(host(), profiles, name, `[from ${sender}] ${message}`, `profile:${api.taskId}`, context);
 				if (background === true) return { structuredOutput: `Sent to ${name}.` };
+				// A busy profile may be waiting on this very caller, so an inline wait could never end.
+				if (busy) return { structuredOutput: `${name} is in the middle of something; your message is queued and it will answer in its own turn.` };
 				const settled = await submission.wait(context);
 				if (settled.status !== "done" || settled.type !== "input") throw new Error(`Profile ${name} did not answer: ${settled.reason ?? settled.status}.`);
 				return { structuredOutput: await api.commit((tx) => answerText(tx, settled.answer), context) };

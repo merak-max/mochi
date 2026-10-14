@@ -195,7 +195,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
 	if (options.scheduling === "daemon") {
-		const sweep = defineSweep({ harness: () => harness, everyMs: options.sweepEveryMs ?? SWEEP_EVERY_MS, log, toProfile: async (name, brief, key, context) => void (await sendToProfile(harness, options.profiles, name, brief, key, context)) });
+		const sweep = defineSweep({ harness: () => harness, everyMs: options.sweepEveryMs ?? SWEEP_EVERY_MS, log, toProfile: async (name, brief, key, context) => void (await sendToProfile(harness, options.profiles, name, `[from board] ${brief}`, key, context)) });
 		registry.install(defineExtension({ name: "board", tasks: [sweep] }));
 		await ensureSweep(harness, sweep, context);
 	}
