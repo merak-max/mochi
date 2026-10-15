@@ -27,6 +27,7 @@ import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/
 import { connectApps } from "./apps/apps.ts";
 import { ingest } from "./turn/turn.ts";
 import { runFeed } from "./memory/feed.ts";
+import { watchCompaction } from "./memory/compact.ts";
 import { fastCompletion } from "./turn/lifecycle.ts";
 
 /** Only iMessage serves users; the other adapters stay owner-only. */
@@ -176,6 +177,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		BACKGROUND_CONTEXT,
 	);
 	mochi.harness.resume();
+	const stopCompaction = watchCompaction(mochi.harness, models, config.modelSetup.compactAt, running, (error) => log("compaction.failed", { error: String(error) }));
 	await listenAttach(socketPath(config.home.dir), { line: mochi.line, models, log }, running);
 
 	const background = [
@@ -197,6 +199,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	return {
 		async stop(reason) {
 			log("mochi.stopping", { reason });
+			stopCompaction();
 			controller.abort();
 			await Promise.allSettled(background);
 			await mochi.harness.close(BACKGROUND_CONTEXT);

@@ -7,6 +7,7 @@ import {
 	defineExtension,
 	type Extension,
 	type ModelRef,
+	type PromptSection,
 	ROOT_CONVERSATION_ID,
 	type ToolRegistration,
 	type Tx,
@@ -114,7 +115,7 @@ function withDeadline(code: string): string {
  * One `seat-<seat>` extension per seat: its model tools, `codemode` with its prompt section, and the library tools its
  * scripts may call. Throws when the tables and the definitions disagree.
  */
-export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[]): Extension[] {
+export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], agentSections: readonly PromptSection[]): Extension[] {
 	const codemode = createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: SCRIPT_MEMORY_BYTES }), models: false });
 	const tool = codemode.tools![0]!;
 	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
@@ -130,7 +131,8 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 			if (!entry.seats.includes(seat)) continue;
 			scripted.push(entry.inline ? { ...each, callers: ["tools"] } : { ...each, callers: ["tools"], deferred: true });
 		}
-		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted], sections: codemode.sections ?? [] });
+		const sections = seat === "agent" ? [...agentSections, ...(codemode.sections ?? [])] : (codemode.sections ?? []);
+		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted], sections });
 	});
 }
 

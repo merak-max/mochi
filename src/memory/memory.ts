@@ -341,18 +341,20 @@ async function renderMemory(read: MemoryReader, owner: Owner, context: Context):
 }
 
 /**
- * The memory section: the wake view of the memory log. It always renders, so the section set never changes. Once shown,
- * it stays as shown until a compaction or reset drops it: a fresh copy after each note would add the whole section to
- * the transcript again. The extension keeps the name the stored conversations already select.
+ * The memory section: the wake view of the memory log. It always renders, so the section set never changes. While the
+ * log only grows, the section stays as shown until a compaction or reset drops it: a fresh copy after each note would add
+ * the whole section to the transcript again. A rewritten log, whose first line changed, shows at once. The extension
+ * keeps the name the stored conversations already select.
  */
 export function memoryExtension(ownerOf: (read: DocumentReader, conversation: ConversationId, context: Context) => Promise<Owner>): Extension {
 	return defineExtension({
 		name: "notes",
 		sections: [
 			section("memory", async (input, context) => {
-				const shown = input.shown.memory;
-				if (shown !== undefined) return shown.slice("<memory>\n".length, -"\n</memory>".length);
-				return renderMemory(input.read, await ownerOf(input.read, input.conversationId, context), context);
+				const fresh = await renderMemory(input.read, await ownerOf(input.read, input.conversationId, context), context);
+				const shown = input.shown.memory?.slice("<memory>\n".length, -"\n</memory>".length);
+				const firstLine = fresh.split("\n", 1)[0]!;
+				return shown?.startsWith(firstLine) ? shown : fresh;
 			}),
 		],
 	});

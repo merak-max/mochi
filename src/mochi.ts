@@ -38,7 +38,7 @@ import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
 import { type A2APeers, a2aFns } from "./a2a/tools.ts";
 import { boardFns, defineSweep, ensureSweep, SWEEP_EVERY_MS } from "./board/board.ts";
-import { profileFns, type Profiles } from "./profiles/profiles.ts";
+import { profileFns, type Profiles, rosterSection } from "./profiles/profiles.ts";
 import type { WebConfig } from "./config.ts";
 
 interface MochiOptions {
@@ -127,7 +127,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		defineExtension({ name: "procs", tasks: [procWatch] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
-		...seatExtensions(modelTools, library),
+		...seatExtensions(modelTools, library, [rosterSection(options.profiles)]),
 	]) {
 		registry.install(extension);
 	}

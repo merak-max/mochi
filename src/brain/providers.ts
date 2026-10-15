@@ -48,6 +48,8 @@ export const ModelsSchema = Type.Object(
 		fast: Type.Optional(Type.String({ minLength: 3 })),
 		/** The strongest model, for a profile that asks for `strongest`. Default: the brain. */
 		strongest: Type.Optional(Type.String({ minLength: 3 })),
+		/** Compact a conversation once a request uses this fraction of its model's context window. Default 0.6. */
+		compactAt: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1 })),
 		/** The yes/no classifier for `classify` and classify steps, on a provider with api "classifier". */
 		classifier: Type.Optional(Type.String({ minLength: 3 })),
 		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a profile or a trigger may use. */
@@ -79,6 +81,7 @@ export interface ModelSetup {
 	readonly fast: ModelRef;
 	/** `[models] classifier`; absent, `classify` and classify steps fail with a clear error. */
 	readonly classifier?: ModelRef;
+	readonly compactAt: number;
 	/** `brain` (or `default`), `fast`, `strongest`, an alias, or `provider/id`. */
 	ref(name: string): ModelRef;
 	/** One line per provider whose key is not set, for the setup report. */
@@ -97,7 +100,7 @@ function defaultModels(providers: Record<string, ProviderConfig>): Required<Pick
 	return { brain: `${name}/gpt-6-sol`, fast: `${name}/gpt-6-luna` };
 }
 
-/** The most context any model gets, until `[models.overrides]` says otherwise. Past this, compaction runs. */
+/** A model the catalog does not know: this much context, until `[models.overrides]` says otherwise. */
 const CONTEXT_WINDOW = 200_000;
 
 /** pi-ai's classifier catalog entry for an id served by any System One provider, for its prices and limits. */
@@ -142,7 +145,7 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 		id,
 		provider,
 		baseUrl: url,
-		contextWindow: override.contextWindow ?? Math.min(base.contextWindow, CONTEXT_WINDOW),
+		contextWindow: override.contextWindow ?? base.contextWindow,
 		...(override.cost === undefined ? {} : { cost: override.cost }),
 		...(override.maxTokens === undefined ? {} : { maxTokens: override.maxTokens }),
 		promptCache: override.promptCache ?? base.promptCache ?? (wire === "anthropic-messages" ? { short: 300, long: 3600 } : undefined),
@@ -222,5 +225,5 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 		}
 		return { provider, modelId: id };
 	};
-	return { models, brain: ref("brain"), fast: ref("fast"), ...(classifier === undefined ? {} : { classifier }), ref, missing };
+	return { models, brain: ref("brain"), fast: ref("fast"), ...(classifier === undefined ? {} : { classifier }), compactAt: input.models?.compactAt ?? 0.6, ref, missing };
 }

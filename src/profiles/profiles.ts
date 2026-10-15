@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
-import { AgentDoc, configure, defineTask, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { AgentDoc, configure, defineTask, type PromptSection, section, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { journaled } from "../journal.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { Owner } from "../memory/memory.ts";
@@ -248,4 +248,19 @@ export function profileFns(profiles: Profiles, host: () => Host, reply: ReplyTas
 			},
 		}),
 	];
+}
+
+/**
+ * The roster in every agent seat's prompt, so root and each profile see who owns what without a lookup. Root, its
+ * forks and the profiles render the same bytes.
+ */
+export function rosterSection(profiles: Profiles): PromptSection {
+	return section("profiles", async () => {
+		const lines = (await profiles.all()).map((profile) => `${profile.name}: ${profile.description}`);
+		if (lines.length === 0) return undefined;
+		return [
+			"Standing teammates. When a task is one of these roles, hand it over with tools.profile_send({ name, message }) instead of doing it yourself; background: true for long work. Its answer comes back here.",
+			...lines,
+		].join("\n");
+	});
 }
