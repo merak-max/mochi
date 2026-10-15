@@ -19,6 +19,10 @@ type Named = { readonly id: number; readonly kind: AgentKind; readonly label: st
 
 const firstLine = (text: string): string => (text.split("\n").find((line) => line.trim() !== "") ?? "").trim().slice(0, 120);
 
+// A script fork's stored brief starts with fork.ts's preamble paragraph; the caller's own brief follows it.
+const FORK_PREAMBLE = /^You are [^\n]*, a fork of this conversation[^\n]*\n\n/;
+const briefTitle = (brief: string): string => firstLine(brief.replace(FORK_PREAMBLE, ""));
+
 /** Kind, label, parent and title of every conversation, from records and documents only: no entry scans. */
 async function names(deps: RosterDeps, context: Context): Promise<Named[]> {
 	const { harness } = deps;
@@ -59,7 +63,7 @@ async function nameOf(
 		if (task?.kind === "mochi.agent") {
 			const input = task.input as { readonly name: string; readonly brief: string };
 			const kind = record.parent === undefined ? "agent" : "fork";
-			return { id, kind, label: `${kind}:${input.name}@${id}`, ...parent, title: firstLine(input.brief) };
+			return { id, kind, label: `${kind}:${input.name}@${id}`, ...parent, title: briefTitle(input.brief) };
 		}
 		return { id, kind: "conversation", label: `conversation:${id}`, ...parent };
 	}

@@ -21,12 +21,26 @@ The daemon takes the lock file `<home>/mochi.lock` at start and exits if another
 |---|---|
 | `mochi` on a terminal | The TUI. It attaches to the running daemon. Without one, this process becomes the daemon with every configured channel until the TUI exits. |
 | `mochi --headless` | The daemon alone. This is the systemd mode. |
-| `mochi chat` | Each stdin line goes to root and its answer prints. Without a daemon, this process becomes one with no channels and no triggers. |
-| `mochi -p <prompt>` | One prompt, then its reply. The same daemon rule as `chat`. |
+| `mochi attach <id\|label>` | The TUI on another conversation. It needs a running daemon. |
+| `mochi chat [--to <id\|label>]` | Each stdin line goes to root, or to the `--to` conversation, and its answer prints. Without a daemon, this process becomes one with no channels and no triggers. |
+| `mochi -p <prompt> [--to <id\|label>]` | One prompt, then its reply. The same daemon rule as `chat`. |
+| `mochi agents` | Every conversation: id, kind, label, parent, busy or idle, model, title. |
+| `mochi status` | The daemon's pid, uptime, protocol, build, channels, setup report, usage and live tasks. |
+| `mochi doctor` | Read-only checks of the home, config, lock, socket, protocol, systemd unit and log. It exits 1 when a check fails. |
+| `mochi models [search]` | The configured models and the config names that pick them. |
+| `mochi stop` | Stops the daemon. When systemd runs it, this runs `systemctl --user stop mochi`. Otherwise it sends SIGTERM and waits. |
+| `mochi export <id\|label> [out]` | A conversation's history as JSON lines, to stdout or to a new file. |
 | `mochi auth apps` | The OAuth login to the apps server. |
 | `mochi service install` | Writes `~/.config/systemd/user/mochi.service`. |
+| `mochi help [command]` | The commands, or one command's flags. |
 
-`--id <key>` makes a script's submissions replay-safe: line n becomes request `cli:<key>:<n>`, so a rerun after a crash prints the same answers without asking again. `--json` prints the root view as JSON lines.
+`agents`, `status`, `export` and `attach` never become a daemon. Without one they print "mochi is not running." and exit 1.
+
+A conversation's label is `main`, `line`, `profile:<name>`, `trigger:<id>`, `fork:<name>@<id>`, `agent:<name>@<id>`, `user:<user id>`, or else `conversation:<id>`. A number is always a conversation id. A label must match exactly.
+
+`--id <key>` makes a script's submissions replay-safe for any target: line n becomes request `cli:<key>:<n>`, so a rerun after a crash prints the same answers without asking again. `--json` prints the target's view as JSON lines.
+
+The socket speaks protocol 2. Each connection starts with `hello`. The daemon refuses another protocol with an error that says which side to restart. A line that is not a valid request gets one error frame, and only that connection closes.
 
 ## Conversations
 
