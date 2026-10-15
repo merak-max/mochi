@@ -146,13 +146,21 @@ export function parseClientMessage(raw: unknown): Parsed<ClientMessage> {
 }
 export const parseServerMessage = (raw: unknown): Parsed<ServerMessage> => check(ServerMessageSchema, raw, "mochi frame");
 
-/** Splits the stream into lines and parses each one. Never throws out of the socket listener: a bad line goes to `onBadLine`. */
-export function readLines(socket: Socket, onMessage: (message: unknown) => void, onBadLine: (problem: string) => void): void {
+/**
+ * Splits the stream into lines and parses each one. Never throws out of the socket listener: a bad line goes to
+ * `onBadLine`. Once `refused()` is true, the rest of the stream is dropped, buffered lines included.
+ */
+export function readLines(socket: Socket, onMessage: (message: unknown) => void, onBadLine: (problem: string) => void, refused: () => boolean = () => false): void {
 	let buffer = "";
 	socket.setEncoding("utf8");
 	socket.on("data", (chunk: string) => {
+		if (refused()) return;
 		buffer += chunk;
 		for (let newline = buffer.indexOf("\n"); newline >= 0; newline = buffer.indexOf("\n")) {
+			if (refused()) {
+				buffer = "";
+				return;
+			}
 			const line = buffer.slice(0, newline);
 			buffer = buffer.slice(newline + 1);
 			if (line.trim() === "") continue;

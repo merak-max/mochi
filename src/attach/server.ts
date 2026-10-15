@@ -129,6 +129,7 @@ export async function listenAttach(path: string, deps: AttachDeps, context: Cont
 		let view: ConversationWatch | undefined;
 		let tasks: TaskGraphWatch | undefined;
 		let greeted = false;
+		let refused = false;
 		const send = (message: ServerMessage) => writeLine(socket, message);
 		const show = async (id: ConversationId): Promise<void> => {
 			const found = await harness.conversation(id, context);
@@ -148,6 +149,7 @@ export async function listenAttach(path: string, deps: AttachDeps, context: Cont
 		// One error frame, then this connection closes. A reply carries the text too when the line had an id, so an
 		// older client that waits on that id shows it.
 		const refuse = (problem: string, id: unknown): void => {
+			refused = true;
 			log("attach.refused", { problem });
 			if (typeof id === "number") send({ t: "reply", id, ok: false, error: problem });
 			send({ t: "error", error: problem });
@@ -183,6 +185,7 @@ export async function listenAttach(path: string, deps: AttachDeps, context: Cont
 					.catch((error: unknown) => send({ t: "reply", id: message.id, ok: false, error: error instanceof Error ? error.message : String(error) }));
 			},
 			(problem) => refuse(problem, undefined),
+			() => refused,
 		);
 		socket.on("close", () => {
 			sockets.delete(socket);
