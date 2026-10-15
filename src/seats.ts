@@ -139,6 +139,9 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 /** The host default, for anything that reaches a conversation without a seat: the least capable one. */
 export const defaultSelection = (installed: (name: string) => Extension | undefined): Extension[] => selection("user").flatMap((name) => installed(name) ?? []);
 
+/** Root's extensions, set when the harness creates root; an existing root keeps its stored ones. */
+export const rootSelection = (installed: (name: string) => Extension | undefined): Extension[] => selection("agent").flatMap((name) => installed(name) ?? []);
+
 interface SeatChange {
 	readonly instructions?: string;
 	/** Absent: root's, read in the same commit. */

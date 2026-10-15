@@ -21,7 +21,7 @@ import { type Apps, appsFns } from "./apps/apps.ts";
 import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
-import { defaultSelection, seatExtensions } from "./seats.ts";
+import { defaultSelection, rootSelection, seatExtensions } from "./seats.ts";
 import { reactTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
 import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
@@ -151,7 +151,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		context,
 	);
 
-	const root = await harness.root(context, { agent: { model: options.brain, thinkingLevel: "medium" } });
+	const root = await harness.root(context, { agent: { model: options.brain, thinkingLevel: "medium", extensions: rootSelection((name) => registry.snapshot().extension(name)) } });
 	await root.configure({ model: options.brain, ...(options.instructions === undefined ? {} : { instructions: options.instructions }) }, context);
 	const turn = defineTurn({ root, harness, users, channels: options.channels, workDir: options.workDir, media, log });
 	if (options.scheduling === "daemon") registry.install(defineExtension({ name: "delivery", tasks: [turn] }));
