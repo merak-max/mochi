@@ -1,4 +1,5 @@
 import { broken, off, ready, type Setup } from "../setup.ts";
+import type { EffectName } from "./directives.ts";
 
 export type ChatChannelId = "imessage" | "whatsapp";
 /** `cli` is a view, not a line: attached terminals render replies from the transcript, and nothing is delivered to it. */
@@ -61,10 +62,22 @@ export type Inbound =
 export type InboundSink = (inbound: Inbound) => Promise<void>;
 
 export type Bubble =
-	| { readonly kind: "text"; readonly text: string }
+	/** `effect`: an iMessage send effect; other channels ignore it. */
+	| { readonly kind: "text"; readonly text: string; readonly effect?: EffectName }
 	/** A URL alone. iMessage renders a link card; other channels send the URL as text. */
 	| { readonly kind: "link"; readonly url: string }
-	| { readonly kind: "file"; readonly name: string; readonly mimeType: string; readonly bytes: Uint8Array };
+	/** `voice`: send audio as a voice message where the channel has one, else as a plain file. */
+	| { readonly kind: "file"; readonly name: string; readonly mimeType: string; readonly bytes: Uint8Array; readonly voice?: boolean };
+
+/** What the message tool asks of a channel beyond sending bubbles. A channel without `message` supports none of it. */
+export type MessageRequest =
+	| { readonly action: "sent" }
+	| { readonly action: "edit"; readonly messageId?: string; readonly text: string }
+	| { readonly action: "unsend"; readonly messageId?: string }
+	| { readonly action: "poll"; readonly title: string; readonly options: readonly string[] }
+	/** No fields: share mochi's own contact card. */
+	| { readonly action: "contact"; readonly name?: string; readonly phone?: string; readonly email?: string }
+	| { readonly action: "read" };
 
 export class DeliveryError extends Error {}
 /** The bubble never left: reconnecting, service unreachable, or the channel is not running in this process. Retry. */
@@ -88,6 +101,8 @@ export interface Channel {
 	send(bubble: Bubble, person?: string, options?: { readonly replyTo?: string }): Promise<void>;
 	typing(on: boolean, person?: string): Promise<void>;
 	react?(messageId: string, reaction: Reaction | "none"): Promise<void>;
+	/** Resolves to one line for the model. */
+	message?(request: MessageRequest): Promise<string>;
 }
 
 export type Channels = ReadonlyMap<ChatChannelId, Channel>;

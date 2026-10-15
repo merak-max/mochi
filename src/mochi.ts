@@ -30,6 +30,7 @@ import { fastBrowserFns } from "./browser/fast.ts";
 import type { MediaDeps } from "./media/client.ts";
 import { mediaFns } from "./media/media.ts";
 import { gifFns } from "./media/gif.ts";
+import { messageTool } from "./channels/message-tool.ts";
 import { defineProcWatch, PROC_POLL_MS, procFns } from "./procs/procs.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
 import { fastCompletion, handoffTool } from "./turn/lifecycle.ts";
@@ -111,6 +112,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...fastBrowserFns({ ...browserDeps(options.web), models: options.models, fast: options.fast, classify: options.classify }),
 		...mediaFns({ ...media, workDir: options.workDir }),
 		...gifFns(options.workDir),
+		messageTool(options.channels),
 		...thinkFns({ models: options.models, ref: options.profiles.model, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
 		...contextFns(options.workDir),

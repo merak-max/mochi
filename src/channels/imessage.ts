@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import type { Content } from "spectrum-ts";
+import type { Content, ContentInput } from "spectrum-ts";
+import type { EffectName } from "./directives.ts";
 import { log } from "../log.ts";
 import type { Setup } from "../setup.ts";
 import {
@@ -13,6 +14,7 @@ import {
 	DeliveryError,
 	type Env,
 	type Inbound,
+	type MessageRequest,
 	type ReplyTarget,
 	SendRejected,
 	SendUnknown,
@@ -25,12 +27,18 @@ const IMESSAGE_PROFILE: ChannelProfile = {
 	id: "imessage",
 	style:
 		"imessage: plain text. Each blank-line-separated paragraph is its own bubble, so write one to three short ones. " +
-		"A link alone on its line shows a link card. react sends a tapback.",
+		"A link alone on its line shows a link card. react sends a tapback. Lines: attach: <path> sends a file (work path or absolute under home). " +
+		"voice: <path> sends a voice note. effect: <slam|loud|gentle|invisible|confetti|fireworks|lasers|heart|balloons|echo|sparkles|spotlight> animates the reply. " +
+		"reply: <id> threads it. tools.message edits, unsends, polls.",
 	maxBubbles: 3,
 	maxBubbleChars: 400,
 	paragraphsAreBubbles: true,
 	typingMaxMs: 90_000,
 };
+
+const REMEMBERED_SENDS = 50;
+const SENT_LIST = 5;
+const SENT_PREVIEW_CHARS = 80;
 
 interface ReactionHandle {
 	unsend(): Promise<void>;
@@ -47,12 +55,29 @@ interface IMessageMessage {
 	read?(): Promise<void>;
 }
 
+/** A message mochi sent, as the SDK returns it: the handle to edit or unsend it later. */
+interface SentHandle {
+	readonly id: string;
+	edit(text: string): Promise<void>;
+	unsend(): Promise<void>;
+}
+
+type FileToSend = { readonly name: string; readonly mimeType: string; readonly bytes: Uint8Array };
+
+type ContactCard = { readonly name?: string; readonly phone?: string; readonly email?: string };
+
+/** Each send resolves to the sent message, a SentHandle, where the SDK returns one. `replyTo` threads; a missing target sends plain. */
 interface IMessageSpace {
 	send(text: string): Promise<unknown>;
 	/** A threaded reply to `targetMessageId`; a plain send when the target cannot be found. */
 	sendReply(text: string, targetMessageId: string): Promise<unknown>;
 	sendLink(url: string): Promise<unknown>;
-	sendFile(file: { readonly name: string; readonly mimeType: string; readonly bytes: Uint8Array }): Promise<unknown>;
+	sendFile(file: FileToSend, replyTo?: string): Promise<unknown>;
+	sendVoice?(file: FileToSend, replyTo?: string): Promise<unknown>;
+	sendEffect?(text: string, effect: EffectName, replyTo?: string): Promise<unknown>;
+	sendPoll?(title: string, options: readonly string[]): Promise<unknown>;
+	/** No card: share mochi's own contact card. */
+	sendContact?(card: ContactCard | undefined): Promise<unknown>;
 	startTyping(): Promise<void>;
 	stopTyping(): Promise<void>;
 	getMessage(id: string): Promise<IMessageMessage | undefined>;
@@ -133,6 +158,9 @@ async function collect(content: Content, into: Collected): Promise<void> {
 		case "group":
 			for (const item of content.items) await collect(item.content, into);
 			return;
+		case "poll_option":
+			into.text.push(`[poll "${content.poll.title}": ${content.selected ? "voted" : "took back a vote for"} "${content.option.title}"]`);
+			return;
 		default:
 			return;
 	}
@@ -188,24 +216,37 @@ function classifyIMessageError(error: unknown): DeliveryError {
 }
 
 async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
-	const { Spectrum, attachment, reply, richlink } = await import("spectrum-ts");
-	const { imessage } = await import("spectrum-ts/providers/imessage");
+	const { Spectrum, attachment, contact, poll, reply, richlink, voice } = await import("spectrum-ts");
+	const { effect, imessage, nativeContactCard } = await import("spectrum-ts/providers/imessage");
 	// @ts-expect-error spectrum-ts 12.10.1 provider types do not resolve under exactOptionalPropertyTypes; runtime accepts an empty config.
 	const app = await Spectrum({ ...credentials, providers: [imessage.config()] });
 	const platform = imessage(app);
-	const wrap = (space: Awaited<ReturnType<typeof platform.space.create>>): IMessageSpace => ({
+	const wrap = (space: Awaited<ReturnType<typeof platform.space.create>>): IMessageSpace => {
+		const sendThreaded = async (content: ContentInput, targetMessageId: string | undefined) => {
+			const target = targetMessageId === undefined ? undefined : await space.getMessage(targetMessageId).catch(() => undefined);
+			if (target === undefined) return space.send(content);
+			return space.send(reply(content, target));
+		};
+		return {
 		send: (text) => space.send(text),
-		sendReply: async (text, targetMessageId) => {
-			const target = await space.getMessage(targetMessageId).catch(() => undefined);
-			if (target === undefined) return space.send(text);
-			return space.send(reply(text, target));
-		},
+		sendReply: (text, targetMessageId) => sendThreaded(text, targetMessageId),
 		sendLink: (url) => space.send(richlink(url)),
-		sendFile: (file) => space.send(attachment(Buffer.from(file.bytes), { name: file.name, mimeType: file.mimeType })),
+		sendFile: (file, replyTo) => sendThreaded(attachment(Buffer.from(file.bytes), { name: file.name, mimeType: file.mimeType }), replyTo),
+		sendVoice: (file, replyTo) => sendThreaded(voice(Buffer.from(file.bytes), { name: file.name, mimeType: file.mimeType }), replyTo),
+		sendEffect: (text, name, replyTo) => sendThreaded(effect(text, imessage.effect.message[name]), replyTo),
+		sendPoll: (title, options) => space.send(poll(title, [...options])),
+		sendContact: (card) => {
+			if (card === undefined) return space.send(nativeContactCard());
+			const name = card.name === undefined ? {} : { name: { formatted: card.name } };
+			const phones = card.phone === undefined ? {} : { phones: [{ value: card.phone }] };
+			const emails = card.email === undefined ? {} : { emails: [{ value: card.email }] };
+			return space.send(contact({ ...name, ...phones, ...emails }));
+		},
 		startTyping: () => space.startTyping(),
 		stopTyping: () => space.stopTyping(),
 		getMessage: (id) => space.getMessage(id) as Promise<IMessageMessage | undefined>,
-	});
+		};
+	};
 	return {
 		messages: (async function* () {
 			for await (const [space, message] of app.messages) yield [wrap(space as Parameters<typeof wrap>[0]), message as unknown as IMessageMessage] as const;
@@ -213,6 +254,14 @@ async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
 		dm: async (handle) => wrap(await platform.space.create(handle)),
 		stop: () => app.stop(),
 	};
+}
+
+type SentEntry = { readonly handle: SentHandle; readonly kind: "text" | "link" | "file" | "poll"; readonly text: string; readonly person: string };
+
+function isSentHandle(value: unknown): value is SentHandle {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as Partial<SentHandle>;
+	return typeof candidate.id === "string" && typeof candidate.edit === "function" && typeof candidate.unsend === "function";
 }
 
 /** `users`: normalized handles of the users who may write besides the owner. */
@@ -228,10 +277,27 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 	const spaces = new Map<string, IMessageSpace>();
 	const recent = new Map<string, IMessageMessage>();
 	const reactions = new Map<string, ReactionHandle>();
+	const sent = new Map<string, SentEntry>();
+	let lastInbound: IMessageMessage | undefined;
 
 	function remember(message: IMessageMessage): void {
 		recent.set(message.id, message);
 		if (recent.size > REMEMBERED_MESSAGES) recent.delete(recent.keys().next().value!);
+	}
+
+	function rememberSent(result: unknown, kind: SentEntry["kind"], text: string, person: string): void {
+		if (!isSentHandle(result)) return;
+		sent.set(result.id, { handle: result, kind, text, person });
+		if (sent.size > REMEMBERED_SENDS) sent.delete(sent.keys().next().value!);
+	}
+
+	function sentTarget(messageId: string | undefined, kind?: SentEntry["kind"]): { id: string; entry: SentEntry } {
+		const id = messageId ?? [...sent.entries()].findLast(([, entry]) => entry.person === owner && (kind === undefined || entry.kind === kind))?.[0];
+		const entry = id === undefined ? undefined : sent.get(id);
+		if (id === undefined || entry === undefined) {
+			throw new Error(messageId === undefined ? "mochi has sent nothing on iMessage since it started." : `No message ${messageId} that mochi sent since it started. Use action sent to list them.`);
+		}
+		return { id, entry };
 	}
 
 	async function space(person = owner): Promise<IMessageSpace> {
@@ -242,6 +308,49 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 			spaces.set(person, found);
 		}
 		return found;
+	}
+
+	async function runMessage(request: MessageRequest): Promise<string> {
+		switch (request.action) {
+			case "sent": {
+				const mine = [...sent.entries()].filter(([, entry]) => entry.person === owner).slice(-SENT_LIST);
+				if (mine.length === 0) return "mochi has sent nothing on iMessage since it started.";
+				return mine.map(([id, entry]) => `${id}: ${entry.text.slice(0, SENT_PREVIEW_CHARS)}`).join("\n");
+			}
+			case "edit": {
+				const target = sentTarget(request.messageId, "text");
+				if (target.entry.kind !== "text") throw new Error(`iMessage can edit only text, and ${target.id} is a ${target.entry.kind}.`);
+				await target.entry.handle.edit(request.text);
+				sent.set(target.id, { ...target.entry, text: request.text });
+				return `Edited ${target.id}.`;
+			}
+			case "unsend": {
+				const target = sentTarget(request.messageId);
+				if (target.entry.kind === "poll") throw new Error("iMessage polls cannot be unsent.");
+				await target.entry.handle.unsend();
+				sent.delete(target.id);
+				return `Unsent ${target.id}.`;
+			}
+			case "poll": {
+				const to = await space();
+				if (to.sendPoll === undefined) throw new Error("This iMessage connection cannot send polls.");
+				rememberSent(await to.sendPoll(request.title, request.options), "poll", `[poll ${request.title}]`, owner);
+				return `Sent the poll "${request.title}". Votes arrive as owner messages.`;
+			}
+			case "contact": {
+				const to = await space();
+				if (to.sendContact === undefined) throw new Error("This iMessage connection cannot send contact cards.");
+				const { action: _action, ...card } = request;
+				const mine = card.name === undefined && card.phone === undefined && card.email === undefined;
+				await to.sendContact(mine ? undefined : card);
+				return mine ? "Shared mochi's own contact card." : "Sent the contact card.";
+			}
+			case "read": {
+				if (lastInbound?.read === undefined) throw new Error("The owner has not written on iMessage since mochi started.");
+				await lastInbound.read();
+				return "Marked the owner's chat read.";
+			}
+		}
 	}
 
 	return {
@@ -259,6 +368,7 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 					}
 					spaces.set(parsed.message.person ?? owner, from);
 					remember(message);
+					if (parsed.message.person === undefined && message.read !== undefined) lastInbound = message;
 					if (parsed.message.kind === "message") message.read?.().catch(() => {});
 					await sink(parsed.message);
 				} catch (error) {
@@ -309,20 +419,35 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 		},
 
 		async send(bubble, person, options) {
+			const to = person ?? owner;
 			try {
 				const target = await space(person);
 				if (bubble.kind === "text") {
 					const chunks = chunkText(bubble.text, TEXT_LIMIT);
 					for (let index = 0; index < chunks.length; index++) {
+						const chunk = chunks[index]!;
 						const replyTo = index === 0 ? options?.replyTo : undefined;
-						if (replyTo === undefined) await target.send(chunks[index]!);
-						else await target.sendReply(chunks[index]!, replyTo);
+						const effect = index === 0 ? bubble.effect : undefined;
+						let result: unknown;
+						if (effect !== undefined && target.sendEffect !== undefined) result = await target.sendEffect(chunk, effect, replyTo);
+						else if (replyTo === undefined) result = await target.send(chunk);
+						else result = await target.sendReply(chunk, replyTo);
+						rememberSent(result, "text", chunk, to);
 					}
-				} else if (bubble.kind === "link") await target.sendLink(bubble.url);
-				else await target.sendFile(bubble);
+				} else if (bubble.kind === "link") {
+					rememberSent(await target.sendLink(bubble.url), "link", bubble.url, to);
+				} else if (bubble.voice === true && bubble.mimeType.startsWith("audio/") && target.sendVoice !== undefined) {
+					rememberSent(await target.sendVoice(bubble, options?.replyTo), "file", `[voice ${bubble.name}]`, to);
+				} else {
+					rememberSent(await target.sendFile(bubble, options?.replyTo), "file", `[file ${bubble.name}]`, to);
+				}
 			} catch (error) {
 				throw classifyIMessageError(error);
 			}
+		},
+
+		async message(request) {
+			return runMessage(request);
 		},
 
 		async typing(on, person) {

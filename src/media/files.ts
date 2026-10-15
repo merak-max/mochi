@@ -43,17 +43,6 @@ export async function saveOutput(workDir: string, extension: string, bytes: Uint
 	return { path: out.path };
 }
 
-export function splitAttachments(text: string): { text: string; attachments: string[] } {
-	const attachments: string[] = [];
-	const kept: string[] = [];
-	for (const line of text.split(/\r?\n/)) {
-		const match = /^[ \t]*attach:[ \t]+(.+?)[ \t]*$/.exec(line);
-		if (match?.[1]) attachments.push(match[1]);
-		else kept.push(line);
-	}
-	return { text: kept.join("\n"), attachments };
-}
-
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 
 /**

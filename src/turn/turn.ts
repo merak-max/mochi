@@ -43,8 +43,9 @@ import type { Log } from "../log.ts";
 import { formatStamp, messageText } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { MediaDeps } from "../media/client.ts";
-import { loadOutgoing, splitAttachments } from "../media/files.ts";
+import { loadOutgoing } from "../media/files.ts";
 import { prepareInbound } from "../media/inbound.ts";
+import { splitDirectives, withEffect } from "../channels/directives.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
 
 // A Turn is a background task of the ownerless line conversation, so neither Esc nor /stop on root reaches it.
@@ -331,7 +332,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 				else if (answer.kind === "input") text = task.input.text;
 				else await runtime.commit(async (tx) => void (text = await answerText(tx, answer.entry)), context);
 				const finished = task.input.source === "run" ? running({ phase: "record" }) : completed("sent");
-				const outgoing = splitAttachments(text);
+				const outgoing = splitDirectives(text);
 				let retried = false;
 				for (;;) {
 					const channel = channels.get(id);
@@ -339,8 +340,8 @@ export function defineTurn(host: TurnHost): TurnTask {
 					if (channel !== undefined) {
 						// Attachment bubbles are placeholders until their turn to send, so a file read never shifts `sent` indexes.
 						const bubbles: Bubble[] = [
-							...present(outgoing.text, channel.profile),
-							...outgoing.attachments.map((path) => ({ kind: "file" as const, name: path, mimeType: "application/octet-stream", bytes: new Uint8Array() })),
+							...withEffect(present(outgoing.text, channel.profile), outgoing.effect),
+							...outgoing.files.map((file) => ({ kind: "file" as const, name: file.path, mimeType: "application/octet-stream", bytes: new Uint8Array(), voice: file.voice })),
 						];
 						if (bubbles.length === 0) return runtime.commit(() => completed("silent"), context);
 						if (sent >= bubbles.length) return runtime.commit(() => finished, context);
@@ -355,13 +356,14 @@ export function defineTurn(host: TurnHost): TurnTask {
 						let outgoingBubble = bubble;
 						if (bubble.kind === "file") {
 							try {
-								outgoingBubble = await loadOutgoing(bubble.name, workDir);
+								outgoingBubble = { ...(await loadOutgoing(bubble.name, workDir)), voice: bubble.voice === true };
 							} catch (error) {
 								throw new SendRejected(`The attachment ${bubble.name} could not be sent: ${error instanceof Error ? error.message : String(error)}`);
 							}
 						}
-						const threadOn = task.input.source === "chat" ? task.input.threadOn : undefined;
-						if (sent === 0 && outgoingBubble.kind === "text" && threadOn !== undefined) await channel.send(outgoingBubble, person, { replyTo: threadOn });
+						const chatThread = task.input.source === "chat" && outgoingBubble.kind === "text" ? task.input.threadOn : undefined;
+						const threadOn = outgoing.replyTo ?? chatThread;
+						if (sent === 0 && threadOn !== undefined) await channel.send(outgoingBubble, person, { replyTo: threadOn });
 						else await channel.send(outgoingBubble, person);
 					} catch (error) {
 						if (!(error instanceof DeliveryError)) {

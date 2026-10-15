@@ -34,7 +34,7 @@ export function mediaFns(deps: MediaDeps): ToolRegistration[] {
 		}),
 		defineTool({
 			name: "speak",
-			description: "Speak text with the configured voice model. voice overrides the configured voice name. Save AAC in M4A. Return a work-relative path; send it with a standalone attach: <path> line.",
+			description: "Speak text with the configured voice model. voice overrides the configured voice name. Save AAC in M4A. Return a work-relative path; send it with a standalone voice: <path> line as a voice note, or attach: <path> as a file.",
 			parameters: Type.Object({ text: Type.String({ minLength: 1, maxLength: 2000 }), voice: Type.Optional(Type.String({ pattern: "^[a-z]+$" })) }),
 			structuredOutputSchema: PathResult,
 			replay: "unsafe",

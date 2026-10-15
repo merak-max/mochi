@@ -27,7 +27,7 @@ const SEND_TIMEOUT_MS = 30_000;
 
 const WHATSAPP_PROFILE: ChannelProfile = {
 	id: "whatsapp",
-	style: "whatsapp: plain text with *bold* and _italic_, no tables, one message per reply, up to 4,096 characters. react sets an emoji reaction.",
+	style: "whatsapp: plain text with *bold* and _italic_, no tables, one message per reply, up to 4,096 characters. react sets an emoji reaction. attach: and voice: (OGG) lines work.",
 	maxBubbles: 3,
 	maxBubbleChars: TEXT_LIMIT,
 	paragraphsAreBubbles: false,
@@ -202,7 +202,10 @@ function whatsAppChannel(config: WhatsAppConfig): Channel {
 		const id = typeof uploaded === "object" && uploaded !== null && "id" in uploaded ? String(uploaded.id) : undefined;
 		if (id === undefined) throw new SendUnknown("WhatsApp media upload returned no id");
 		const kind = attachmentKind(file.mimeType);
-		await postMessage(kind === "file" ? { type: "document", document: { id, filename: file.name } } : { type: kind, [kind]: { id } });
+		if (kind === "file") return void (await postMessage({ type: "document", document: { id, filename: file.name } }));
+		// WhatsApp plays only OGG/Opus as a voice note; any other audio goes as a plain audio file.
+		const voice = kind === "audio" && file.voice === true && file.mimeType === "audio/ogg";
+		await postMessage({ type: kind, [kind]: voice ? { id, voice: true } : { id } });
 	}
 
 	async function download(ref: MediaRef): Promise<Attachment> {

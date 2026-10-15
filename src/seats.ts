@@ -78,6 +78,7 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	gif_search: { seats: ALL, inline: false },
 	gif_save: { seats: ALL, inline: false },
 	transcribe: { seats: ALL, inline: false },
+	message: { seats: AGENT, inline: false },
 	proc_start: { seats: AGENT_TRIGGER, inline: false },
 	proc_status: { seats: AGENT_TRIGGER, inline: false },
 	proc_logs: { seats: AGENT_TRIGGER, inline: false },
