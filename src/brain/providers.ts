@@ -97,7 +97,7 @@ function defaultModels(providers: Record<string, ProviderConfig>): Required<Pick
 	return { brain: `${name}/gpt-6-sol`, fast: `${name}/gpt-6-luna` };
 }
 
-/** A model the catalog does not know: this much context, until `[models.overrides]` says otherwise. */
+/** The most context any model gets, until `[models.overrides]` says otherwise. Past this, compaction runs. */
 const CONTEXT_WINDOW = 200_000;
 
 /** pi-ai's classifier catalog entry for an id served by any System One provider, for its prices and limits. */
@@ -142,7 +142,7 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 		id,
 		provider,
 		baseUrl: url,
-		contextWindow: override.contextWindow ?? base.contextWindow,
+		contextWindow: override.contextWindow ?? Math.min(base.contextWindow, CONTEXT_WINDOW),
 		...(override.cost === undefined ? {} : { cost: override.cost }),
 		...(override.maxTokens === undefined ? {} : { maxTokens: override.maxTokens }),
 		promptCache: override.promptCache ?? base.promptCache ?? (wire === "anthropic-messages" ? { short: 300, long: 3600 } : undefined),

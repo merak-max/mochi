@@ -130,6 +130,12 @@ export async function ownerIn(tx: Tx, conversation: ConversationId): Promise<Own
 	return profile === null ? "root" : { profile };
 }
 
+/** A fork works as its parent's profile, so its notes merge into the same memory log and its messages carry the same sender. */
+export async function inheritProfile(tx: Tx, parent: ConversationId, child: ConversationId): Promise<void> {
+	const { profile } = await tx.doc(ProfileOfDoc, String(parent), null);
+	if (profile !== null) (await tx.doc(ProfileOfDoc, String(child), null)).profile = profile;
+}
+
 /** Writes a run's profile, model, instructions and tool list into a conversation; no list clears an old one. */
 export async function applyAgent(tx: Tx, conversation: ConversationId, run: RunAgent): Promise<void> {
 	await configure(tx, conversation, { ...run.agent, instructions: run.instructions });

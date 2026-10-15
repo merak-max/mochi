@@ -1,14 +1,14 @@
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineDoc, defineTask, defineTool, type Harness, ROOT_CONVERSATION_ID, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
-import { startFork } from "../fork/fork.ts";
+import { startFresh } from "../fork/fork.ts";
 import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
-import { forkPoint } from "../seats.ts";
 
 // The board: what mochi and its profiles owe, so nothing promised is forgotten. One session document in root's home.
-// The sweep reads it in code each minute and wakes a model only for a task whose due time has passed: it forks root
-// with the task as the brief, once per due time.
+// The sweep reads it in code each minute and wakes a model only for a task whose due time has passed: it starts a
+// fresh root-seat conversation with the task as the brief, once per due time. A fork would copy root's whole chat,
+// and an idle root's prompt cache has expired by then, so every wake would pay to write it again.
 
 const STATUSES = ["open", "waiting", "done", "dropped"] as const;
 type Status = (typeof STATUSES)[number];
@@ -248,11 +248,10 @@ export function defineSweep(deps: { readonly harness: () => Harness; readonly ev
 						continue;
 					}
 					const { id, created } = await harness.commit(async (tx) => {
-						const at = await forkPoint(tx, ROOT_CONVERSATION_ID);
 						const board = await tx.doc(BoardDoc);
 						const current = board.tasks[String(item.id)];
 						const wake = item.nudged === item.due ? (item.wakes ?? 1) + 1 : 1;
-						const woken = await journaled(tx, task.id, `board:${item.id}:${item.due}:${wake}`, () => startFork(tx, ROOT_CONVERSATION_ID, at, { name: `board-${item.id}`, brief: boardBrief(item) }), 64);
+						const woken = await journaled(tx, task.id, `board:${item.id}:${item.due}:${wake}`, () => startFresh(tx, { name: `board-${item.id}`, brief: boardBrief(item) }), 64);
 						if (current !== undefined && item.due !== undefined && current.due === item.due) {
 							current.nudged = item.due;
 							current.nudgedAt = now;

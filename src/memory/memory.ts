@@ -236,7 +236,7 @@ export function noteTool(index: SearchIndex, ownerOf: OwnerOf) {
 		name: "note",
 		description:
 			"Keep one line in memory for good: a fact about the owner, their people or projects, a preference, a standing rule, a decision, " +
-			"or an event of lasting effect. It shows in the memory section of every prompt from the next request. Do not repeat what memory already holds.",
+			"or an event of lasting effect. New conversations see it in the memory section; this one sees it from the next compaction. Do not repeat what memory already holds.",
 		parameters: Type.Object({ line: Type.String({ minLength: 1 }) }),
 		replay: "safe",
 		execute: async ({ line }, api, context) => {
@@ -341,13 +341,20 @@ async function renderMemory(read: MemoryReader, owner: Owner, context: Context):
 }
 
 /**
- * The memory section: the wake view of the memory log. It always renders, so the section set never changes. The
- * extension keeps the name the stored conversations already select.
+ * The memory section: the wake view of the memory log. It always renders, so the section set never changes. Once shown,
+ * it stays as shown until a compaction or reset drops it: a fresh copy after each note would add the whole section to
+ * the transcript again. The extension keeps the name the stored conversations already select.
  */
 export function memoryExtension(ownerOf: (read: DocumentReader, conversation: ConversationId, context: Context) => Promise<Owner>): Extension {
 	return defineExtension({
 		name: "notes",
-		sections: [section("memory", async (input, context) => renderMemory(input.read, await ownerOf(input.read, input.conversationId, context), context))],
+		sections: [
+			section("memory", async (input, context) => {
+				const shown = input.shown.memory;
+				if (shown !== undefined) return shown.slice("<memory>\n".length, -"\n</memory>".length);
+				return renderMemory(input.read, await ownerOf(input.read, input.conversationId, context), context);
+			}),
+		],
 	});
 }
 
