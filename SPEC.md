@@ -77,17 +77,18 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 - `notify`: sends text verbatim to the owner, or to a trigger's recipients. Refused in root, whose reply already reaches the owner.
 - `handoff`: starts a fresh context from a note.
 
-`LIBRARY` in `src/seats.ts` lists every script function and the seats that get it. Opening mochi fails when `SURFACE`, `LIBRARY` and the definitions disagree. A profile's `tools` list narrows its conversations further through pi-durable's stored `tools` filter.
+`LIBRARY` in `src/seats.ts` lists every script function and the seats that get it. Opening mochi fails when `SURFACE`, `LIBRARY` and the definitions disagree. A profile's `tools` list narrows its conversations further through pi-durable's stored `tools` filter. A narrowed list always keeps `context_read` and `context_list`, so a profile can read its own held input.
 
 | Area | Functions |
 |---|---|
 | Files and shell | `bash`, `read`, `edit`, `write` (the daemon user's full access; bash defaults to a 600 s timeout) |
 | Memory | `note`, `recall`, `zoom`, `history` |
 | Models | `llm` (the fast model, no tools), `classify` (the classifier model) |
+| Context | `context_read`, `context_put`, `context_list` |
 | Web | `web_search`, `web_fetch`, `web_map`, `web_find_tools`, `web_alexandria`, `browse`, `browse_fast` |
 | Apps | `apps_search`, `apps_call`, `apps_skills` |
 | Media | `image_gen`, `video_gen`, `speak`, `transcribe`, `gif_search`, `gif_save` |
-| Forks and profiles | `fork`, `fork_start`, `profile_list`, `profile_send`, `profile_update` |
+| Forks and profiles | `fork`, `fork_start`, `agent`, `profile_list`, `profile_send`, `profile_update` |
 | Triggers | `trigger_add`, `trigger_list`, `trigger_remove` |
 | Board | `board_add`, `board_list`, `board_update`, `board_claim` |
 | Processes | `proc_start`, `proc_status`, `proc_logs`, `proc_stop` |
@@ -105,7 +106,8 @@ Sections render in this order, and each must be stable between requests so the p
 3. `memory`: the wake view of the conversation owner's memory log. A user thread does not have it.
 4. `skills-index`: one line per bundled skill. The model opens a skill with `read`.
 5. `codemode`: the inline library functions. `searchTools()` finds the deferred ones.
-6. `instructions`: root's `<home>/instructions.md`, or a profile's or trigger's instructions.
+6. `context`: the context keys and `store()` keys the conversation holds, with their sizes. It is empty until a value exists.
+7. `instructions`: root's `<home>/instructions.md`, or a profile's or trigger's instructions.
 
 A changed section reaches the next request as a mid-conversation system message that carries only the change, so a `note` does not break the cache.
 
@@ -124,9 +126,27 @@ The feed (`src/memory/feed.ts`) subscribes to commits. After each commit it inde
 
 The retired `mochi.memory` note document imports into root's memory log once, at open, when the log is empty.
 
+## Context
+
+Long input is a value, not prompt text. `holdText` in `src/context.ts` is the one owner of inbound text. Text up to 8,192 chars (`INLINE_MAX`) reaches the model as it is. Longer text goes to `<work>/context/<sha256>.txt`, written to a temp name and then renamed. The conversation's `mochi.context` catalog maps a key to the file, its size and its line count. The model sees a header with the key, the first 1,500 chars and the last 500. The threshold is a reading budget; nothing is dropped.
+
+- Keys are immutable and name their source: `in:<request id>` for inbound text, `put:<task id>` for a script's `context_put`. The same key with other text throws.
+- The same key and text give the same file and the same header, so a replay submits identical content and its request id dedupes it.
+- Held inputs: chat and cli messages, trigger check output, webhook bodies, A2A text, profile messages and replies, fork answers that merge back, proc wakes and child briefs.
+- `context_read({ key, offset?, length? })` returns one page (64K chars by default) and the offset of the next. `context_put({ text })` keeps a script's value and returns its key and file path. `context_list` lists the catalog.
+- The catalog forks `asOf`, like the codemode store. Compaction does not touch it, and the `context` section lists its keys after compaction.
+
 ## Forks
 
-`fork({ briefs: [{ name, brief }] })` forks the calling conversation at its newest entry once per brief, six at a time (`FORK_BATCH`), and resolves to the answers in brief order. A fork keeps its parent's agent, history and codemode store, so its first request reads the parent's prompt cache. `fork_start` is the background form: it returns the names at once, and a fork calls `notify` if the owner needs its result. Each fork's brief names its own scratch directory, `<work>/forks/<name>`, and tells it to do code work in a git worktree of its own. The fork task kind is `mochi.agent`.
+Two kinds of child exist. Each is a `mochi.agent` task that owns one conversation.
+
+`fork({ briefs: [{ name, brief }] })` forks the calling conversation at its newest entry once per brief, six at a time (`FORK_BATCH`), and resolves to the answers in brief order. A fork keeps its parent's agent, history, codemode store and context catalog, so its first request reads the parent's prompt cache. `fork_start` is the background form: it returns the names at once, and each answer merges back into the caller as a new message.
+
+`agent({ jobs: [{ name, brief, context?, model? }] })` starts fresh children, six at a time, and resolves to `[{ name, answer }]` in job order. A fresh child has the caller's agent (seat, tools, instructions, profile) and no history. `model` is `brain`, `fast` or `strongest`; an unknown or unconfigured model throws before any child exists. `context` names the caller's context keys to copy into the child. Use `agent` for a sub-task over one slice of data that needs tools, `fork` when the child needs this conversation, and `llm` for one completion without tools. The board wakes root's due tasks through the same fresh creator.
+
+Depth is durable. Root and standing conversations are depth 0. Each child records its caller's depth plus one in its task input, read before the creating commit's first write. A `fork` or `agent` call from depth 3 (`MAX_DEPTH`) throws "Children are 3 deep here. Do this slice yourself."
+
+Each brief names its own scratch directory, `<work>/forks/<name>`, and tells the child to do code work in a git worktree of its own.
 
 ## Profiles
 
@@ -188,7 +208,8 @@ src/
   brain/            providers and models, the classifier, identity section, llm and classify
   memory/           tree.ts (cover, pending), memory.ts (logs, tools, sections, the window hook), feed.ts
   index/fts.ts      FTS5 over memory lines and chat text
-  fork/fork.ts      the fork task and fork, fork_start
+  context.ts        held text: files, the catalog, holdText, context_* tools and the context section
+  fork/fork.ts      the child task, fork, fork_start, agent and depth
   profiles/         profiles on disk, standing conversations, profile_* tools, memory owner
   triggers/         cron parser, trigger task, steps, seeds, webhooks
   board/board.ts    the board, claims, the sweep
@@ -211,7 +232,7 @@ src/
 | No approvals, guard hooks or tool sandbox. | The owner trusts the model on their own machine. A prompt injection in a page or a mail can reach the daemon user's files and keys; that is the accepted cost. |
 | Three model tools; everything else is a script function. | The first request stays small, and a script fans out work and filters data before the model reads it. |
 | Triggers run in their own conversations and reach people only by `notify`. | Root's transcript and cache stay clean, and silence is the default for periodic checks. |
-| Forks over fresh subagents. | A fork reuses the parent's prompt cache and knows the context. Measured live on Opus 5.5: each fork's first request read about 6,500 cached tokens and wrote about 225. |
+| Forks by default; fresh agents only for a slice of data. | A fork reuses the parent's prompt cache and knows the context. Measured live on Opus 5.5: each fork's first request read about 6,500 cached tokens and wrote about 225. A fresh `agent` pays its own prompt, so it is for bulk work on a cheaper model over context it is given. |
 | Profiles live in the one daemon, not one service each. | One process, one store, one schedule; a profile still has its own role, model, tools and memory. |
 | OptMem memory and window instead of rewrite-on-compaction. | Rewriting the whole prefix on every compaction lost detail each pass, and promises died at compaction. A tree builds each summary once and keeps every raw line reachable. |
 | The board holds promises, not one-shot triggers. | Of 23 commitments root made from Oct 6 to 14, 10 had nothing behind them. |
