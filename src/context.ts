@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
@@ -51,7 +51,10 @@ const digestOf = (text: string): string => createHash("sha256").update(text).dig
 const linesOf = (text: string): number => text.split("\n").length;
 const count = (value: number): string => value.toLocaleString("en-US");
 
-/** Writes the file once: a temp name then a rename, so a crash never leaves half a file under the final name. */
+/**
+ * Writes the file once: a temp name then a rename, so a crash never leaves half a file under the final name. The file
+ * and the directory are synced before the catalog commit names the file.
+ */
 async function writeBody(workDir: string, text: string): Promise<{ digest: string; path: string }> {
 	const digest = digestOf(text);
 	const path = join("context", `${digest}.txt`);
@@ -59,8 +62,20 @@ async function writeBody(workDir: string, text: string): Promise<{ digest: strin
 	if (existsSync(full)) return { digest, path };
 	await mkdir(join(workDir, "context"), { recursive: true });
 	const temp = `${full}.${randomUUID()}.tmp`;
-	await writeFile(temp, text);
+	const file = await open(temp, "w");
+	try {
+		await file.writeFile(text);
+		await file.sync();
+	} finally {
+		await file.close();
+	}
 	await rename(temp, full);
+	const dir = await open(join(workDir, "context"), "r");
+	try {
+		await dir.sync();
+	} finally {
+		await dir.close();
+	}
 	return { digest, path };
 }
 
