@@ -10,11 +10,14 @@ import {
 	type ToolRenderers,
 	truncateToVisualLines,
 } from "@earendil-works/pi-coding-agent";
-import { type Component, Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Box, type Component, Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
 const CODE_LINES = 10;
 const OUTPUT_LINES = 5;
 const ARGS_CHARS = 100;
+const PREVIEW_CHARS = 60;
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const NOTHING: Component = { render: () => [], invalidate() {} };
 
 type Renderers = Pick<ToolRenderers, "renderShell" | "renderCall" | "renderResult">;
 
@@ -26,7 +29,71 @@ export function toolRenderers(cwd: string): (name: string) => Renderers {
 		}),
 	);
 	const own: Record<string, Renderers> = { ...pi, codemode: codeRenderers };
-	return (name) => own[name] ?? compactRenderers(name);
+	return (name) => collapsible(name, own[name] ?? compactRenderers(name));
+}
+
+type LineState = { outputLines?: number; firstLine?: string | undefined };
+
+function collapsible(name: string, full: Renderers): Renderers {
+	return {
+		renderShell: "self",
+		renderCall(args, theme, context) {
+			if (context.expanded) return padded(full.renderCall?.(args, theme, { ...context, lastComponent: undefined }));
+			return toolLine(name, args, theme, context);
+		},
+		renderResult(result, options, theme, context) {
+			const text = resultText(result).replace(/^Script (completed|failed)\nWall time [^\n]*\nOutput:\n\n?/, "");
+			const state = context.state as LineState;
+			state.outputLines = text === "" ? 0 : text.split("\n").length;
+			state.firstLine = text.split("\n").find((line) => line.trim() !== "")?.trim();
+			if (options.expanded) return padded(full.renderResult?.(result, options, theme, { ...context, lastComponent: undefined }));
+			return NOTHING;
+		},
+	};
+}
+
+function padded(component: Component | undefined): Component {
+	if (component === undefined) return NOTHING;
+	const box = new Box(1, 0);
+	box.addChild(component);
+	return box;
+}
+
+function toolLine(name: string, args: unknown, theme: Theme, context: Parameters<NonNullable<Renderers["renderCall"]>>[2]): Component {
+	const state = context.state as LineState;
+	return {
+		render(width) {
+			const dot = theme.fg("dim", " · ");
+			let marker = theme.fg("dim", "◇");
+			if (context.executionStarted) marker = theme.fg("accent", SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]!);
+			if (!context.isPartial) marker = theme.fg("success", "✓");
+			if (context.isError) marker = theme.fg("error", "✗");
+			let line = ` ${marker} ${theme.fg("muted", name)}`;
+			const shown = firstLine(args);
+			if (shown !== "") line += dot + theme.fg("dim", truncateToWidth(shown, PREVIEW_CHARS, "…"));
+			if (context.isPartial && context.executionStarted) line += dot + theme.fg("dim", "running");
+			if (!context.isPartial && context.isError && state.firstLine !== undefined) line += dot + theme.fg("error", state.firstLine);
+			if (!context.isPartial && !context.isError && (state.outputLines ?? 0) > 0) line += dot + theme.fg("dim", `↓ ${state.outputLines} lines`);
+			if (context.durationMs !== undefined) line += dot + theme.fg("dim", formatDuration(context.durationMs));
+			return [truncateToWidth(line, width, "…")];
+		},
+		invalidate() {},
+	};
+}
+
+function firstLine(args: unknown): string {
+	if (args === null || typeof args !== "object") return "";
+	const record = args as Record<string, unknown>;
+	const source = record.code ?? record.command ?? record.path;
+	if (typeof source !== "string") return summarize(args);
+	const meaningful = source.split("\n").map((line) => line.trim()).find((line) => line !== "" && !line.startsWith("//"));
+	return meaningful ?? "";
+}
+
+function formatDuration(ms: number): string {
+	if (ms < 1000) return `${Math.round(ms)}ms`;
+	if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+	return `${Math.floor(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`;
 }
 
 function preview(text: string, max: number, expanded: boolean, theme: Theme): Component {
