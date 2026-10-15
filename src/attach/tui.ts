@@ -90,11 +90,11 @@ class UserBlock implements Component {
 	}
 
 	render(width: number): string[] {
-		const lines = this.#message.render(width).map((line) => line + theme.bg("userMessageBg", " ".repeat(Math.max(0, width - visibleWidth(line)))));
-		if (this.#meta === undefined || lines.length === 0) return lines;
-		const meta = this.#meta;
-		lines[0] = theme.bg("userMessageBg", spread("", theme.fg("dim", meta), width));
-		return lines;
+		const fill = (line: string) => theme.bg("userMessageBg", line + " ".repeat(Math.max(0, width - visibleWidth(line))));
+		// The component pads itself with blank rows; drop them so the block is exactly meta, body, one padding row.
+		const body = this.#message.render(width).filter((line) => line.replace(/\x1b\][^\x07]*\x07/g, "").replace(/\x1b\[[0-9;]*m/g, "").trim() !== "");
+		const top = this.#meta === undefined ? "" : spread("", theme.fg("dim", this.#meta), width);
+		return [fill(top), ...body.map(fill), fill("")];
 	}
 
 	invalidate(): void {
@@ -330,7 +330,7 @@ class MochiTui {
 		const width = this.ui.terminal.columns;
 		this.#topBar.setText(centered(`${theme.fg("text", label)}  ${dim("$" + usage.cost.toFixed(2))}`, width));
 		const mode = this.#expanded ? "Expanded mode (Ctrl+O to collapse)" : "Collapsed mode (Ctrl+O to expand)";
-		const left = status === "" ? dim("/ commands") : theme.fg("muted", status);
+		const left = status === "" ? "" : theme.fg("muted", status);
 		let right = `${model}:${agent.thinkingLevel ?? "off"} · ${formatTokens(tokens)}`;
 		if (window > 0) right += ` (${Math.round((tokens / window) * 100)}%)`;
 		this.#context.setText(`\n${spread("", dim(mode), width)}\n`);
@@ -612,7 +612,7 @@ function dock(graph: TaskGraph | undefined, width: number): string {
 	const procs = nodes.filter((node) => node.kind === "mochi.proc").length;
 	const count = (glyph: string, n: number, noun: string) => theme.fg(n > 0 ? "success" : "muted", `${glyph} ${n} ${noun}`);
 	const separator = dim("  ·  ");
-	const row = ` ${count("◆", agents, "agents")}${separator}${count("◷", triggers, "triggers")}${separator}${count("▸", procs, "procs")}`;
+	const row = ` ${count("◆", agents, "agents")}${separator}${count("●", triggers, "triggers")}${separator}${count("▪", procs, "procs")}`;
 	return row.length > 0 && visibleWidth(row) > width ? row.slice(0, width) : row;
 }
 
