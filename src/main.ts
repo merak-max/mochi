@@ -51,6 +51,9 @@ async function main(cli: Cli): Promise<number> {
 		case "help":
 			process.stdout.write(`${helpText(cli.command)}\n`);
 			return 0;
+		case "version":
+			process.stdout.write(`mochi ${buildOf()}\n`);
+			return 0;
 		case "service-install":
 			await installService(home);
 			return 0;

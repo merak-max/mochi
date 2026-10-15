@@ -22,7 +22,8 @@ export const COMMANDS = [
 	{ name: "--headless", args: "", summary: "The daemon alone. This is the systemd mode.", flags: [] },
 	{ name: "auth", args: "apps", summary: "OAuth login to the apps server.", flags: [] },
 	{ name: "service", args: "install", summary: "Writes the systemd user unit.", flags: [] },
-	{ name: "help", args: "[command]", summary: "This text, or one command's.", flags: [] },
+	{ name: "help", args: "[command]", summary: "This text, or one command's. Also -h and --help.", flags: [] },
+	{ name: "version", args: "", summary: "The build of this checkout. Also -v and --version.", flags: [] },
 ] as const satisfies readonly Command[];
 
 export type CommandName = (typeof COMMANDS)[number]["name"];
@@ -39,12 +40,14 @@ export type Cli =
 	| { readonly kind: "export"; readonly to: Target; readonly out?: string }
 	| { readonly kind: "auth-apps" }
 	| { readonly kind: "service-install" }
-	| { readonly kind: "help"; readonly command?: CommandName };
+	| { readonly kind: "help"; readonly command?: CommandName }
+	| { readonly kind: "version" };
 
 const ID_KEY = /^[A-Za-z0-9._-]+$/;
 
 function find(name: string): Command | undefined {
-	const wanted = name === "--print" ? "-p" : name;
+	const ALIASES: Readonly<Record<string, string>> = { "--print": "-p", "-h": "help", "--help": "help", "-v": "version", "--version": "version" };
+	const wanted = ALIASES[name] ?? name;
 	for (const command of COMMANDS) {
 		if (command.name === wanted) return command;
 	}
@@ -68,7 +71,7 @@ export function parseCli(argv: readonly string[], interactive: boolean): Cli {
 	const command = find(argv[0]!);
 	if (command === undefined) return fail(`Unknown command ${argv[0]}.`);
 	const name = command.name as CommandName;
-	if (argv.includes("--help") || argv.includes("-h")) return { kind: "help", command: name };
+	if (argv.includes("--help") || argv.includes("-h")) return name === "help" ? { kind: "help" } : { kind: "help", command: name };
 
 	const values = new Map<string, string>();
 	const switches = new Set<string>();
@@ -138,6 +141,8 @@ export function parseCli(argv: readonly string[], interactive: boolean): Cli {
 			if (wanted === undefined) return fail(`Unknown command ${first}.`);
 			return { kind: "help", command: wanted.name as CommandName };
 		}
+		case "version":
+			return { kind: "version" };
 		default: {
 			const _exhaustive: never = name;
 			throw new Error(`Unhandled command ${String(_exhaustive)}`);
