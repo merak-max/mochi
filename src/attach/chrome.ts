@@ -1,24 +1,33 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-// An enso, the one-stroke brush circle: heavy where the brush lands at the lower left, thinning as it lifts at the
-// upper right, with the gap left open. "~" cells draw in the accent: the mochi resting inside.
+// Kagami mochi, drawn from a reference silhouette: a mandarin with its leaf on two stacked mochi, on a low stand.
+// "~" before a cell draws it in the accent, so the mandarin is the one colored part.
 const MARK = [
-	"        ▗▄▄▄▄▖   ▗",
-	"    ▗▄██▀▀▀▀▀▀▀▘ ▝",
-	"  ▗██▀",
-	" ▐██▌     ▗~~▖",
-	" ▐██▌    ▐~~~~▌   ▖",
-	"  ▜██▙▖   ▝▀▀▘  ▗▟▘",
-	"    ▀▀███▄▄▄▄▄▟█▀▘",
+	"        ~▄~█~█~█~▀",
+	"       ~▝~█~█~█~█~▘",
+	"    ▗▄▟██████▙▄▖",
+	"    ▝▀████████▀▘",
+	"   ▄▄▟████████▙▄▄▖",
+	"  ▜███████████████",
+	"    ▀▀▀▀▀▀▀▀▀▀▀▀",
+	"▐██████████████████▌",
 ];
-const MARK_WIDTH = Math.max(...MARK.map((row) => row.length));
+const MARK_WIDTH = Math.max(...MARK.map((row) => row.replaceAll("~", "").length));
 
 export type SplashFacts = { readonly build: string; readonly model: string; readonly home: string };
 
 function markRow(row: string, theme: Theme): string {
 	let out = "";
-	for (const char of row) out += char === "~" ? theme.fg("accent", "█") : theme.fg("text", char);
+	let accent = false;
+	for (const char of row) {
+		if (char === "~") {
+			accent = true;
+			continue;
+		}
+		out += theme.fg(accent ? "accent" : "text", char);
+		accent = false;
+	}
 	return out;
 }
 
@@ -36,7 +45,10 @@ export function splash(facts: () => SplashFacts, theme: Theme): Component {
 			const metaStart = showMark ? Math.floor((MARK.length - meta.length) / 2) : 0;
 			for (let index = 0; index < rows; index++) {
 				let line = " ";
-				if (showMark) line += markRow((MARK[index] ?? "").padEnd(MARK_WIDTH), theme) + "   ";
+				if (showMark) {
+					const row = MARK[index] ?? "";
+					line += markRow(row, theme) + " ".repeat(MARK_WIDTH - row.replaceAll("~", "").length) + "   ";
+				}
 				line += meta[index - metaStart] ?? "";
 				lines.push(truncateToWidth(line, width, ""));
 			}
