@@ -568,6 +568,7 @@ export async function runTui(client: AttachClient, cwd: string, target?: Target)
 			}
 			case "expand":
 				tui.toggleExpanded();
+				render();
 				return;
 			case "followUp": {
 				const text = tui.editor.getText().trim();
