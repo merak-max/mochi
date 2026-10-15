@@ -111,15 +111,15 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, cla
 						return runtime.commit(() => wait({ at: slot, result: "check-failed" }), context);
 					}
 					if (found.out === null) return runtime.commit(() => wait({ at: slot, result: "quiet" }), context);
-					const held = await holdText(harness(), workDir, conversation.id, `in:${requestId}`, found.out, context);
-					payload = `\n<check_output source="${trigger.id}">\n${held}\n</check_output>`;
+					payload = `\n<check_output source="${trigger.id}">\n${found.out}\n</check_output>`;
 				}
 				const memo = (key: string, value?: number) => (value === undefined ? runtime.memo<number>(`${key}:${iso(slot)}`, context) : runtime.memo(`${key}:${iso(slot)}`, value, context));
 				if (!(await inputPasses(trigger, payload === "" ? trigger.prompt : payload, classify, memo, log, context))) return runtime.commit(() => wait({ at: slot, result: "stopped" }), context);
 				const run = await runAgent(trigger, catalog);
 				await harness().commit((tx) => applyAgent(tx, conversation.id, run), context);
 				await freshRun(harness(), conversation, requestId, runtime.now(), context);
-				const content = `[${trigger.kind} ${trigger.id}] Current time: ${formatStamp(new Date(slot), timeZone)}\n${trigger.prompt}${payload}`;
+				const body = await holdText(harness(), workDir, conversation.id, `in:${requestId}`, `${trigger.prompt}${payload}`, context);
+				const content = `[${trigger.kind} ${trigger.id}] Current time: ${formatStamp(new Date(slot), timeZone)}\n${body}`;
 				const submission = await conversation.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context);
 				const race = withCancel(context);
 				const settled = await Promise.race([submission.wait(race.context), runtime.sleep(deadline, race.context).then(() => undefined)]).finally(() => race.cancel());

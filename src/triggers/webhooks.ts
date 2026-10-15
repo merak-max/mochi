@@ -89,8 +89,8 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	if (!(await inputPasses(trigger, body.toString("utf8"), deps.classify, remember, deps.log, context))) return reply(response, 202, "accepted");
 	const conversation = await deps.harness.conversation(found.conversationId, context);
 	try {
-		const held = await holdText(deps.harness, deps.workDir, found.conversationId, `in:${requestId}`, body.toString("utf8"), context);
-		const submission = await conversation!.submit({ type: "input", content: webhookContent(id, trigger.prompt, held), requestId, whenBusy: "reject" }, context);
+		const content = await holdText(deps.harness, deps.workDir, found.conversationId, `in:${requestId}`, webhookContent(id, trigger.prompt, body.toString("utf8")), context);
+		const submission = await conversation!.submit({ type: "input", content, requestId, whenBusy: "reject" }, context);
 		deps.log("webhook.admitted", { id, delivery, submissionId: submission.id });
 		reply(response, 202, "accepted");
 		const race = withCancel(context);
