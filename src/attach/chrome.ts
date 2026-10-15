@@ -1,15 +1,14 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-// Three dango on a skewer. "~" cells draw in the accent, so the top ball reads as the pink one.
 const MARK = [
-	"            ▗~~~▖",
-	"           ▐~~~~~▌",
-	"       ▗▄▄▖ ▝~~~▘",
-	"      ▐████▌ ╱",
-	"  ▗▄▄▖ ▝▀▀▘╱",
-	" ▐████▌  ╱",
-	"  ▝▀▀▘ ╱",
+	"       ▗▄▄▄▄▄▄▄▄▖       ",
+	"    ▗▟█~~▀███████▙▖    ",
+	"   ▟█▛~▘  ▝████████▙   ",
+	"  ▐████████████████▌  ",
+	"  ▐████▛▀▜████▛▀▜███▌  ",
+	"   ▜██████▙▄▄▟██████▛   ",
+	"     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ",
 ];
 const MARK_WIDTH = Math.max(...MARK.map((row) => row.length));
 
@@ -17,11 +16,7 @@ export type SplashFacts = { readonly build: string; readonly model: string; read
 
 function markRow(row: string, theme: Theme): string {
 	let out = "";
-	for (const char of row) {
-		if (char === "~") out += theme.fg("accent", "█");
-		else if (char === "╱") out += theme.fg("dim", char);
-		else out += theme.fg("text", char);
-	}
+	for (const char of row) out += char === "~" ? theme.fg("accent", "▀") : theme.fg("text", char);
 	return out;
 }
 

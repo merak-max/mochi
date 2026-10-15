@@ -612,7 +612,7 @@ function dock(graph: TaskGraph | undefined, width: number): string {
 	const procs = nodes.filter((node) => node.kind === "mochi.proc").length;
 	const count = (glyph: string, n: number, noun: string) => theme.fg(n > 0 ? "success" : "muted", `${glyph} ${n} ${noun}`);
 	const separator = dim("  ·  ");
-	const row = ` ${count("◆", agents, "agents")}${separator}${count("●", triggers, "triggers")}${separator}${count("▪", procs, "procs")}`;
+	const row = ` ${count("◆", agents, "agents")}${separator}${count("◷", triggers, "triggers")}${separator}${count("▸", procs, "procs")}`;
 	return row.length > 0 && visibleWidth(row) > width ? row.slice(0, width) : row;
 }
 
