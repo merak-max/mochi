@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -16,7 +17,8 @@ import { SearchIndex } from "./index/fts.ts";
 import { acquireLock } from "./lock.ts";
 import { log, setLogFile } from "./log.ts";
 import { broken, off, ready, type Setup, setupReport } from "./setup.ts";
-import { listenAttach } from "./attach/server.ts";
+import { type DaemonFacts, listenAttach } from "./attach/server.ts";
+import type { ModelRef } from "@earendil-works/pi-durable";
 import { AttachClient } from "./attach/client.ts";
 import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
@@ -121,11 +123,11 @@ async function main(args: readonly string[]): Promise<void> {
 	let local: Awaited<ReturnType<typeof startDaemon>> | undefined;
 	let client: AttachClient;
 	try {
-		client = await AttachClient.connect(socket);
+		client = await AttachClient.connect(socket, { watch: true });
 	} catch {
 		if (mode.kind === "tui") setLogFile(config.home.logFile);
 		local = await startDaemon(config, mode.kind === "tui" ? "configured" : "terminal");
-		client = await AttachClient.connect(socket);
+		client = await AttachClient.connect(socket, { watch: true });
 	}
 	try {
 		if (mode.kind === "tui") await runTui(client, config.home.dir);
@@ -133,6 +135,26 @@ async function main(args: readonly string[]): Promise<void> {
 	} finally {
 		client.close();
 		await local?.stop("terminal closed");
+	}
+}
+
+/** Each config name for a model (brain, fast, strongest, classifier, aliases) and the model it picks. */
+function modelRoles(config: Config): Record<string, ModelRef> {
+	const { modelSetup } = config;
+	const roles: Record<string, ModelRef> = { brain: modelSetup.brain, fast: modelSetup.fast, strongest: modelSetup.ref("strongest") };
+	if (modelSetup.classifier !== undefined) roles.classifier = modelSetup.classifier;
+	for (const alias of Object.keys(config.file.models?.aliases ?? {})) roles[alias] = modelSetup.ref(alias);
+	return roles;
+}
+
+/** The git short hash of this checkout, with "+dirty" for uncommitted changes. */
+function buildOf(): string {
+	try {
+		const hash = execFileSync("git", ["-C", REPO, "rev-parse", "--short", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+		const dirty = execFileSync("git", ["-C", REPO, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() !== "";
+		return dirty ? `${hash}+dirty` : hash;
+	} catch {
+		return "unknown";
 	}
 }
 
@@ -147,8 +169,10 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const workDir = join(config.home.dir, "work");
 	await mkdir(workDir, { recursive: true });
 	const a2a = a2aServerSetup(config.env);
-	for (const line of [...setupReport([...services(config), ["a2a", a2a]]), ...channelReport]) log("setup", { line });
+	const setup = [...setupReport([...services(config), ["a2a", a2a]]), ...channelReport];
+	for (const line of setup) log("setup", { line });
 	const { models } = config.modelSetup;
+	const profiles = new Profiles(config.home.profilesDir, join(REPO, "agents"), config.modelSetup.ref);
 	const apps = config.appsUrl === undefined ? undefined : connectApps(storedTokenConnector(config.appsUrl, authFile(config.home.dir)), log);
 
 	const mochi = await openMochi(
@@ -163,7 +187,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			...(apps === undefined ? {} : { apps }),
 			index,
 			skillsDir: join(REPO, "skills"),
-			profiles: new Profiles(config.home.profilesDir, join(REPO, "agents"), config.modelSetup.ref),
+			profiles,
 			workDir,
 			channels,
 			users: config.users,
@@ -178,7 +202,16 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	);
 	mochi.harness.resume();
 	const stopCompaction = watchCompaction(mochi.harness, models, config.modelSetup.compactAt, running, (error) => log("compaction.failed", { error: String(error) }));
-	await listenAttach(socketPath(config.home.dir), { line: mochi.line, models, log }, running);
+	const facts: DaemonFacts = {
+		startedAt: new Date(),
+		build: buildOf(),
+		home: config.home.dir,
+		scheduling: channelSet === "terminal" ? "local" : "daemon",
+		channels: [...channels.keys()],
+		setup,
+		roles: modelRoles(config),
+	};
+	await listenAttach(socketPath(config.home.dir), { line: mochi.line, models, log, profiles, users: config.users, facts }, running);
 
 	const background = [
 		runFeed(mochi.harness, index, fastCompletion(models, config.modelSetup.fast), mochi.catalog, running, (error) => log("memory.failed", { error: String(error) })),

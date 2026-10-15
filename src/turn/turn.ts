@@ -161,6 +161,10 @@ function userInstructions(user: ChatUser): string {
 	return lines.join("\n\n");
 }
 
+export async function userConversation(harness: Pick<Harness, "snapshot">, handle: string, context: Context): Promise<ConversationId | null> {
+	return (await harness.snapshot(UserDoc, handle, context))?.conversation ?? null;
+}
+
 async function ensureUser(tx: Tx, user: ChatUser): Promise<ConversationId> {
 	const doc = await tx.doc(UserDoc, user.handle, null);
 	if (doc.conversation === null) doc.conversation = await createSeatConversation(tx, "user", { kind: "ownerless" }, { instructions: userInstructions(user) });
@@ -406,7 +410,15 @@ export function openTurn(tx: Tx, line: Pick<Line, "id" | "turn">, input: TurnInp
 	return tx.createTask(line.turn, input, { ownership: { kind: "conversation" }, conversationId: line.id, background: true });
 }
 
-type CliInbound = { readonly kind: "cli"; readonly messageId: string; readonly text: string; readonly at: Date };
+/** `to`: the conversation it goes to; absent, root. */
+type CliInbound = {
+	readonly kind: "cli";
+	readonly messageId: string;
+	readonly text: string;
+	readonly at: Date;
+	readonly to?: ConversationId;
+	readonly whenBusy?: "steer" | "followUp";
+};
 
 const tagOf = (channel: ChannelId, messageId: string, at: Date, timeZone: string) => `[${channel} ${formatStamp(at, timeZone)} id=${messageId}]`;
 
@@ -417,7 +429,8 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 	switch (inbound.kind) {
 		case "cli": {
 			const content = `${tagOf("cli", inbound.messageId, inbound.at, line.timeZone)}\n${inbound.text}`;
-			return (await root.submit({ type: "input", content, requestId: requestKey("cli", inbound.messageId), whenBusy: "steer" }, context)).id;
+			const target = await conversationOf(line, inbound.to ?? root.id, context);
+			return (await target.submit({ type: "input", content, requestId: requestKey("cli", inbound.messageId), whenBusy: inbound.whenBusy ?? "steer" }, context)).id;
 		}
 		case "tapback": {
 			const user = userOf(line.users, inbound.person);
