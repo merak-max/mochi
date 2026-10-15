@@ -7,6 +7,7 @@ import type { Context } from "@earendil-works/chord";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { defineTask, defineTool, type NextTaskState, ROOT_CONVERSATION_ID, type Task, type TaskId, type ToolExecutionApi, type ToolRegistration, type TaskRuntime } from "@earendil-works/pi-durable";
 import { type Committer, holdText } from "../context.ts";
+import type { ChatChannelId } from "../channels/types.ts";
 import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
@@ -155,24 +156,32 @@ interface ProcWatchDeps {
 
 type ProcRuntime = TaskRuntime<ProcInput, ProcState, ProcResult, object>;
 
+/** A wake's text and destination, fixed on first run so a replay submits the same content to the same place. */
+type WakeMemo = { readonly tag: string; readonly body: string; readonly last: { readonly channel: ChatChannelId; readonly messageId: string } | null };
+
 /** A wake into root goes through a chat Turn on the owner's last chat channel, so the reply reaches them. */
 export function defineProcWatch(deps: ProcWatchDeps): ProcTask {
 	const wake = async (task: { readonly id: TaskId }, runtime: ProcRuntime, event: "watch" | "exit", tag: string, files: ProcFiles, next: NextTaskState<ProcState, ProcResult>, context: Context) => {
 		const key = `proc:${task.id}:${event}`;
 		deps.log("proc.wake", { task: task.id, event, tag });
-		const lines = await tailLines(files.log, WAKE_LINES);
-		const body = lines.length === 0 ? "(no output)" : lines.join("\n");
-		const last = runtime.conversationId === ROOT_CONVERSATION_ID ? (await runtime.snapshot(LastInboundDoc, context))?.last : undefined;
-		if (last !== undefined && last !== null) {
+		let frozen = await runtime.memo<WakeMemo>(`wake:${event}`, context);
+		if (frozen === undefined) {
+			const lines = await tailLines(files.log, WAKE_LINES);
+			const text = lines.length === 0 ? "(no output)" : lines.join("\n");
+			const last = runtime.conversationId === ROOT_CONVERSATION_ID ? (await runtime.snapshot(LastInboundDoc, context))?.last : undefined;
+			frozen = await runtime.memo<WakeMemo>(`wake:${event}`, { tag, body: text, last: last ?? null }, context);
+		}
+		const { body, last } = frozen;
+		if (last !== null) {
 			await runtime.commit(async (tx) => {
-				await openTurn(tx, deps.line(), { source: "chat", channel: last.channel, key, tag, text: body, files: [] });
+				await openTurn(tx, deps.line(), { source: "chat", channel: last.channel, key, tag: frozen.tag, text: body, files: [] });
 				return next;
 			}, context);
 			return;
 		}
 		const conversation = (await runtime.conversation(runtime.conversationId, context))!;
 		const held = await holdText(deps.harness(), deps.workDir, conversation.id, `in:${key}`, body, context);
-		await conversation.submit({ type: "input", content: `${tag}\n${held}`, requestId: key, whenBusy: "followUp" }, context);
+		await conversation.submit({ type: "input", content: `${frozen.tag}\n${held}`, requestId: key, whenBusy: "followUp" }, context);
 		await runtime.commit(() => next, context);
 	};
 
