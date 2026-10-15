@@ -34,19 +34,25 @@ const Answer = Type.Union([
 	Type.Object({ type: Type.Literal("score"), score: Type.Number(), confidence: Type.Number() }),
 ]);
 
-/** Fast-model calls from scripts: `llm` on the fast model with no tools, and `classify` on the classifier model. */
-export function thinkFns(deps: { readonly models: Models; readonly fast: ModelRef; readonly classify: Classify }): readonly ToolRegistration[] {
+const MODELS = ["brain", "fast", "strongest"] as const;
+
+/**
+ * Model calls from scripts: `llm` with no tools, on the fast model unless it names brain or strongest, and `classify`
+ * on the classifier model. `ref` is the same name-to-model lookup the agent tool uses; it throws on an unknown name.
+ */
+export function thinkFns(deps: { readonly models: Models; readonly ref: (name: string) => ModelRef; readonly classify: Classify }): readonly ToolRegistration[] {
 	const slot = limiter(LLM_CONCURRENCY);
 	return [
 		defineTool({
 			name: "llm",
-			description: "One fast-model completion, no tools. Hand it a slice of data; only its answer reaches you.",
-			parameters: Type.Object({ prompt: Type.String(), system: Type.Optional(Type.String()) }),
+			description: "One model completion, no tools: the fast model, or model brain or strongest. Hand it a slice of data; only its answer reaches you.",
+			parameters: Type.Object({ prompt: Type.String(), system: Type.Optional(Type.String()), model: Type.Optional(Type.Union(MODELS.map((name) => Type.Literal(name)))) }),
 			structuredOutputSchema: Type.String(),
 			replay: "safe",
-			execute: async ({ prompt, system }, _api, context) => {
-				const model = deps.models.getModel(deps.fast.provider, deps.fast.modelId);
-				if (model === undefined) throw new Error(`Model ${deps.fast.provider}/${deps.fast.modelId} is not configured.`);
+			execute: async ({ prompt, system, model: name }, _api, context) => {
+				const ref = deps.ref(name ?? "fast");
+				const model = deps.models.getModel(ref.provider, ref.modelId);
+				if (model === undefined) throw new Error(`Model ${name ?? "fast"} (${ref.provider}/${ref.modelId}) is not configured.`);
 				const signal = context.abortSignal;
 				const response = await slot(() =>
 					deps.models.completeSimple(

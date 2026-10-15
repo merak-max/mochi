@@ -111,7 +111,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...fastBrowserFns({ ...browserDeps(options.web), models: options.models, fast: options.fast, classify: options.classify }),
 		...mediaFns({ ...media, workDir: options.workDir }),
 		...gifFns(options.workDir),
-		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
+		...thinkFns({ models: options.models, ref: options.profiles.model, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
 		...contextFns(options.workDir),
 		...forkFns({ task: forkTask, scratchDir: (name) => join(options.workDir, "forks", name), ref: options.profiles.model }),

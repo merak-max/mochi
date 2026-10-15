@@ -83,7 +83,7 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 |---|---|
 | Files and shell | `bash`, `read`, `edit`, `write` (the daemon user's full access; bash defaults to a 600 s timeout) |
 | Memory | `note`, `recall`, `zoom`, `history` |
-| Models | `llm` (the fast model, no tools), `classify` (the classifier model) |
+| Models | `llm` (the fast model unless `model` names `brain` or `strongest`, no tools), `classify` (the classifier model) |
 | Context | `context_read`, `context_put`, `context_list` |
 | Web | `web_search`, `web_fetch`, `web_map`, `web_find_tools`, `web_alexandria`, `browse`, `browse_fast` |
 | Apps | `apps_search`, `apps_call`, `apps_skills` |

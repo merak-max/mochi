@@ -75,7 +75,7 @@ function stopUnit(pid: number): number {
 /**
  * mochi stop. The pid comes from the daemon's own hello, not the lock file. When systemd runs that pid, systemd stops it
  * (a SIGTERM alone would be undone by Restart=always). Otherwise SIGTERM, then wait until the pid and the socket are gone.
- * Never SIGKILL. Returns the exit code.
+ * This command never sends SIGKILL; systemd may, after TimeoutStopSec. Returns the exit code.
  */
 export async function stopDaemon(home: Home, socket: string): Promise<number> {
 	const found = await reach(socket, false);
