@@ -90,7 +90,7 @@ class UserBlock implements Component {
 	}
 
 	render(width: number): string[] {
-		const lines = this.#message.render(width);
+		const lines = this.#message.render(width).map((line) => line + theme.bg("userMessageBg", " ".repeat(Math.max(0, width - visibleWidth(line)))));
 		if (this.#meta === undefined || lines.length === 0) return lines;
 		const meta = this.#meta;
 		lines[0] = theme.bg("userMessageBg", spread("", theme.fg("dim", meta), width));
@@ -231,7 +231,7 @@ class MochiTui {
 			{ component: this.#queue, shrink: 1, minSize: 0 },
 			{ component: this.#notices, shrink: 1, minSize: 0 },
 			{ component: this.#context, shrink: 0, minSize: 0 },
-			{ component: this.#editorSlot, shrink: 1, minSize: 3 },
+			{ component: this.#editorSlot, shrink: 1, minSize: 1 },
 			{ component: this.#footer, shrink: 1, minSize: 0 },
 		]);
 		for (const component of [this.#topBar, this.#chat, this.#activity, this.#queue, this.#notices, this.#context, this.#editorSlot, this.#footer]) {
