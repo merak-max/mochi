@@ -1,17 +1,15 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-// Kagami mochi, drawn from a reference silhouette: a mandarin with its leaf on two stacked mochi, on a low stand.
-// "~" before a cell draws it in the accent, so the mandarin is the one colored part.
+// One daifuku: a soft dome with a flat base. The cut-out at its upper left is the highlight; "~" cells draw in the accent.
 const MARK = [
-	"        ~▄~█~█~█~▀",
-	"       ~▝~█~█~█~█~▘",
-	"    ▗▄▟██████▙▄▖",
-	"    ▝▀████████▀▘",
-	"   ▄▄▟████████▙▄▄▖",
-	"  ▜███████████████",
-	"    ▀▀▀▀▀▀▀▀▀▀▀▀",
-	"▐██████████████████▌",
+	"",
+	"     ▗▄▄▄▄▄▄▖",
+	"  ▗▟█~▀~▜███████▙▖",
+	" ▗██▙▄▄█████████▖",
+	" ▐██████████████▌",
+	" ▝██████████████▘",
+	"",
 ];
 const MARK_WIDTH = Math.max(...MARK.map((row) => row.replaceAll("~", "").length));
 
