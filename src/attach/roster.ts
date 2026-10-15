@@ -19,9 +19,10 @@ type Named = { readonly id: number; readonly kind: AgentKind; readonly label: st
 
 const firstLine = (text: string): string => (text.split("\n").find((line) => line.trim() !== "") ?? "").trim().slice(0, 120);
 
-// A script fork's stored brief starts with fork.ts's preamble paragraph; the caller's own brief follows it.
-const FORK_PREAMBLE = /^You are [^\n]*, a fork of this conversation[^\n]*\n\n/;
-const briefTitle = (brief: string): string => firstLine(brief.replace(FORK_PREAMBLE, ""));
+// A child's stored brief starts with fork.ts's preamble (a fork's paragraph, or an agent job's lines up to a blank
+// line); the caller's own brief follows it.
+const PREAMBLE = /^You are [^\n]*, (a fork of this conversation|a fresh agent a script started)[\s\S]*?\n\n/;
+const briefTitle = (brief: string): string => firstLine(brief.replace(PREAMBLE, ""));
 
 /** Kind, label, parent and title of every conversation, from records and documents only: no entry scans. */
 async function names(deps: RosterDeps, context: Context): Promise<Named[]> {
