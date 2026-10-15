@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
@@ -11,9 +12,20 @@ const MARK = [
 	" ▝██████████████▘",
 	"",
 ];
-const MARK_WIDTH = Math.max(...MARK.map((row) => row.replaceAll("~", "").length));
 
 export type SplashFacts = { readonly build: string; readonly model: string; readonly home: string };
+
+/** Pre-colored rows from <home>/mark.ans, used as they are; the built-in mark when the file is absent. */
+export function loadMark(homeDir: string): string[] | undefined {
+	let text: string;
+	try {
+		text = readFileSync(`${homeDir}/mark.ans`, "utf8");
+	} catch {
+		return undefined;
+	}
+	const rows = text.replace(/\n+$/, "").split("\n");
+	return rows.length === 0 ? undefined : rows;
+}
 
 function markRow(row: string, theme: Theme): string {
 	let out = "";
@@ -29,7 +41,9 @@ function markRow(row: string, theme: Theme): string {
 	return out;
 }
 
-export function splash(facts: () => SplashFacts, theme: Theme): Component {
+export function splash(facts: () => SplashFacts, theme: Theme, custom?: readonly string[]): Component {
+	const mark = custom ?? MARK.map((row) => markRow(row, theme));
+	const markWidth = Math.max(...mark.map((row) => visibleWidth(row)));
 	return {
 		render(width) {
 			const meta = [
@@ -37,15 +51,15 @@ export function splash(facts: () => SplashFacts, theme: Theme): Component {
 				`${theme.fg("dim", "model")} ${theme.fg("muted", facts().model)}`,
 				`${theme.fg("dim", "home")} ${theme.fg("muted", facts().home)}`,
 			];
-			const showMark = width >= 70;
+			const showMark = width >= markWidth + 40;
 			const lines = [""];
-			const rows = showMark ? MARK.length : meta.length;
-			const metaStart = showMark ? Math.floor((MARK.length - meta.length) / 2) : 0;
+			const rows = showMark ? mark.length : meta.length;
+			const metaStart = showMark ? Math.floor((mark.length - meta.length) / 2) : 0;
 			for (let index = 0; index < rows; index++) {
 				let line = " ";
 				if (showMark) {
-					const row = MARK[index] ?? "";
-					line += markRow(row, theme) + " ".repeat(MARK_WIDTH - row.replaceAll("~", "").length) + "   ";
+					const row = mark[index] ?? "";
+					line += row + "\x1b[0m" + " ".repeat(markWidth - visibleWidth(row)) + "   ";
 				}
 				line += meta[index - metaStart] ?? "";
 				lines.push(truncateToWidth(line, width, ""));

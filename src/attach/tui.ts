@@ -36,7 +36,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { AttachClient } from "./client.ts";
 import type { AgentSummary, ModelSummary, Target } from "./protocol.ts";
-import { centered, type SplashFacts, splash, splitTag, spread } from "./chrome.ts";
+import { centered, loadMark, type SplashFacts, splash, splitTag, spread } from "./chrome.ts";
 import { toolRenderers } from "./renderers.ts";
 
 type Action = "abort" | "exit" | "model" | "thinking" | "expand" | "followUp";
@@ -225,7 +225,7 @@ class MochiTui {
 		);
 		this.#editorSlot.addChild(this.editor);
 		const content = new Container();
-		content.addChild(splash(() => this.splashFacts, theme));
+		content.addChild(splash(() => this.splashFacts, theme, loadMark(cwd)));
 		content.addChild(this.#chat);
 		content.addChild(new Spacer(1));
 		this.#transcript = new ScrollView(content, { follow: "end", primary: true, overscroll: "chain" });
