@@ -1,3 +1,5 @@
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { styleText } from "node:util";
 import {
 	AssistantMessageComponent,
@@ -365,7 +367,7 @@ interface Snapshot {
 /** `target`: the conversation to open; absent, main. */
 export async function runTui(client: AttachClient, cwd: string, target?: Target): Promise<void> {
 	if (target !== undefined) await client.request({ op: "show", to: target });
-	initTheme();
+	loadMochiTheme();
 	const tui = new MochiTui(cwd);
 	let state: Snapshot = {
 		client,
@@ -509,6 +511,15 @@ export async function runTui(client: AttachClient, cwd: string, target?: Target)
 	await exited;
 	unsubscribe();
 	tui.stop();
+}
+
+/** pi reads custom themes from <PI_CODING_AGENT_DIR>/themes; point it at ours only while the theme loads. */
+function loadMochiTheme(): void {
+	const saved = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = dirname(fileURLToPath(import.meta.url));
+	initTheme("mochi");
+	if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = saved;
 }
 
 function statusOf(live: LiveState): string {
