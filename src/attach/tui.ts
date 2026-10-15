@@ -105,24 +105,27 @@ class UserBlock implements Component {
 class MochiEditor extends Editor {
 	onAction: (action: Action) => void = () => {};
 
+	// A padded panel on the user-block background: a blank row, " > " and the text, a blank row.
 	override render(width: number): string[] {
-		const lines = super.render(width - 2);
+		const lines = super.render(width - 4);
+		const panel = (text: string) => theme.bg("userMessageBg", text + " ".repeat(Math.max(0, width - visibleWidth(text))));
 		const out: string[] = [];
 		let inside = false;
 		let first = true;
 		for (const line of lines) {
 			if (line.includes(EDITOR_RULE)) {
+				if (!inside) out.push(panel(""));
 				inside = !inside;
+				if (!inside) out.push(panel(""));
 				continue;
 			}
 			if (!inside) {
 				out.push(line);
 				continue;
 			}
-			const prompt = first ? theme.fg("accent", "›") + " " : "  ";
+			const prompt = first ? ` ${theme.fg("muted", ">")} ` : "   ";
 			first = false;
-			const fill = " ".repeat(Math.max(0, width - 2 - visibleWidth(line)));
-			out.push(theme.bg("userMessageBg", `${prompt}${line}${fill}`));
+			out.push(panel(prompt + line));
 		}
 		return out;
 	}

@@ -1,14 +1,16 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
+// An enso, the one-stroke brush circle: heavy where the brush lands at the lower left, thinning as it lifts at the
+// upper right, with the gap left open. "~" cells draw in the accent: the mochi resting inside.
 const MARK = [
-	"       ▗▄▄▄▄▄▄▄▄▖       ",
-	"    ▗▟█~~▀███████▙▖    ",
-	"   ▟█▛~▘  ▝████████▙   ",
-	"  ▐████████████████▌  ",
-	"  ▐████▛▀▜████▛▀▜███▌  ",
-	"   ▜██████▙▄▄▟██████▛   ",
-	"     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ",
+	"        ▗▄▄▄▄▖   ▗",
+	"    ▗▄██▀▀▀▀▀▀▀▘ ▝",
+	"  ▗██▀",
+	" ▐██▌     ▗~~▖",
+	" ▐██▌    ▐~~~~▌   ▖",
+	"  ▜██▙▖   ▝▀▀▘  ▗▟▘",
+	"    ▀▀███▄▄▄▄▄▟█▀▘",
 ];
 const MARK_WIDTH = Math.max(...MARK.map((row) => row.length));
 
@@ -16,7 +18,7 @@ export type SplashFacts = { readonly build: string; readonly model: string; read
 
 function markRow(row: string, theme: Theme): string {
 	let out = "";
-	for (const char of row) out += char === "~" ? theme.fg("accent", "▀") : theme.fg("text", char);
+	for (const char of row) out += char === "~" ? theme.fg("accent", "█") : theme.fg("text", char);
 	return out;
 }
 
