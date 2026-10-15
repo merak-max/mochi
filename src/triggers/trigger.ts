@@ -6,6 +6,7 @@ import { withCancel } from "@earendil-works/chord/context";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, defineTask, defineTool, type Harness, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import type { ChannelId } from "../channels/types.ts";
+import { holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
 import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
@@ -60,7 +61,7 @@ type TriggerRecord = TaskRecord<TriggerInput, TriggerState, null>;
 
 const iso = (at: number): string => new Date(at).toISOString();
 
-export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, classify }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit">; readonly catalog: Profiles; readonly classify: Classify }): TriggerTask {
+export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, classify, workDir }: { readonly timeZone: string; readonly deadlineMs: number; readonly log: Log; readonly harness: () => Pick<Harness, "commit">; readonly catalog: Profiles; readonly classify: Classify; readonly workDir: string }): TriggerTask {
 	const wait = (last: LastSlot): NextTaskState<TriggerState, null> => ({ status: "running", checkpoint: { phase: "wait", last } });
 	const missed = (trigger: Trigger, slot: number): NextTaskState<TriggerState, null> => {
 		log("trigger.missed", { id: trigger.id, slot: iso(slot) });
@@ -95,6 +96,8 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, cla
 			run: async (task, runtime, context) => {
 				const { trigger } = task.input;
 				const { slot, deadline } = task.state.checkpoint;
+				const conversation = (await runtime.conversation(runtime.conversationId, context))!;
+				const requestId = `${trigger.kind}:${trigger.id}:${iso(slot)}`;
 				let payload = "";
 				if (trigger.kind === "cron" && trigger.check !== undefined) {
 					const key = `check:${iso(slot)}`;
@@ -108,12 +111,11 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, cla
 						return runtime.commit(() => wait({ at: slot, result: "check-failed" }), context);
 					}
 					if (found.out === null) return runtime.commit(() => wait({ at: slot, result: "quiet" }), context);
-					payload = `\n<check_output source="${trigger.id}">\n${found.out}\n</check_output>`;
+					const held = await holdText(harness(), workDir, conversation.id, `in:${requestId}`, found.out, context);
+					payload = `\n<check_output source="${trigger.id}">\n${held}\n</check_output>`;
 				}
 				const memo = (key: string, value?: number) => (value === undefined ? runtime.memo<number>(`${key}:${iso(slot)}`, context) : runtime.memo(`${key}:${iso(slot)}`, value, context));
 				if (!(await inputPasses(trigger, payload === "" ? trigger.prompt : payload, classify, memo, log, context))) return runtime.commit(() => wait({ at: slot, result: "stopped" }), context);
-				const conversation = (await runtime.conversation(runtime.conversationId, context))!;
-				const requestId = `${trigger.kind}:${trigger.id}:${iso(slot)}`;
 				const run = await runAgent(trigger, catalog);
 				await harness().commit((tx) => applyAgent(tx, conversation.id, run), context);
 				await freshRun(harness(), conversation, requestId, runtime.now(), context);

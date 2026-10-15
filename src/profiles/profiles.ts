@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
 import { AgentDoc, configure, defineTask, type PromptSection, section, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { Owner } from "../memory/memory.ts";
@@ -22,7 +23,7 @@ interface Profile {
 	readonly instructions: string;
 	readonly model?: string;
 	readonly thinking?: Thinking;
-	/** The only tools its conversations may use; absent: its seat's tools. `codemode` and `notify` stay, so a list names script functions. */
+	/** The only tools its conversations may use; absent: its seat's tools. `codemode`, `notify` and the context readers stay, so a list names script functions. */
 	readonly tools?: readonly string[];
 }
 
@@ -97,7 +98,7 @@ export function agentOf(profile: Profile, profiles: Profiles, header: string): R
 	return {
 		profile: profile.name,
 		agent: { model: profiles.model(profile.model ?? "default"), ...(profile.thinking === undefined ? {} : { thinkingLevel: profile.thinking }) },
-		tools: profile.tools === undefined ? undefined : ["codemode", "notify", "handoff", ...profile.tools],
+		tools: profile.tools === undefined ? undefined : ["codemode", "notify", "handoff", "context_read", "context_list", ...profile.tools],
 		instructions: profile.instructions === "" ? header : `${header}\n\n${profile.instructions}`,
 	};
 }
@@ -165,7 +166,7 @@ type ReplyInput = { readonly submission: SubmissionId; readonly to: Conversation
  * Waits for a profile's answer to a message nobody waits for inline, then sends it back to the asker's conversation as
  * a new message, which wakes the asker. Durable, so a restart still delivers it, once.
  */
-export const defineReply = (harness: () => Pick<Harness, "submission">) => defineTask<ReplyInput, { readonly phase: "wait" }, null>({
+export const defineReply = (harness: () => Pick<Harness, "submission" | "commit">, workDir: string) => defineTask<ReplyInput, { readonly phase: "wait" }, null>({
 	name: "mochi.reply",
 	version: 1,
 	initial: () => ({ phase: "wait" }),
@@ -181,7 +182,10 @@ export const defineReply = (harness: () => Pick<Harness, "submission">) => defin
 				if (answer !== "") body = answer;
 			}
 			const target = await runtime.conversation(to, context);
-			if (target !== undefined) await target.submit({ type: "input", content: `[from ${from}] re: ${re}\n${body}`, requestId: `reply:${task.id}`, whenBusy: "followUp" }, context);
+			if (target !== undefined) {
+				const held = await holdText(harness(), workDir, to, `in:reply:${task.id}`, body, context);
+				await target.submit({ type: "input", content: `[from ${from}] re: ${re}\n${held}`, requestId: `reply:${task.id}`, whenBusy: "followUp" }, context);
+			}
 			await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
 		},
 	},
@@ -192,18 +196,19 @@ const firstLine = (text: string): string => (text.split("\n").find((line) => lin
 
 /** Submits `message` to the profile's standing conversation, creating it the first time. Same requestId, same submission. */
 /** Submits `message` to the profile's standing conversation, creating it the first time. Same requestId, same submission. `busy`: it was mid-turn. */
-export async function sendToProfile(host: Host, profiles: Profiles, name: string, message: string, requestId: string, context: Context): Promise<{ submission: Submission; busy: boolean }> {
+export async function sendToProfile(host: Host, profiles: Profiles, workDir: string, name: string, message: string, requestId: string, context: Context): Promise<{ submission: Submission; busy: boolean }> {
 	const profile = await profiles.get(name);
 	const conversation = await host.commit((tx) => ensureConversation(tx, profile, profiles), context);
 	const target = await host.conversation(conversation, context);
 	if (target === undefined) throw new Error(`Profile ${name} has no conversation.`);
 	const busy = await host.commit(async (tx) => (await tx.doc(LiveDoc, conversation)).run !== undefined, context);
-	return { submission: await target.submit({ type: "input", content: message, requestId, whenBusy: "followUp" }, context), busy };
+	const content = await holdText(host, workDir, conversation, `in:${requestId}`, message, context);
+	return { submission: await target.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context), busy };
 }
 
 export type ReplyTask = ReturnType<typeof defineReply>;
 
-export function profileFns(profiles: Profiles, host: () => Host, reply: ReplyTask): ToolRegistration[] {
+export function profileFns(profiles: Profiles, host: () => Host, reply: ReplyTask, workDir: string): ToolRegistration[] {
 	return [
 		defineTool({
 			name: "profile_list",
@@ -225,7 +230,7 @@ export function profileFns(profiles: Profiles, host: () => Host, reply: ReplyTas
 				const owner = await api.commit((tx) => ownerIn(tx, api.conversationId), context);
 				const sender = owner === "root" ? "root" : owner.profile;
 				if (sender === name) throw new Error(`You are ${name}; send to another profile.`);
-				const { submission, busy } = await sendToProfile(host(), profiles, name, `[from ${sender}] ${message}`, `profile:${api.taskId}`, context);
+				const { submission, busy } = await sendToProfile(host(), profiles, workDir, name, `[from ${sender}] ${message}`, `profile:${api.taskId}`, context);
 				// A busy profile may be waiting on this very caller, so an inline wait could never end: its answer comes back later.
 				if (background === true || busy) {
 					await api.commit((tx) => journaled(tx, api.taskId, "reply", () => tx.createTask(reply, { submission: submission.id, to: api.conversationId, from: name, re: firstLine(message) }, { ownership: { kind: "conversation" }, conversationId: api.conversationId, background: true })), context);

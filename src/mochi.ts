@@ -15,7 +15,8 @@ import type { Channels } from "./channels/types.ts";
 import { workEnv } from "./env/work-env.ts";
 import type { SearchIndex } from "./index/fts.ts";
 import type { Log } from "./log.ts";
-import { forkFns, ForkTask } from "./fork/fork.ts";
+import { contextFns, contextSection } from "./context.ts";
+import { defineForkTask, forkFns } from "./fork/fork.ts";
 import { defineReply, ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
 import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
@@ -93,10 +94,11 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users }),
 		handoffTool(),
 	];
-	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.profiles, classify: options.classify });
+	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.profiles, classify: options.classify, workDir: options.workDir });
 	const procDir = join(options.workDir, ".procs");
-	const procWatch = defineProcWatch({ dir: procDir, line: lineOf, pollMs: PROC_POLL_MS, log });
-	const reply = defineReply(() => harness);
+	const procWatch = defineProcWatch({ dir: procDir, workDir: options.workDir, harness: () => harness, line: lineOf, pollMs: PROC_POLL_MS, log });
+	const reply = defineReply(() => harness, options.workDir);
+	const forkTask = defineForkTask(options.workDir);
 	const library: ToolRegistration[] = [
 		...(await codingTools()),
 		noteTool(index, ownerIn),
@@ -111,11 +113,12 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...gifFns(options.workDir),
 		...thinkFns({ models: options.models, fast: options.fast, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
-		...forkFns((name) => join(options.workDir, "forks", name)),
+		...contextFns(options.workDir),
+		...forkFns({ task: forkTask, scratchDir: (name) => join(options.workDir, "forks", name), ref: options.profiles.model }),
 		...triggerFns({ task: trigger, catalog: options.profiles, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: Date.now, users }),
 		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 		...a2aFns(a2aPeers),
-		...profileFns(options.profiles, () => harness, reply),
+		...profileFns(options.profiles, () => harness, reply, options.workDir),
 		...boardFns({ by: async (tx, conversation) => { const owner = await ownerIn(tx, conversation); return owner === "root" ? "root" : owner.profile; }, now: Date.now }),
 	];
 	for (const extension of [
@@ -123,11 +126,11 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		memoryExtension(ownerOf),
 		skillsExtension(options.skillsDir),
 		windowExtension(),
-		defineExtension({ name: "agents", tasks: [ForkTask, reply] }),
+		defineExtension({ name: "agents", tasks: [forkTask, reply] }),
 		defineExtension({ name: "procs", tasks: [procWatch] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
-		...seatExtensions(modelTools, library, [rosterSection(options.profiles)]),
+		...seatExtensions(modelTools, library, [rosterSection(options.profiles)], [contextSection()]),
 	]) {
 		registry.install(extension);
 	}
@@ -168,7 +171,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
 	if (options.scheduling === "daemon") {
-		const sweep = defineSweep({ harness: () => harness, everyMs: SWEEP_EVERY_MS, log, toProfile: async (name, brief, key, context) => void (await sendToProfile(harness, options.profiles, name, `[from board] ${brief}`, key, context)) });
+		const sweep = defineSweep({ harness: () => harness, forkTask, everyMs: SWEEP_EVERY_MS, log, toProfile: async (name, brief, key, context) => void (await sendToProfile(harness, options.profiles, options.workDir, name, `[from board] ${brief}`, key, context)) });
 		registry.install(defineExtension({ name: "board", tasks: [sweep] }));
 		await ensureSweep(harness, sweep, context);
 	}

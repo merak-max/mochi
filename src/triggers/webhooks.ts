@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { ConversationBusy, type Harness } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
+import { holdText } from "../context.ts";
 import { readBody, safeEqual, validSha256Signature } from "../http.ts";
 import type { Config } from "../config.ts";
 import { type Log, log } from "../log.ts";
@@ -20,6 +21,7 @@ interface WebhookDeps {
 	readonly harness: Pick<Harness, "commit" | "conversation">;
 	readonly log: Log;
 	readonly classify: Classify;
+	readonly workDir: string;
 }
 
 type Headers = IncomingMessage["headers"];
@@ -40,8 +42,8 @@ function deliveryId(headers: Headers, body: Buffer): string {
 	return createHash("sha256").update(body).digest("hex");
 }
 
-function webhookContent(id: string, prompt: string, body: Buffer): string {
-	return `${prompt}\n<webhook_payload source="${id}">\n${body.toString("utf8")}\n</webhook_payload>`;
+function webhookContent(id: string, prompt: string, body: string): string {
+	return `${prompt}\n<webhook_payload source="${id}">\n${body}\n</webhook_payload>`;
 }
 
 const single = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
@@ -87,7 +89,8 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	if (!(await inputPasses(trigger, body.toString("utf8"), deps.classify, remember, deps.log, context))) return reply(response, 202, "accepted");
 	const conversation = await deps.harness.conversation(found.conversationId, context);
 	try {
-		const submission = await conversation!.submit({ type: "input", content: webhookContent(id, trigger.prompt, body), requestId, whenBusy: "reject" }, context);
+		const held = await holdText(deps.harness, deps.workDir, found.conversationId, `in:${requestId}`, body.toString("utf8"), context);
+		const submission = await conversation!.submit({ type: "input", content: webhookContent(id, trigger.prompt, held), requestId, whenBusy: "reject" }, context);
 		deps.log("webhook.admitted", { id, delivery, submissionId: submission.id });
 		reply(response, 202, "accepted");
 		const race = withCancel(context);
@@ -107,10 +110,10 @@ function reply(response: ServerResponse, status: number, text: string): void {
 	response.end(`${text}\n`);
 }
 
-export async function triggersComponent({ harness, trigger, catalog, classify }: Mochi, config: Config, context: Context): Promise<void> {
+export async function triggersComponent({ harness, trigger, catalog, classify, line }: Mochi, config: Config, context: Context): Promise<void> {
 	const seeds = parseSeeds(config.file, config.users);
 	await reconcileSeeds(harness, trigger, seeds, catalog, context);
 	const listen = { host: config.env.MOCHI_BIND_HOST || "127.0.0.1", port: Number(config.env.MOCHI_HOOKS_PORT || 8788) };
-	const { address } = await startWebhookServer({ harness, log, classify }, listen, context);
+	const { address } = await startWebhookServer({ harness, log, classify, workDir: line.workDir }, listen, context);
 	log("triggers.started", { seeds: seeds.map((seed) => seed.id), hooks: `${address.address}:${address.port}` });
 }

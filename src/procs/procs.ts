@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { defineTask, defineTool, type NextTaskState, ROOT_CONVERSATION_ID, type Task, type TaskId, type ToolExecutionApi, type ToolRegistration, type TaskRuntime } from "@earendil-works/pi-durable";
+import { type Committer, holdText } from "../context.ts";
 import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
@@ -145,6 +146,8 @@ function checkPattern(watch: string): void {
 
 interface ProcWatchDeps {
 	readonly dir: string;
+	readonly workDir: string;
+	readonly harness: () => Committer;
 	readonly line: () => Line;
 	readonly pollMs: number;
 	readonly log: Log;
@@ -168,7 +171,8 @@ export function defineProcWatch(deps: ProcWatchDeps): ProcTask {
 			return;
 		}
 		const conversation = (await runtime.conversation(runtime.conversationId, context))!;
-		await conversation.submit({ type: "input", content: `${tag}\n${body}`, requestId: key, whenBusy: "followUp" }, context);
+		const held = await holdText(deps.harness(), deps.workDir, conversation.id, `in:${key}`, body, context);
+		await conversation.submit({ type: "input", content: `${tag}\n${held}`, requestId: key, whenBusy: "followUp" }, context);
 		await runtime.commit(() => next, context);
 	};
 

@@ -54,6 +54,10 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	web_search: { seats: ALL, inline: true },
 	web_fetch: { seats: ALL, inline: true },
 	llm: { seats: ALL, inline: true },
+	context_read: { seats: ALL, inline: true },
+	context_put: { seats: ALL, inline: true },
+	context_list: { seats: ALL, inline: false },
+	agent: { seats: AGENT, inline: true },
 	apps_search: { seats: NOT_USER, inline: true },
 	apps_call: { seats: NOT_USER, inline: true },
 	fork: { seats: AGENT, inline: true },
@@ -115,7 +119,7 @@ function withDeadline(code: string): string {
  * One `seat-<seat>` extension per seat: its model tools, `codemode` with its prompt section, and the library tools its
  * scripts may call. Throws when the tables and the definitions disagree.
  */
-export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], agentSections: readonly PromptSection[]): Extension[] {
+export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], agentSections: readonly PromptSection[], everySeat: readonly PromptSection[]): Extension[] {
 	const codemode = createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: SCRIPT_MEMORY_BYTES }), models: false });
 	const tool = codemode.tools![0]!;
 	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
@@ -131,7 +135,7 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 			if (!entry.seats.includes(seat)) continue;
 			scripted.push(entry.inline ? { ...each, callers: ["tools"] } : { ...each, callers: ["tools"], deferred: true });
 		}
-		const sections = seat === "agent" ? [...agentSections, ...(codemode.sections ?? [])] : (codemode.sections ?? []);
+		const sections = seat === "agent" ? [...agentSections, ...(codemode.sections ?? []), ...everySeat] : [...(codemode.sections ?? []), ...everySeat];
 		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted], sections });
 	});
 }

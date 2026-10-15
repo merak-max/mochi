@@ -6,6 +6,7 @@ import { withCancel } from "@earendil-works/chord/context";
 import { AgentDoc, type ConversationId, defineDocFamily, type Harness, ROOT_CONVERSATION_ID, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
 import { Value } from "typebox/value";
 import type { Config } from "../config.ts";
+import { holdText } from "../context.ts";
 import { readBody, safeEqual } from "../http.ts";
 import { type Log, log } from "../log.ts";
 import type { Mochi } from "../mochi.ts";
@@ -113,6 +114,7 @@ interface ServerDeps {
 	readonly settings: A2AServerSettings;
 	readonly timeZone: string;
 	readonly log: Log;
+	readonly workDir: string;
 }
 
 async function startA2AServer(deps: ServerDeps, context: Context): Promise<AddressInfo> {
@@ -184,8 +186,10 @@ async function sendMessage(deps: ServerDeps, peer: string, id: RpcId, params: un
 	const contextId = message.contextId ?? params.contextId ?? randomUUID();
 	const conversationId = await harness.commit((tx) => ensureContext(tx, peer, contextId), context);
 	const conversation = (await harness.conversation(conversationId, context))!;
-	const content = `[a2a ${peer} ${formatStamp(new Date(), deps.timeZone)} context=${contextId} id=${message.messageId}]\n${text}`;
-	const submission = await conversation.submit({ type: "input", content, requestId: `a2a:${peer}:${message.messageId}`, whenBusy: "followUp" }, context);
+	const requestId = `a2a:${peer}:${message.messageId}`;
+	const held = await holdText(harness, deps.workDir, conversationId, `in:${requestId}`, text, context);
+	const content = `[a2a ${peer} ${formatStamp(new Date(), deps.timeZone)} context=${contextId} id=${message.messageId}]\n${held}`;
+	const submission = await conversation.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context);
 	const taskId = `a2a-${submission.id}`;
 	const task: A2ATask = { peer, contextId, conversation: conversationId, submission: submission.id };
 	await harness.commit(async (tx) => {
@@ -231,8 +235,8 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
 	response.end(JSON.stringify(value));
 }
 
-export async function a2aComponent({ harness }: Mochi, config: Config, setup: Setup<A2AServerSettings>, context: Context): Promise<void> {
+export async function a2aComponent({ harness, line }: Mochi, config: Config, setup: Setup<A2AServerSettings>, context: Context): Promise<void> {
 	if (setup.kind !== "ready") return;
-	const address = await startA2AServer({ harness, settings: setup.value, timeZone: config.timeZone, log }, context);
+	const address = await startA2AServer({ harness, settings: setup.value, timeZone: config.timeZone, log, workDir: line.workDir }, context);
 	log("a2a.started", { peers: [...setup.value.tokens.keys()], listen: `${address.address}:${address.port}` });
 }

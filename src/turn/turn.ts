@@ -23,6 +23,7 @@ import {
 	type UserInput,
 } from "@earendil-works/pi-durable";
 import { pace, present } from "../channels/present.ts";
+import { type Committer, holdText } from "../context.ts";
 import {
 	type Attachment,
 	type Bubble,
@@ -204,15 +205,17 @@ function deliveredRecord(input: RunTurn, recipient: string): string {
 }
 
 // The only builder of a chat Turn's input, so ingest and `run` submit identical content.
-async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "workDir">, signal?: AbortSignal): Promise<UserInput> {
-	const { notes, images } = turn.preparedMedia ?? (await prepareInbound(turn.files, workDir, media, signal));
-	const lines = [turn.tag];
+async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "workDir">, host: Committer, context: Context): Promise<UserInput> {
+	const { notes, images } = turn.preparedMedia ?? (await prepareInbound(turn.files, workDir, media, context.abortSignal));
+	const lines: string[] = [];
 	if (turn.replyTo !== undefined) {
 		const whose = turn.replyTo.fromAgent ? "your" : "their";
 		const quoted = turn.replyTo.text === "" ? "(text not available; use recall)" : turn.replyTo.text;
 		lines.push(`[replying to ${whose} message id=${turn.replyTo.messageId}] ${quoted}`);
 	}
-	const text = [...lines, turn.text, ...notes].join("\n");
+	lines.push(turn.text);
+	const held = await holdText(host, workDir, turn.conversation ?? ROOT_CONVERSATION_ID, `in:${turn.key}`, lines.join("\n"), context);
+	const text = [turn.tag, held, ...notes].join("\n");
 	return images.length === 0 ? text : [{ type: "text", text }, ...images];
 }
 
@@ -292,7 +295,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 				let settled;
 				try {
 					const conversation = (await runtime.conversation(input.conversation ?? ROOT_CONVERSATION_ID, context))!;
-					const content = await inputOf(workDir, input, media, context.abortSignal);
+					const content = await inputOf(workDir, input, media, host.harness, context);
 					settled = await (await conversation.submit({ type: "input", content, requestId: input.key, whenBusy: "steer" }, context)).wait(context);
 				} finally {
 					await stopTyping();
@@ -428,9 +431,11 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 	const { root, harness } = line;
 	switch (inbound.kind) {
 		case "cli": {
-			const content = `${tagOf("cli", inbound.messageId, inbound.at, line.timeZone)}\n${inbound.text}`;
 			const target = await conversationOf(line, inbound.to ?? root.id, context);
-			return (await target.submit({ type: "input", content, requestId: requestKey("cli", inbound.messageId), whenBusy: inbound.whenBusy ?? "steer" }, context)).id;
+			const key = requestKey("cli", inbound.messageId);
+			const text = await holdText(harness, line.workDir, target.id, `in:${key}`, inbound.text, context);
+			const content = `${tagOf("cli", inbound.messageId, inbound.at, line.timeZone)}\n${text}`;
+			return (await target.submit({ type: "input", content, requestId: key, whenBusy: inbound.whenBusy ?? "steer" }, context)).id;
 		}
 		case "tapback": {
 			const user = userOf(line.users, inbound.person);
@@ -479,7 +484,7 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 			}, context);
 			if (opened.kind === "existing") return opened.submission;
 			const target = await conversationOf(line, opened.conversation, context);
-			const content = await inputOf(line.workDir, turn, line.media, context.abortSignal);
+			const content = await inputOf(line.workDir, user === undefined ? turn : { ...turn, conversation: opened.conversation }, line.media, harness, context);
 			return (await target.submit({ type: "input", content, requestId: key, whenBusy: "steer" }, context)).id;
 		}
 	}
