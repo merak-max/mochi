@@ -65,11 +65,8 @@ async function main(cli: Cli): Promise<number> {
 			const config = await loadConfig(process.env);
 			await mkdir(config.home.dir, { recursive: true });
 			const daemon = await startDaemon(config, "configured");
-			const reason = await new Promise<string>((resolveStop) => {
-				for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => resolveStop(signal));
-			});
-			await daemon.stop(reason);
-			return 0;
+			stopOnSignal(daemon, () => {});
+			return new Promise<number>(() => {});
 		}
 		case "stop":
 			return stopDaemon(home, socket);
@@ -131,7 +128,7 @@ async function attach(cli: Extract<Cli, { kind: "tui" | "lines" }>, home: Home, 
 	const watch = cli.kind === "tui" || cli.json;
 	let found = await reach(socket, watch);
 	if (found.kind === "refused") throw new Error(found.reason);
-	let local: Awaited<ReturnType<typeof startDaemon>> | undefined;
+	let local: Daemon | undefined;
 	if (found.kind === "absent") {
 		if (cli.kind === "tui" && cli.to !== undefined) {
 			process.stderr.write("mochi is not running.\n");
@@ -145,6 +142,7 @@ async function attach(cli: Extract<Cli, { kind: "tui" | "lines" }>, home: Home, 
 		if (found.kind !== "ready") throw new Error(found.reason);
 	}
 	const client = found.client;
+	if (local !== undefined) stopOnSignal(local, () => client.close());
 	try {
 		if (cli.kind === "tui") await runTui(client, home.dir, cli.to);
 		else await runLines(client, cli.prompt, cli);
@@ -153,6 +151,18 @@ async function attach(cli: Extract<Cli, { kind: "tui" | "lines" }>, home: Home, 
 		await local?.stop("terminal closed");
 	}
 	return 0;
+}
+
+type Daemon = Awaited<ReturnType<typeof startDaemon>>;
+
+/** Each process that owns a daemon, a terminal included, ends its terminal, stops the daemon and exits on SIGINT or SIGTERM. */
+function stopOnSignal(daemon: Daemon, endTerminal: () => void): void {
+	for (const signal of ["SIGINT", "SIGTERM"] as const) {
+		process.once(signal, () => {
+			endTerminal();
+			void daemon.stop(signal).then(() => process.exit(0));
+		});
+	}
 }
 
 async function installService(home: Home): Promise<void> {
@@ -280,18 +290,24 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	);
 	log("mochi.started", { channels: [...channels.keys()], pid: process.pid });
 
+	let stopped: Promise<void> | undefined;
+	const stop = async (reason: string): Promise<void> => {
+		log("mochi.stopping", { reason });
+		stopCompaction();
+		controller.abort();
+		await Promise.allSettled(background);
+		await mochi.harness.close(BACKGROUND_CONTEXT);
+		channelsRunning.abort();
+		await Promise.allSettled(inbound);
+		index.close();
+		rmSync(socketPath(config.home.dir), { force: true });
+		releaseLock();
+	};
+	// The signal handler and the terminal's own exit can both ask; the daemon stops once.
 	return {
-		async stop(reason) {
-			log("mochi.stopping", { reason });
-			stopCompaction();
-			controller.abort();
-			await Promise.allSettled(background);
-			await mochi.harness.close(BACKGROUND_CONTEXT);
-			channelsRunning.abort();
-			await Promise.allSettled(inbound);
-			index.close();
-			rmSync(socketPath(config.home.dir), { force: true });
-			releaseLock();
+		stop(reason) {
+			stopped ??= stop(reason);
+			return stopped;
 		},
 	};
 }
