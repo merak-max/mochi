@@ -1,12 +1,12 @@
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { styleText } from "node:util";
 import {
 	AssistantMessageComponent,
 	DynamicBorder,
 	getMarkdownTheme,
 	getSelectListTheme,
 	initTheme,
+	type Theme,
 	ToolExecutionComponent,
 	UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
@@ -31,10 +31,12 @@ import {
 	Text,
 	TruncatedText,
 	TuiAltScreen,
+	visibleWidth,
 	VStack,
 } from "@earendil-works/pi-tui";
 import type { AttachClient } from "./client.ts";
 import type { AgentSummary, ModelSummary, Target } from "./protocol.ts";
+import { centered, type SplashFacts, splash, splitTag, spread } from "./chrome.ts";
 import { toolRenderers } from "./renderers.ts";
 
 type Action = "abort" | "exit" | "model" | "thinking" | "expand" | "followUp";
@@ -61,11 +63,69 @@ const COMMANDS = [
 	{ name: "quit", description: "Detach; work keeps running in the daemon" },
 ] as const;
 type Command = (typeof COMMANDS)[number]["name"];
-const dim = (text: string) => styleText("dim", text);
-const accent = (text: string) => styleText("cyan", text);
+let theme: Theme;
+const dim = (text: string) => theme.fg("dim", text);
+const accent = (text: string) => theme.fg("accent", text);
+const EDITOR_RULE = "\u0000rule";
+
+function rule(label: string): Component {
+	return {
+		render(width) {
+			const text = ` ${label} `;
+			const side = Math.max(2, Math.floor((width - visibleWidth(text) - 4) / 2));
+			return [centered(theme.fg("borderMuted", "─".repeat(side)) + dim(text) + theme.fg("borderMuted", "─".repeat(side)), width)];
+		},
+		invalidate() {},
+	};
+}
+
+class UserBlock implements Component {
+	readonly #message: UserMessageComponent;
+	readonly #meta: string | undefined;
+
+	constructor(text: string) {
+		const { body, meta } = splitTag(text);
+		this.#message = new UserMessageComponent(body, getMarkdownTheme());
+		this.#meta = meta;
+	}
+
+	render(width: number): string[] {
+		const lines = this.#message.render(width);
+		if (this.#meta === undefined || lines.length === 0) return lines;
+		const meta = this.#meta;
+		lines[0] = theme.bg("userMessageBg", spread("", theme.fg("dim", meta), width));
+		return lines;
+	}
+
+	invalidate(): void {
+		this.#message.invalidate();
+	}
+}
 
 class MochiEditor extends Editor {
 	onAction: (action: Action) => void = () => {};
+
+	override render(width: number): string[] {
+		const lines = super.render(width - 2);
+		const out: string[] = [];
+		let inside = false;
+		let first = true;
+		for (const line of lines) {
+			if (line.includes(EDITOR_RULE)) {
+				inside = !inside;
+				continue;
+			}
+			if (!inside) {
+				out.push(line);
+				continue;
+			}
+			const prompt = first ? theme.fg("accent", "›") + " " : "  ";
+			first = false;
+			const fill = " ".repeat(Math.max(0, width - 2 - visibleWidth(line)));
+			out.push(theme.bg("userMessageBg", `${prompt}${line}${fill}`));
+		}
+		return out;
+	}
 
 	override handleInput(data: string): void {
 		const action = KEYS.find(([key]) => matchesKey(data, key))?.[1];
@@ -128,8 +188,9 @@ class MochiTui {
 	readonly #activity = new Container();
 	readonly #queue = new Container();
 	readonly #notices = new Container();
-	readonly #status = new Text("", 1, 0);
-	readonly #footer = new Text("", 1, 0);
+	readonly #topBar = new Text("", 0, 0);
+	readonly #context = new Text("", 0, 0);
+	readonly #footer = new Text("", 0, 0);
 	readonly #editorSlot = new Container();
 	readonly #transcript: ScrollView;
 	readonly #cwd: string;
@@ -142,11 +203,13 @@ class MochiTui {
 	#expanded = false;
 	#rebuilt = false;
 	#shownConversation: number | undefined;
+	busy = false;
+	splashFacts: SplashFacts = { build: "", model: "", home: "" };
 
 	constructor(cwd: string) {
 		this.#cwd = cwd;
 		this.#renderers = toolRenderers(cwd);
-		this.editor = new MochiEditor(this.ui, { borderColor: dim, selectList: getSelectListTheme() }, { paddingX: 1 });
+		this.editor = new MochiEditor(this.ui, { borderColor: () => EDITOR_RULE, selectList: getSelectListTheme() }, { paddingX: 0 });
 		this.editor.setAutocompleteProvider(
 			new CombinedAutocompleteProvider(
 				COMMANDS.map((command) =>
@@ -159,6 +222,7 @@ class MochiTui {
 		);
 		this.#editorSlot.addChild(this.editor);
 		const content = new Container();
+		content.addChild(splash(() => this.splashFacts, theme));
 		content.addChild(this.#chat);
 		content.addChild(new Spacer(1));
 		this.#transcript = new ScrollView(content, { follow: "end", primary: true, overscroll: "chain" });
@@ -166,15 +230,16 @@ class MochiTui {
 			{ component: this.#activity, shrink: 1, minSize: 0 },
 			{ component: this.#queue, shrink: 1, minSize: 0 },
 			{ component: this.#notices, shrink: 1, minSize: 0 },
-			{ component: this.#status, shrink: 0, minSize: 0 },
+			{ component: this.#context, shrink: 0, minSize: 0 },
 			{ component: this.#editorSlot, shrink: 1, minSize: 3 },
 			{ component: this.#footer, shrink: 1, minSize: 0 },
 		]);
-		for (const component of [this.#chat, this.#activity, this.#queue, this.#notices, this.#status, this.#editorSlot, this.#footer]) {
+		for (const component of [this.#topBar, this.#chat, this.#activity, this.#queue, this.#notices, this.#context, this.#editorSlot, this.#footer]) {
 			this.ui.addChild(component);
 		}
 		this.ui.setLayoutRoot(
 			new VStack([
+				{ component: this.#topBar, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
 				{ component: this.#transcript, basis: 0, grow: 1, shrink: 1, minSize: 1 },
 				{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
 			]),
@@ -227,9 +292,9 @@ class MochiTui {
 			this.#queue.addChild(new TruncatedText(dim(`[${item.mode}] ${text}`), 1, 0));
 		}
 		this.#notices.clear();
-		for (const notice of state.notices.slice(-4)) this.#notices.addChild(new TruncatedText(styleText(notice.error ? "red" : "dim", notice.text), 1, 0));
-		this.#status.setText(styleText("yellow", statusOf(live)));
-		this.#syncFooter(state);
+		for (const notice of state.notices.slice(-4)) this.#notices.addChild(new TruncatedText(theme.fg(notice.error ? "error" : "dim", notice.text), 1, 0));
+		this.busy = live.run !== undefined;
+		this.#syncFooter(state, statusOf(live));
 		if (this.#rebuilt) this.#transcript.scrollToEnd();
 		this.ui.requestRender(this.#rebuilt);
 		this.#rebuilt = false;
@@ -239,7 +304,7 @@ class MochiTui {
 		this.#activity.clear();
 		if (!state.activity || state.client.tasks === undefined) return;
 		const nodes = Object.values(state.client.tasks.tasks);
-		const lines = [accent(`Activity: ${nodes.length} live task(s). /tasks hides, /stop stops everything.`)];
+		const lines = [`${nodes.length} live tasks · /tasks hides · /stop stops everything`];
 		const owned = new Set(nodes.flatMap((node) => node.conversations));
 		const children = (node: TaskGraphNode) =>
 			nodes.filter((candidate) => candidate.owner === node.id || (candidate.owner === undefined && node.conversations.includes(candidate.conversationId)));
@@ -253,20 +318,24 @@ class MochiTui {
 		for (const line of lines) this.#activity.addChild(new TruncatedText(dim(line), 1, 0));
 	}
 
-	#syncFooter(state: Snapshot): void {
+	#syncFooter(state: Snapshot, status: string): void {
 		const view = state.client.view!;
 		const agent = (view.docs["pi.agent"] ?? {}) as AgentState;
 		const usage = totalUsage((view.docs["pi.usage"] ?? { models: {}, tools: {} }) as UsageState);
-		const stats = [`↑${formatTokens(usage.input)}`, `↓${formatTokens(usage.output)}`, `R${formatTokens(usage.cacheRead)}`, `$${usage.cost.toFixed(3)}`];
 		const window = state.models.find((model) => model.provider === agent.model?.provider && model.modelId === agent.model.modelId)?.contextWindow ?? 0;
-		const tokens = contextTokens(view.entries);
-		if (window > 0 && tokens !== undefined) stats.push(`${((tokens / window) * 100).toFixed(1)}%/${formatTokens(window)}`);
+		const tokens = contextTokens(view.entries) ?? 0;
 		const label = state.conversations.find((summary) => summary.id === view.conversation.id)?.label ?? `conversation ${view.conversation.id}`;
 		const model = agent.model === undefined ? "no model" : `${agent.model.provider}/${agent.model.modelId}`;
-		this.#footer.setText(
-			`${label === "main" ? dim(label) : accent(label)}${dim(` · ${model} · thinking:${agent.thinkingLevel ?? "off"} · ${stats.join(" ")}`)}\n` +
-				dim("esc abort · shift+tab thinking · ctrl+l model · ctrl+o expand · / commands · alt+enter follow-up · ctrl+d exit"),
-		);
+		this.splashFacts = { build: state.client.daemon?.build ?? "", model, home: state.home };
+		const width = this.ui.terminal.columns;
+		this.#topBar.setText(centered(`${theme.fg("text", label)}  ${dim("$" + usage.cost.toFixed(2))}`, width));
+		const mode = this.#expanded ? "Expanded mode (Ctrl+O to collapse)" : "Collapsed mode (Ctrl+O to expand)";
+		const left = status === "" ? dim("/ commands") : theme.fg("muted", status);
+		let right = `${model}:${agent.thinkingLevel ?? "off"} · ${formatTokens(tokens)}`;
+		if (window > 0) right += ` (${Math.round((tokens / window) * 100)}%)`;
+		this.#context.setText(`\n${spread("", dim(mode), width)}\n`);
+		const lines = ["", spread(left, dim(right), width), theme.fg("borderMuted", "─".repeat(width)), dock(state.client.tasks, width)];
+		this.#footer.setText(lines.join("\n"));
 	}
 
 	#syncTranscript(entries: readonly EntryRecord[]): void {
@@ -293,7 +362,7 @@ class MochiTui {
 		const message = entry.model?.[0];
 		if (entry.kind === "pi.user" && message?.role === "user") {
 			this.#chat.addChild(new Spacer(1));
-			this.#chat.addChild(new UserMessageComponent(userText(message.content), getMarkdownTheme()));
+			this.#chat.addChild(new UserBlock(userText(message.content)));
 		} else if (entry.kind === "pi.assistant" && message?.role === "assistant") {
 			const component = this.#streaming ?? new AssistantMessageComponent(undefined, false, getMarkdownTheme());
 			if (this.#streaming === undefined) this.#chat.addChild(component);
@@ -313,9 +382,10 @@ class MochiTui {
 			const result = message as ToolResultMessage;
 			this.#tool(result.toolName, result.toolCallId).updateResult(result);
 		} else if (entry.kind === "pi.compaction") {
-			this.#text(this.#expanded && message?.role === "user" ? userText(message.content) : "[earlier context summarized]");
+			if (this.#expanded && message?.role === "user") this.#text(userText(message.content));
+			else this.#rule("earlier context summarized");
 		} else if (entry.kind === "pi.reset") {
-			this.#text("[new context]");
+			this.#rule("new context");
 		} else if (entry.kind === "app.notify" && message?.role === "user") {
 			this.#chat.addChild(new Spacer(1));
 			this.#chat.addChild(new Markdown(userText(message.content), 1, 0, getMarkdownTheme()));
@@ -333,6 +403,11 @@ class MochiTui {
 			this.#tool(content.name, content.id, content.arguments, !this.#streamingCalls.has(content.id));
 			this.#streamingCalls.add(content.id);
 		}
+	}
+
+	#rule(label: string): void {
+		this.#chat.addChild(new Spacer(1));
+		this.#chat.addChild(rule(label));
 	}
 
 	#text(text: string): void {
@@ -361,6 +436,7 @@ interface Snapshot {
 	readonly models: readonly ModelSummary[];
 	readonly usage: UsageState | undefined;
 	readonly activity: boolean;
+	readonly home: string;
 	readonly notices: readonly { readonly text: string; readonly error: boolean }[];
 }
 
@@ -374,7 +450,8 @@ export async function runTui(client: AttachClient, cwd: string, target?: Target)
 		conversations: await client.request({ op: "agents" }),
 		models: await client.request({ op: "models" }),
 		usage: await client.request({ op: "usage" }),
-		activity: true,
+		activity: false,
+		home: cwd.replace(process.env.HOME ?? "\u0000", "~"),
 		notices: [],
 	};
 	const render = () => tui.apply(state);
@@ -504,11 +581,15 @@ export async function runTui(client: AttachClient, cwd: string, target?: Target)
 
 	tui.ui.start();
 	render();
+	const ticker = setInterval(() => {
+		if (tui.busy) tui.ui.requestRender();
+	}, 80);
 	void client.closed.then(() => {
 		fail("The daemon closed the connection.");
 		exit();
 	});
 	await exited;
+	clearInterval(ticker);
 	unsubscribe();
 	tui.stop();
 }
@@ -518,8 +599,20 @@ function loadMochiTheme(): void {
 	const saved = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = dirname(fileURLToPath(import.meta.url));
 	initTheme("mochi");
+	theme = (globalThis as Record<symbol, Theme>)[Symbol.for("@earendil-works/pi-coding-agent:theme")]!;
 	if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = saved;
+}
+
+function dock(graph: TaskGraph | undefined, width: number): string {
+	const nodes = Object.values(graph?.tasks ?? {}).filter((node) => !node.abortRequested);
+	const agents = nodes.filter((node) => node.kind === "mochi.agent").length;
+	const triggers = nodes.filter((node) => node.kind === "mochi.trigger" && !(node.state.status !== "completing" && node.state.phase === "wait")).length;
+	const procs = nodes.filter((node) => node.kind === "mochi.proc").length;
+	const count = (glyph: string, n: number, noun: string) => theme.fg(n > 0 ? "success" : "muted", `${glyph} ${n} ${noun}`);
+	const separator = dim("  ·  ");
+	const row = ` ${count("◆", agents, "agents")}${separator}${count("◷", triggers, "triggers")}${separator}${count("▸", procs, "procs")}`;
+	return row.length > 0 && visibleWidth(row) > width ? row.slice(0, width) : row;
 }
 
 function statusOf(live: LiveState): string {
@@ -528,8 +621,8 @@ function statusOf(live: LiveState): string {
 	const tool = live.tools?.find((slot) => slot.status === "running");
 	if (generation?.retry !== undefined) return `Retrying (attempt ${generation.attempt + 1}): ${generation.retry.error}`;
 	if (compaction !== undefined) return `Compacting (${compaction.reason})...`;
-	if (tool !== undefined) return `Running ${tool.name}... (esc to abort)`;
-	if (live.run !== undefined) return "Working... (esc to abort)";
+	if (tool !== undefined) return `running ${tool.name} · esc abort`;
+	if (live.run !== undefined) return "working · esc abort";
 	return "";
 }
 
