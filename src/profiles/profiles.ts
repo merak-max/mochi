@@ -6,6 +6,7 @@ import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
 import { AgentDoc, configure, defineTask, type PromptSection, section, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
+import { allPages } from "../pages.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { Owner } from "../memory/memory.ts";
 import { answerText } from "../turn/turn.ts";
@@ -144,6 +145,26 @@ export async function applyAgent(tx: Tx, conversation: ConversationId, run: RunA
 	const agent = await tx.doc(AgentDoc, conversation);
 	if (run.tools === undefined) delete agent.tools;
 	else agent.tools = [...run.tools];
+}
+
+const CONTEXT_READERS = ["context_read", "context_list"];
+
+/**
+ * Gives every profile conversation with a narrowed tool list the context readers, so held input stays readable in
+ * conversations whose list was written before the readers existed or by a path that skips applyAgent. Run before resume.
+ */
+export async function addContextReaders(tx: Tx): Promise<void> {
+	const records = await allPages((cursor) => tx.scanConversations({}, 256, cursor));
+	for (const record of records) {
+		const { profile } = await tx.doc(ProfileOfDoc, String(record.id), null);
+		if (profile === null) continue;
+		const agent = await tx.doc(AgentDoc, record.id);
+		const tools = agent.tools;
+		if (!Array.isArray(tools)) continue;
+		for (const name of CONTEXT_READERS) {
+			if (!tools.includes(name)) tools.push(name);
+		}
+	}
 }
 
 const HEADER = (name: string) =>

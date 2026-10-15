@@ -17,7 +17,7 @@ import type { SearchIndex } from "./index/fts.ts";
 import type { Log } from "./log.ts";
 import { contextFns, contextSection } from "./context.ts";
 import { defineForkTask, forkFns } from "./fork/fork.ts";
-import { defineReply, ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
+import { addContextReaders, defineReply, ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
 import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
@@ -188,6 +188,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
 	};
 	await harness.commit(importOldNotes, context);
+	await harness.commit(addContextReaders, context);
 	index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
 	return { harness, classify: options.classify, line, trigger, catalog: options.profiles };
 }
