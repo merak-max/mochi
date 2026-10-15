@@ -346,4 +346,11 @@ async function run(args: readonly string[]): Promise<void> {
 	}
 }
 
-if (import.meta.main) await run(process.argv.slice(2));
+if (import.meta.main) {
+	// A reader such as head can close stdout early. That ends the output, not the command.
+	process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+		if (error.code === "EPIPE") process.exit(process.exitCode ?? 0);
+		throw error;
+	});
+	await run(process.argv.slice(2));
+}
