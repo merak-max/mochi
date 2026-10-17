@@ -5,6 +5,8 @@ const FIRECRAWL_V2_BASE_URL = "https://api.firecrawl.dev/v2";
 const MAX_RATE_LIMIT_RETRIES = 3;
 const MAX_RATE_LIMIT_WAIT_SECONDS = 30;
 const DEFAULT_RATE_LIMIT_WAIT_SECONDS = 5;
+export const SEARCH_TIMEOUT_MS = 20_000;
+export const DEFAULT_TIMEOUT_MS = 60_000;
 
 export interface SearchRequest {
 	query: string;
@@ -26,6 +28,8 @@ interface ScrapeRequest {
 	url: string;
 	formats: ["markdown", "html"];
 	onlyMainContent: true;
+	/** Firecrawl's own limit in milliseconds; keep it under the client deadline so Firecrawl gives up first. */
+	timeout: number;
 	maxAge?: number | undefined;
 }
 
@@ -84,6 +88,23 @@ function retryAfterSeconds(payload: unknown, response: Response): number | undef
 	return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }
 
+function seconds(milliseconds: number): string {
+	return `${milliseconds / 1000}s`;
+}
+
+/** Settles with `work`, or rejects as soon as `signal` aborts, even when `work` ignores the signal. */
+export function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+	return new Promise((resolve, reject) => {
+		if (signal.aborted) {
+			reject(signal.reason);
+			return;
+		}
+		const onAbort = () => reject(signal.reason);
+		signal.addEventListener("abort", onAbort, { once: true });
+		work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+	});
+}
+
 function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
@@ -112,13 +133,15 @@ export class FirecrawlClient {
 		this.#baseUrl = baseUrl.replace(/\/+$/, "");
 	}
 
-	async search(options: SearchRequest, signal?: AbortSignal): Promise<SearchHit[]> {
-		const hits = records(data(await this.#request("search", options, signal), "search").web);
+	async search(options: SearchRequest, signal?: AbortSignal, timeoutMs = SEARCH_TIMEOUT_MS): Promise<SearchHit[]> {
+		const payload = await this.#requestWithDeadline("search", options, signal, timeoutMs, `search`, `"${options.query}"`);
+		const hits = records(data(payload, "search").web);
 		return hits.flatMap((hit) => (typeof hit.url === "string" ? [{ url: hit.url, title: text(hit.title), description: text(hit.description) }] : []));
 	}
 
-	async scrape(options: ScrapeRequest, signal?: AbortSignal): Promise<ScrapedPage> {
-		const page = data(await this.#request("scrape", options, signal), "scrape");
+	async scrape(options: ScrapeRequest, signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<ScrapedPage> {
+		const payload = await this.#requestWithDeadline("scrape", options, signal, timeoutMs, "scrape", options.url);
+		const page = data(payload, "scrape");
 		const metadata = record(page.metadata) ?? {};
 		return {
 			markdown: text(page.markdown),
@@ -128,8 +151,9 @@ export class FirecrawlClient {
 		};
 	}
 
-	async map(options: { url: string; search?: string; limit: number }, signal?: AbortSignal): Promise<string[]> {
-		const links = records(success(await this.#request("map", options, signal), "map").links);
+	async map(options: { url: string; search?: string; limit: number }, signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<string[]> {
+		const payload = await this.#requestWithDeadline("map", options, signal, timeoutMs, "map", options.url);
+		const links = records(success(payload, "map").links);
 		return links.flatMap((link) => (typeof link.url === "string" ? [link.url] : []));
 	}
 
@@ -137,10 +161,12 @@ export class FirecrawlClient {
 	 * Runs one Alexandria tool through /scrape. Discovery (firecrawl/find-tools) is free; every other tool charges its listed credits.
 	 * One `x-request-id` covers the rate-limit retries, so Firecrawl replays a retried call instead of billing it twice.
 	 */
-	async alexandria(call: AlexandriaCall, signal?: AbortSignal): Promise<AlexandriaResult> {
-		const label = `alexandria ${call.provider}/${call.capability}`;
+	async alexandria(call: AlexandriaCall, signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<AlexandriaResult> {
+		const tool = `${call.provider}/${call.capability}`;
+		const label = `alexandria ${tool}`;
 		const headers = { "x-request-id": crypto.randomUUID() };
-		const response = data(await this.#request("scrape", { alexandria: [call] }, signal, headers), label);
+		const payload = await this.#requestWithDeadline("scrape", { alexandria: [call] }, signal, timeoutMs, "alexandria", tool, headers);
+		const response = data(payload, label);
 		const result = records(response.alexandria)[0];
 		if (result === undefined) throw new Error(`Firecrawl returned no result for ${label}.`);
 		const error = record(result.error);
@@ -149,26 +175,49 @@ export class FirecrawlClient {
 		return { data: (result.data ?? null) as JsonValue, creditsCost: cost, records: number(result.records) };
 	}
 
-	async #request(endpoint: string, body: object, signal?: AbortSignal, headers: Record<string, string> = {}): Promise<unknown> {
+	/**
+	 * One deadline covers the whole call, rate-limit waits included. When the deadline fires, and not the caller's signal,
+	 * this throws a plain Error, so a script can catch it and keep its other results.
+	 */
+	async #requestWithDeadline(
+		endpoint: string,
+		body: object,
+		signal: AbortSignal | undefined,
+		timeoutMs: number,
+		label: string,
+		target: string,
+		headers: Record<string, string> = {},
+	): Promise<unknown> {
+		const deadline = AbortSignal.timeout(timeoutMs);
+		const combined = signal === undefined ? deadline : AbortSignal.any([signal, deadline]);
+		try {
+			return await untilAborted(this.#request(endpoint, body, combined, headers), combined);
+		} catch (error) {
+			if (deadline.aborted && !signal?.aborted) throw new Error(`Firecrawl ${label} timed out after ${seconds(timeoutMs)} for ${target}.`);
+			throw error;
+		}
+	}
+
+	async #request(endpoint: string, body: object, signal: AbortSignal, headers: Record<string, string>): Promise<unknown> {
 		for (let attempt = 0; ; attempt++) {
-			signal?.throwIfAborted();
+			signal.throwIfAborted();
 			let response: Response;
 			try {
 				response = await fetch(`${this.#baseUrl}/${endpoint}`, {
 					method: "POST",
 					headers: { Authorization: `Bearer ${this.#apiKey}`, "Content-Type": "application/json", ...headers },
 					body: JSON.stringify(body),
-					signal: signal ?? null,
+					signal,
 				});
 			} catch (error) {
-				if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
+				if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
 				throw new Error("Firecrawl transport request failed.");
 			}
 			let payload: unknown;
 			try {
 				payload = await response.json();
 			} catch {
-				signal?.throwIfAborted();
+				signal.throwIfAborted();
 				throw new Error(`Firecrawl returned a non-JSON response (HTTP ${response.status}).`);
 			}
 			if (response.ok) return payload;

@@ -1,7 +1,7 @@
 import type { JsonValue } from "@earendil-works/chord";
 import { type Models, type Static, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
-import { type AlexandriaCall, FirecrawlClient, type SearchHit as WebHit, type SearchRequest } from "./client.ts";
+import { type AlexandriaCall, DEFAULT_TIMEOUT_MS, FirecrawlClient, type SearchHit as WebHit, type SearchRequest } from "./client.ts";
 import { cleanFirecrawlHtml, extractFirecrawlContent } from "./content.ts";
 
 const RECENCY = ["hour", "day", "week", "month", "year"] as const;
@@ -67,20 +67,24 @@ export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 		defineTool({
 			name: "web_fetch",
 			description:
-				"Clean page text, 1 credit. instruction: the fast model extracts it; schema: as JSON. maxAge 0: fresh.",
+				"Clean page text, 1 credit. instruction: the fast model extracts it; schema: as JSON. maxAge 0: fresh. timeoutMs: fetch deadline, default 60000; a slow page throws a catchable timeout error.",
 			parameters: Type.Object({
 				url: Type.String(),
 				instruction: Type.Optional(Type.String()),
 				schema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 				maxAge: Type.Optional(Type.Integer({ minimum: 0 })),
+				timeoutMs: Type.Optional(Type.Integer({ minimum: 5000, maximum: 180000 })),
 			}),
 			structuredOutputSchema: Type.String(),
 			replay: "safe",
-			execute: async ({ url, instruction, schema, maxAge }, _api, context) => {
+			execute: async ({ url, instruction, schema, maxAge, timeoutMs }, _api, context) => {
 				const signal = context.abortSignal;
 				const ask = instruction?.trim() ?? "";
 				if (schema !== undefined && ask === "") throw new Error("schema needs an instruction that says what to extract.");
-				const page = await client().scrape({ url, formats: ["markdown", "html"], onlyMainContent: true, ...(maxAge === undefined ? {} : { maxAge }) }, signal);
+				const deadline = timeoutMs ?? DEFAULT_TIMEOUT_MS;
+				const firecrawlTimeout = Math.floor(deadline * 0.75);
+				const request = { url, formats: ["markdown", "html"] as ["markdown", "html"], onlyMainContent: true as const, timeout: firecrawlTimeout, ...(maxAge === undefined ? {} : { maxAge }) };
+				const page = await client().scrape(request, signal, deadline);
 				if (page.status >= 400) throw new Error(`Page fetch failed (HTTP ${page.status}): ${page.error ?? "source returned an error"}. URL: ${url}`);
 				const markdown = (page.html === undefined ? undefined : await cleanFirecrawlHtml(page.html, url)) ?? page.markdown ?? "";
 				if (ask === "") return { structuredOutput: markdown };
