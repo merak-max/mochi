@@ -56,8 +56,8 @@ interface MochiOptions {
 	/** The apps MCP server; absent, the apps functions say it is not connected. */
 	readonly apps?: Apps;
 	readonly index: SearchIndex;
-	/** Bundled skills, `<skillsDir>/<name>/SKILL.md`, listed in the prompt and opened with `read`. */
-	readonly skillsDir: string;
+	/** Skill directories, `<dir>/<name>/SKILL.md`: bundled first, then the owner's, which replace bundled ones by name. */
+	readonly skillDirs: readonly string[];
 	readonly profiles: Profiles;
 	/** Where bash, read, edit and write run when a conversation sets no cwd. */
 	readonly workDir: string;
@@ -126,7 +126,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),
 		memoryExtension(ownerOf),
-		skillsExtension(options.skillsDir),
+		skillsExtension(options.skillDirs),
 		windowExtension(),
 		defineExtension({ name: "agents", tasks: [forkTask, reply] }),
 		defineExtension({ name: "procs", tasks: [procWatch] }),

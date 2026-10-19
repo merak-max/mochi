@@ -96,3 +96,15 @@ sonnet = "anthropic/claude-sonnet-5-5"
 # keyEnv = "FIRECRAWL_API_KEY"
 # url = "https://api.firecrawl.dev/v2"
 # browserProfile = "mochi"
+
+# Nightly self-improvement (skills/improve): judges yesterday's skill edits by measured signals, then proposes,
+# applies and records new ones in <home>/improve/library.md. <home> must be a git repository.
+# [[triggers]]
+# kind = "cron"
+# id = "improve"
+# cron = "30 4 * * *"
+# tz = "Asia/Kolkata"
+# check = [ "node", "<repo>/scripts/improve-check.ts", "<home>", "24" ]
+# model = "strongest"
+# thinking = "high"
+# prompt = "Run the improve skill: read its SKILL.md from the skills index, then follow it with the check output below."

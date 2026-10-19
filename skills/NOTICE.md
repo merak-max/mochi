@@ -8,3 +8,5 @@ The skills in this directory are adapted from MIT-licensed work. The copyright n
 | The Claude Code port these were vendored from (pstack 0.9.69) | [michael-denyer/pstack-claude](https://github.com/michael-denyer/pstack-claude) | (c) 2026 Michael Denyer | MIT |
 
 Mochi trimmed the vendored copy to the skills that serve a personal assistant, rewrote them for mochi's tools, folded the principle skills into `mochi-mode`, and rewrote the playbooks for assistant work. These modifications are released under the same MIT license. No content from cursor-team-kit remains, so its license file is not carried.
+
+`improve` adapts the method and prompts of [Harness²](https://github.com/google-research/harness2) (Copyright 2026 Google LLC, Apache License 2.0): the INV and DOM proposal dimensions, the compose step, and the experience library with per-edit verdicts. Mochi replaced probing on the same task with live signals judged on the next run, because its tasks act on the world. The Apache 2.0 license is at https://www.apache.org/licenses/LICENSE-2.0.

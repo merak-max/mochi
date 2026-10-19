@@ -186,6 +186,13 @@ The board (`mochi.board`) holds what mochi and its profiles owe. A task has an i
 
 The sweep (`mochi.board-sweep`) reads the board in code every 60 s and costs no model call unless a task is due. For a due task led by root, it forks root with the task as the brief. For a task led by a profile, it sends the brief to that profile. A woken task with no log line for 24 hours is woken again, at most 3 times per due time; the last wake asks for a notify that the task is stuck.
 
+
+## Self-improvement
+
+The `improve` trigger runs `skills/improve` nightly. It follows Harness² (recursive agent harnessing), with one change: mochi does not rerun a task to compare harnesses, because its tasks act on the world. Instead `scripts/improve-check.ts` counts failure signals per owner turn since the last run (busy sends, refused notify, side schedulers, lost children, timeouts, owner chases, duplicate replies) and writes the transcripts. The run judges each pending edit on its signal (helped, hurt, no observed effect, confounded), reverts a hurt one with git, then proposes from two dimensions (procedure and practice) with `llm` on the strongest model, composes at most 3 edits, and applies them.
+
+It edits only `<home>/skills` (which replaces a bundled skill of the same name) and `<home>/profiles`, one git commit in `<home>` per edit. Code and config changes go to the owner as proposals. `<home>/improve/library.md` keeps every edit, its verdict and at most one transferable lesson per run, and each run reads it first. A window with fewer than 10 owner turns is quiet and grows until the next run.
+
 ## Models and config
 
 `[providers.<name>]` is an endpoint, its protocol and the variable with its key. The protocols are `anthropic`, `responses`, `chat` and `classifier` (System One). A gateway is one provider per protocol it serves. `[models]` names `brain`, `fast`, `strongest`, `classifier` and `aliases`, each `<provider>/<id>`. Without `[models] classifier`, an `OPENROUTER_API_KEY` alone turns on the classifier protocol's default endpoint and model. `[models.overrides]` sets a model's cost, context window and cache life.

@@ -250,7 +250,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env, ...(config.file.providers === undefined ? {} : { providers: config.file.providers }) } }),
 			...(apps === undefined ? {} : { apps }),
 			index,
-			skillsDir: join(REPO, "skills"),
+			skillDirs: [join(REPO, "skills"), config.home.skillsDir],
 			profiles,
 			workDir,
 			channels,
