@@ -155,7 +155,8 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 			name: "fork",
 			description:
 				`Copies of you with this whole conversation, one per brief, ${FORK_BATCH} at a time; resolves to their answers in brief order. ` +
-				"Each reuses this chat's prompt cache, so fan one task out in slices: fork({briefs:[{name:'a',brief:'...'},{name:'b',brief:'...'}]}).",
+				"Each reuses this chat's prompt cache, so fan one task out in slices: fork({briefs:[{name:'a',brief:'...'},{name:'b',brief:'...'}]}). " +
+				"The calling script's timeout (10 min unless its // @options line sets timeout_ms) cancels every child still running, and all answers are lost. For slices that can take minutes, use fork_start.",
 			parameters: Type.Object({ briefs: Type.Array(Brief, { minItems: 1 }) }),
 			structuredOutputSchema: Type.Array(Type.String()),
 			replay: "safe",
@@ -185,7 +186,9 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 			description:
 				`Fresh agents with your tools and none of this conversation, one per job, ${FORK_BATCH} at a time; resolves to [{ name, answer }] in job order. ` +
 				"For a sub-task that needs tools over one slice of data: pass the slice as context keys (context_put it first) and pick a model (fast for bulk reading). " +
-				"agent({ jobs: [{ name: 'part-1', brief: 'List the errors in the context value.', context: [key], model: 'fast' }] }). Use llm for a plain completion and fork when the child needs this conversation.",
+				"agent({ jobs: [{ name: 'part-1', brief: 'List the errors in the context value.', context: [key], model: 'fast' }] }). Use llm for a plain completion and fork when the child needs this conversation. " +
+				"The calling script's timeout (10 min unless its // @options line sets timeout_ms) cancels every child still running, and all answers are lost, including the finished ones. " +
+				"For web research or browser jobs, set timeout_ms above the slowest job, and tell each job to write its result to its scratch directory as it goes.",
 			parameters: Type.Object({ jobs: Type.Array(Job, { minItems: 1 }) }),
 			structuredOutputSchema: Type.Array(Type.Object({ name: Type.String(), answer: Type.String() })),
 			replay: "safe",

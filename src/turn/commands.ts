@@ -102,9 +102,9 @@ async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "
 	].join("\n");
 }
 
-// /new keeps background work: processes and background forks.
-async function abortTargets(deps: CommandDeps, target: Conversation, command: Command, context: Context) {
-	const graph = await deps.harness.taskGraph(context);
+// /new keeps background work: processes and background forks. profile_stop reuses this with "stop".
+export async function abortTargets(harness: Pick<Harness, "taskGraph" | "inspect">, target: Pick<Conversation, "id">, command: Command, context: Context) {
+	const graph = await harness.taskGraph(context);
 	try {
 		const owned = new Set([target.id]);
 		let added = true;
@@ -121,7 +121,7 @@ async function abortTargets(deps: CommandDeps, target: Conversation, command: Co
 			if (command === "new" && task.background) continue;
 			tasks.push(task.id);
 		}
-		const submissions = (await deps.harness.inspect(context)).submissions.filter((submission) => owned.has(submission.conversationId)).map((submission) => submission.id);
+		const submissions = (await harness.inspect(context)).submissions.filter((submission) => owned.has(submission.conversationId)).map((submission) => submission.id);
 		return { tasks, submissions, running: tasks.length > 0 || submissions.length > 0 };
 	} finally {
 		graph.dispose();
@@ -146,7 +146,7 @@ export function commandTask(deps: CommandDeps) {
 					const text = await statusText({ ...deps, root: target }, context);
 					return runtime.commit(() => ({ status: "running", checkpoint: { phase: "reply", text, submission: null } }), context);
 				}
-				const targets = await abortTargets(deps, target, task.input.command, context);
+				const targets = await abortTargets(deps.harness, target, task.input.command, context);
 				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "abort", ...targets } }), context);
 			},
 			abort: async (task, runtime, context) => {

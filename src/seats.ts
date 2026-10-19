@@ -94,6 +94,7 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	profile_list: { seats: AGENT, inline: false },
 	profile_send: { seats: AGENT, inline: true },
 	profile_update: { seats: AGENT, inline: false },
+	profile_stop: { seats: AGENT, inline: false },
 };
 
 const SHARED = ["identity", "notes", "skills", "fast-compaction"];

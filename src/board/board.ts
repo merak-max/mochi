@@ -162,7 +162,7 @@ export function boardFns(deps: { readonly by: (tx: Tx, conversation: Conversatio
 		}),
 		defineTool({
 			name: "board_update",
-			description: "Change a board task: status, a new due (wakes the lead again), bots, title, and a log line saying what happened.",
+			description: "Change a board task: status, a new due (wakes the lead again), bots, title, and note: the log line saying what happened. Unknown fields such as log are rejected.",
 			parameters: Type.Object({
 				id: Type.Number(),
 				status: Type.Optional(Type.Union(STATUSES.map((status) => Type.Literal(status)))),
@@ -170,7 +170,7 @@ export function boardFns(deps: { readonly by: (tx: Tx, conversation: Conversatio
 				bots: Type.Optional(Type.Array(Bot, { minItems: 1 })),
 				title: Type.Optional(Type.String({ minLength: 1 })),
 				note: Type.Optional(Type.String()),
-			}),
+			}, { additionalProperties: false }),
 			structuredOutputSchema: TaskSchema,
 			replay: "safe",
 			execute: async ({ id, status, due, bots, title, note }, api, context) => {

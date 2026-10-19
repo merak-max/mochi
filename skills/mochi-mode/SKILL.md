@@ -1,6 +1,6 @@
 ---
 name: mochi-mode
-description: How mochi works beyond a one-line answer. Read before research, errands, plans, triggers or writing as the owner.
+description: How mochi works beyond a one-line answer. Read before research, errands, plans, triggers, writing as the owner, or handing work to a fork, agent or profile.
 ---
 
 # Mochi mode
@@ -19,6 +19,7 @@ Match the task to a playbook and open `playbooks/<file>` beside this file with `
 - **Troubleshoot.** Something the owner relies on is broken or odd, mochi included. [playbooks/troubleshoot.md](playbooks/troubleshoot.md)
 - **Autonomous run.** "Keep going until X", "handle it while I sleep", or work the owner checks later. [playbooks/autonomous-run.md](playbooks/autonomous-run.md)
 - **Big project.** Weeks, many errands or people under one goal, or nothing else fits. [playbooks/big-project.md](playbooks/big-project.md)
+- **Delegate.** You hand work to a fork, an agent or a profile, send it a change, or report its status to the owner. [playbooks/delegate.md](playbooks/delegate.md)
 - **Pause.** The owner says stop or hold, or work must be parked to resume later. [playbooks/pause.md](playbooks/pause.md)
 - **Onboarding.** Memory holds nothing about the owner yet, or the owner says they're new. [playbooks/onboarding.md](playbooks/onboarding.md)
 
@@ -26,7 +27,7 @@ Run `recall` before resuming anything and before telling the owner something was
 
 ## Scripts
 
-Every tool except `codemode` and `handoff` runs inside a `codemode` script as `await tools.<name>(args)`. `notify` works both ways. That includes `read`, `bash`, `note`, `recall` and `react`.
+Every tool except `codemode` and `handoff` runs inside a `codemode` script as `await tools.<name>(args)`. That includes `read`, `bash`, `note`, `recall` and `react`. `notify` is refused in root, the owner's own thread: there, your reply is the message, and a file goes out as an `attach: <path>` line in it.
 
 - Only what the script returns or prints reaches you. Filter and summarize inside the script.
 - A tool that is not listed in the `codemode` section is still there. Find it with `searchTools("words")`, then call it as `tools.<name>`. There is no bare `classify()` or `profile_send()`.
@@ -76,11 +77,15 @@ You are software, so you can do what a person can't: copy yourself, run many of 
 
 - `fork` copies you as you are now, this whole conversation, once per brief. A brief is just the copy's next message, and every copy reuses this conversation's prompt cache, so forks are cheap. One call fans out a batch: `tools.fork({ briefs: [{ name: "a", brief: "..." }, { name: "b", brief: "..." }] })` runs up to six at once and resolves to their answers in brief order. Use it to try three drafts and pick one, check a plan from another angle, or split a job you already understand.
 - Each fork keeps its files in its own scratch directory, and code work happens in a git worktree of its own, never the shared checkout.
-- Profiles are standing teammates with their own role, model and memory: `relay` for mail, `distro` for outreach, `kubera` for money, and the rest in `profile_list`. For anything else, do it yourself or fork. Give one a task with `tools.profile_send({ name, message })` and it resolves to the answer. Pass `background: true` for long work; the profile calls notify when the owner needs the result. To hand over a board item, send its id.
+- Profiles are standing teammates with their own role, model and memory: `relay` for mail, `distro` for outreach, `kubera` for money, and the rest in `profile_list`. For anything else, do it yourself or fork. Give one a task with `tools.profile_send({ name, message })` and it resolves to the answer. Pass `background: true` for long work. To hand over a board item, send its id.
 - A two-step task stays with you. Fork to keep bulky reading out of this conversation, to cover independent slices at once, or to get a second view. Send to a profile when the work is its role.
-- Work longer than a script goes to `fork_start` or `profile_send` with `background`. Its answer merges back here as a new message. Never guess a result that hasn't arrived. If the owner asks, say it is still running.
-- You own every word the owner sees from this conversation, so read a fork's or a profile's result, check the claims that matter, and write your own summary.
+- Work longer than a script goes to `fork_start` or `profile_send` with `background`. Its answer merges back here as a new message. Never guess a result that hasn't arrived. If the owner asks, say whether it is queued or running, per the delegate playbook.
+- A profile works one turn at a time. A result that starts with `NOT STARTED` means your message waits behind its current turn, which can take an hour. Do not tell the owner that work has started until you saw it start. Urgent work goes to `fork_start` or an idle profile instead. A correction to a busy profile's running job goes as one message, not one per owner text: every queued message gets its own copy of the same answer.
+- `fork` and `agent` children die with the calling script: at its timeout (10 min by default) every unfinished answer is lost. A fan-out of web or browser jobs goes to `fork_start`, or sets `// @options: {"timeout_ms": ...}` above the slowest job and tells each job to write results to its scratch directory as it goes.
+- On the owner's stop, call `profile_stop` for each profile that works on it, then check what it left behind: `proc_status`, `trigger_list`, `board_list`, and `systemctl --user list-timers`. Report what already went out from the real record (Sent folder, confirmation mails), not from the profile's word.
+- Later work goes on the board or a trigger, never on `systemd-run`, `cron`, `at` or `nohup`. Root cannot see or stop those, and they fire after the owner says stop.
 - A second opinion is the same brief on a different model: send it to a profile on another model, or fork twice and compare.
+- You own every word the owner sees from this conversation, so read a fork's or a profile's result, check the claims that matter, and write your own summary.
 
 ## Writing the reply
 

@@ -5,6 +5,7 @@ import type { Context } from "@earendil-works/chord";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
 import { AgentDoc, configure, defineTask, type PromptSection, section, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { holdText } from "../context.ts";
+import { abortTargets } from "../turn/commands.ts";
 import { journaled } from "../journal.ts";
 import { allPages } from "../pages.ts";
 import { createSeatConversation } from "../seats.ts";
@@ -169,7 +170,8 @@ export async function addContextReaders(tx: Tx): Promise<void> {
 
 const HEADER = (name: string) =>
 	`You are the ${name} profile, a standing teammate of mochi. Each message here starts with [from <sender>]: root (mochi) or another profile, never the owner. ` +
-	"Answer the sender. Ask any teammate directly with tools.profile_send when you need what they know; profile_list shows who does what. Use notify only when the owner must see something now.";
+	"Answer the sender. Ask any teammate directly with tools.profile_send when you need what they know; profile_list shows who does what. Use notify only when the owner must see something now. " +
+	"Anything that must happen later goes on tools.board_add with a due or a once trigger, never systemd-run, cron, at or nohup, so root can see and stop it.";
 
 async function ensureConversation(tx: Tx, profile: Profile, profiles: Profiles): Promise<ConversationId> {
 	const doc = await tx.doc(ProfileDoc, profile.name, null);
@@ -180,8 +182,18 @@ async function ensureConversation(tx: Tx, profile: Profile, profiles: Profiles):
 }
 
 type Host = Pick<Harness, "commit" | "conversation">;
+type StopHost = Pick<Harness, "commit" | "taskGraph" | "inspect" | "abortSubmission" | "abortTask" | "waitForTask">;
 
 type ReplyInput = { readonly submission: SubmissionId; readonly to: ConversationId; readonly from: string; readonly re: string };
+
+/** Answers already sent back, keyed by asker and answer. Queued follow-ups merge into one profile turn, so they settle with the same answer. */
+const DeliveredDoc = defineDocFamily<{ delivered: boolean }, null>({
+	kind: "mochi.reply-delivered",
+	version: 1,
+	scope: "session",
+	family: true,
+	initial: () => ({ delivered: false }),
+});
 
 /**
  * Waits for a profile's answer to a message nobody waits for inline, then sends it back to the asker's conversation as
@@ -196,14 +208,20 @@ export const defineReply = (harness: () => Pick<Harness, "submission" | "commit"
 			const { submission, to, from, re } = task.input;
 			const settled = await (await harness().submission(submission, context))!.wait(context);
 			let body = "(no answer: it finished without a reply)";
+			let duplicate = false;
 			if (settled.status === "unanswered") body = `(no answer: ${settled.reason ?? "unanswered"})`;
 			else if (settled.type === "input") {
 				let answer = "";
-				await runtime.commit(async (tx) => void (answer = await answerText(tx, settled.answer)), context);
+				await runtime.commit(async (tx) => {
+					answer = await answerText(tx, settled.answer);
+					const seen = await tx.doc(DeliveredDoc, `${to}:${String(settled.answer)}`, null);
+					duplicate = seen.delivered;
+					seen.delivered = true;
+				}, context);
 				if (answer !== "") body = answer;
 			}
 			const target = await runtime.conversation(to, context);
-			if (target !== undefined) {
+			if (target !== undefined && !duplicate) {
 				const held = await holdText(harness(), workDir, to, `in:reply:${task.id}`, body, context);
 				await target.submit({ type: "input", content: `[from ${from}] re: ${re}\n${held}`, requestId: `reply:${task.id}`, whenBusy: "followUp" }, context);
 			}
@@ -229,7 +247,7 @@ export async function sendToProfile(host: Host, profiles: Profiles, workDir: str
 
 export type ReplyTask = ReturnType<typeof defineReply>;
 
-export function profileFns(profiles: Profiles, host: () => Host, reply: ReplyTask, workDir: string): ToolRegistration[] {
+export function profileFns(profiles: Profiles, host: () => Host & StopHost, reply: ReplyTask, workDir: string): ToolRegistration[] {
 	return [
 		defineTool({
 			name: "profile_list",
@@ -243,7 +261,9 @@ export function profileFns(profiles: Profiles, host: () => Host, reply: ReplyTas
 			name: "profile_send",
 			description:
 				"Give a profile a message: a task, a question, or a board item id. Profiles message each other this way too. It works in its own standing conversation with its own memory. " +
-				"Resolves to its answer. With background, or when the profile is busy, it returns at once and the answer arrives here later as a new message.",
+				"Resolves to its answer. With background, it returns at once and the answer arrives here later as a new message. " +
+				"A busy profile does not start your message: it waits until the profile's current turn ends, which can take an hour. The result then starts with NOT STARTED. " +
+				"Never tell the owner that queued work has started; for urgent work use fork_start, agent with background, or an idle profile, or profile_stop first.",
 			parameters: Type.Object({ name: Type.String(), message: Type.String({ minLength: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.String(),
 			replay: "unsafe",
@@ -255,11 +275,36 @@ export function profileFns(profiles: Profiles, host: () => Host, reply: ReplyTas
 				// A busy profile may be waiting on this very caller, so an inline wait could never end: its answer comes back later.
 				if (background === true || busy) {
 					await api.commit((tx) => journaled(tx, api.taskId, "reply", () => tx.createTask(reply, { submission: submission.id, to: api.conversationId, from: name, re: firstLine(message) }, { ownership: { kind: "conversation" }, conversationId: api.conversationId, background: true })), context);
-					return { structuredOutput: busy ? `${name} is busy; your message is queued, and its answer comes back here as a new message.` : `Sent to ${name}; its answer comes back here as a new message.` };
+					return {
+						structuredOutput: busy
+							? `NOT STARTED: ${name} is busy with an earlier turn, so your message waits in its queue until that turn ends. Its answer comes back here as a new message. If this is urgent, give it to a fork, an agent or an idle profile, or call profile_stop first.`
+							: `Sent to ${name}; its answer comes back here as a new message.`,
+					};
 				}
 				const settled = await submission.wait(context);
 				if (settled.status !== "done" || settled.type !== "input") throw new Error(`Profile ${name} did not answer: ${settled.reason ?? settled.status}.`);
 				return { structuredOutput: await api.commit((tx) => answerText(tx, settled.answer), context) };
+			},
+		}),
+		defineTool({
+			name: "profile_stop",
+			description:
+				"Stop a profile now: abort its running turn, its queued messages, and the forks and agents it started. Use it when the owner says stop or a brief is wrong. " +
+				"It does not stop shell processes, triggers or board tasks the profile made: check proc_status, trigger_list, board_list and `systemctl --user list-timers` after it. Resolves to what it stopped.",
+			parameters: Type.Object({ name: Type.String() }),
+			structuredOutputSchema: Type.String(),
+			replay: "safe",
+			execute: async ({ name }, api, context) => {
+				await profiles.get(name);
+				const conversation = await api.commit(async (tx) => (await tx.doc(ProfileDoc, name, null)).conversation, context);
+				if (conversation === null) return { structuredOutput: `${name} has never run; nothing to stop.` };
+				const harness = host();
+				const targets = await abortTargets(harness, { id: conversation }, "stop", context);
+				for (const id of targets.submissions) await harness.abortSubmission(id, context);
+				for (const id of targets.tasks) await harness.abortTask(id, context);
+				for (const id of targets.tasks) await harness.waitForTask(id, context);
+				if (!targets.running) return { structuredOutput: `${name} was idle; nothing was running.` };
+				return { structuredOutput: `Stopped ${name}: ${targets.submissions.length} messages and ${targets.tasks.length} child tasks aborted. Calls that already ran are not undone; check their results.` };
 			},
 		}),
 		defineTool({
@@ -285,7 +330,7 @@ export function rosterSection(profiles: Profiles): PromptSection {
 		const lines = (await profiles.all()).map((profile) => `${profile.name}: ${profile.description}`);
 		if (lines.length === 0) return undefined;
 		return [
-			"Standing teammates. When a task is one of these roles, hand it over with tools.profile_send({ name, message }) instead of doing it yourself; background: true for long work. Its answer comes back here.",
+			"Standing teammates. When a task is one of these roles, hand it over with tools.profile_send({ name, message }) instead of doing it yourself.",
 			...lines,
 		].join("\n");
 	});

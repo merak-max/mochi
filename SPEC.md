@@ -88,7 +88,7 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 | Web | `web_search`, `web_fetch`, `web_map`, `web_find_tools`, `web_alexandria`, `browse`, `browse_fast` |
 | Apps | `apps_search`, `apps_call`, `apps_skills` |
 | Media | `image_gen`, `video_gen`, `speak`, `transcribe`, `gif_search`, `gif_save` |
-| Forks and profiles | `fork`, `fork_start`, `agent`, `profile_list`, `profile_send`, `profile_update` |
+| Forks and profiles | `fork`, `fork_start`, `agent`, `profile_list`, `profile_send`, `profile_stop`, `profile_update` |
 | Triggers | `trigger_add`, `trigger_list`, `trigger_remove` |
 | Board | `board_add`, `board_list`, `board_update`, `board_claim` |
 | Processes | `proc_start`, `proc_status`, `proc_logs`, `proc_stop` |
@@ -153,6 +153,10 @@ Each brief names its own scratch directory, `<work>/forks/<name>`, and tells the
 A profile is a standing teammate inside the daemon: `<home>/profiles/<name>/instructions.md`, with front matter for `description`, `model`, `thinking` and an optional `tools` list. The bundled `agents/worker.md` is a profile too; a home profile with the same name replaces it. Profile files are read on each use, so an edit reaches the next message without a restart.
 
 `profile_send({ name, message, background? })` submits to the profile's standing conversation (`mochi.profile` records it) and resolves to the answer, or returns at once with `background`. Each send writes the profile's model, instructions and tool list into its conversation, and records the conversation's owner in `mochi.profile-of`, so its memory section and its `note` calls use the profile's own memory log. `profile_update` writes a profile file.
+
+A busy profile queues a message (`whenBusy: "followUp"`) and `profile_send` returns at once with a result that starts with `NOT STARTED`. Queued messages merge into the profile's next turn, so they settle with one answer; `mochi.reply` keys each delivery by asker and answer (`mochi.reply-delivered`) and sends that answer back once.
+
+`profile_stop({ name })` aborts the profile's running turn, its queued submissions and the child tasks under its conversation, the same walk `/stop` does for root (`abortTargets` in `turn/commands.ts`). It does not stop processes, triggers or board tasks.
 
 ## Triggers
 
