@@ -29,13 +29,33 @@ function splitLinks(paragraph: string): string[] {
 	return [...out, lines.join("\n")];
 }
 
+/** A list item starts a line: "1." or "1)" or "-" or "*" or "•" then a space. */
+const LIST_ITEM = /^[ \t]*(\d+[.)]|[-*•])[ \t]/;
+
+/** Splits a long paragraph at list items, then line breaks, then sentence ends, so an item never parts from its text. */
 function splitLong(paragraph: string, max: number): string[] {
+	if (paragraph.length <= max) return [paragraph];
+	const lines = paragraph.split("\n");
+	if (lines.length > 1) {
+		const items: string[] = [];
+		for (const line of lines) {
+			const startsItem = LIST_ITEM.test(line);
+			if (items.length === 0 || startsItem) items.push(line);
+			else items[items.length - 1] += `\n${line}`;
+		}
+		const pieces = items.length > 1 ? items : lines;
+		return pieces.flatMap((piece) => splitLong(piece.trim(), max)).filter((piece) => piece !== "");
+	}
 	const out: string[] = [];
 	let rest = paragraph;
 	while (rest.length > max) {
 		const window = rest.slice(0, max);
-		const sentence = Math.max(...[". ", "! ", "? ", ".\n", "!\n", "?\n"].map((end) => window.lastIndexOf(end)));
-		const cut = sentence > 0 ? sentence + 1 : window.lastIndexOf(" ");
+		let cut = -1;
+		for (const match of window.matchAll(/[.!?] /g)) {
+			const before = window.slice(0, match.index);
+			if (!/(^|\s)\d+$/.test(before)) cut = match.index + 1;
+		}
+		if (cut <= 0) cut = window.lastIndexOf(" ");
 		if (cut <= 0) break;
 		out.push(rest.slice(0, cut).trim());
 		rest = rest.slice(cut).trim();
