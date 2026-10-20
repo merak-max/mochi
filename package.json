@@ -11,7 +11,8 @@
   "scripts": {
     "start": "node src/main.ts",
     "chat": "node src/main.ts chat",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
     "@earendil-works/chord": "1.2.0",
