@@ -218,7 +218,7 @@ export async function inputPasses(
 const outputSteps = (trigger: Trigger): readonly ClassifyStep[] =>
 	stepsOf(trigger).flatMap((step: Step) => ("classify" in step && step.classify.on === "output" ? [step.classify] : []));
 
-async function runAgent(trigger: Trigger, catalog: Profiles): Promise<RunAgent> {
+export async function runAgent(trigger: Trigger, catalog: Profiles): Promise<RunAgent> {
 	const header = `${INSTRUCTIONS}
 Trigger: ${trigger.id}.`;
 	const name = trigger.profile ?? trigger.role;

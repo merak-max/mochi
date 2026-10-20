@@ -11,7 +11,8 @@ import { type Log, log } from "../log.ts";
 import type { Mochi } from "../mochi.ts";
 import { pause } from "../pause.ts";
 import type { Classify } from "../brain/classifier.ts";
-import { inputPasses, liveTrigger, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds } from "./trigger.ts";
+import { applyAgent, type Profiles } from "../profiles/profiles.ts";
+import { inputPasses, liveTrigger, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds, runAgent } from "./trigger.ts";
 import type { WebhookAuth } from "./types.ts";
 
 const BODY_LIMIT = 1024 * 1024;
@@ -19,6 +20,7 @@ const DELIVERY_HEADERS = ["x-github-delivery", "x-request-id", "webhook-id"];
 
 interface WebhookDeps {
 	readonly harness: Pick<Harness, "commit" | "conversation">;
+	readonly catalog: Profiles;
 	readonly log: Log;
 	readonly classify: Classify;
 	readonly workDir: string;
@@ -87,6 +89,8 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	const memo = new Map<string, number>();
 	const remember = async (key: string, value?: number) => (value === undefined ? memo.get(key) : (memo.set(key, value), value));
 	if (!(await inputPasses(trigger, body.toString("utf8"), deps.classify, remember, deps.log, context))) return reply(response, 202, "accepted");
+	const run = await runAgent(trigger, deps.catalog);
+	await deps.harness.commit((tx) => applyAgent(tx, found.conversationId, run), context);
 	const conversation = await deps.harness.conversation(found.conversationId, context);
 	try {
 		const content = await holdText(deps.harness, deps.workDir, found.conversationId, `in:${requestId}`, webhookContent(id, trigger.prompt, body.toString("utf8")), context);
@@ -114,6 +118,6 @@ export async function triggersComponent({ harness, trigger, catalog, classify, l
 	const seeds = parseSeeds(config.file, config.users);
 	await reconcileSeeds(harness, trigger, seeds, catalog, context);
 	const listen = { host: config.env.MOCHI_BIND_HOST || "127.0.0.1", port: Number(config.env.MOCHI_HOOKS_PORT || 8788) };
-	const { address } = await startWebhookServer({ harness, log, classify, workDir: line.workDir }, listen, context);
+	const { address } = await startWebhookServer({ harness, catalog, log, classify, workDir: line.workDir }, listen, context);
 	log("triggers.started", { seeds: seeds.map((seed) => seed.id), hooks: `${address.address}:${address.port}` });
 }
