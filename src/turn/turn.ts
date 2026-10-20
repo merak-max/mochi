@@ -47,6 +47,7 @@ import { loadOutgoing } from "../media/files.ts";
 import { prepareInbound } from "../media/inbound.ts";
 import { splitDirectives, withEffect } from "../channels/directives.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
+import { keyedReset } from "./lifecycle.ts";
 import { streamParagraphs } from "./stream.ts";
 
 // A Turn is a background task of the ownerless line conversation, so neither Esc nor /stop on root reaches it.
@@ -223,6 +224,13 @@ async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "
 	return images.length === 0 ? text : [{ type: "text", text }, ...images];
 }
 
+/** A provider usage-policy block poisons the whole window: every later request is blocked too. */
+function blockedByPolicy(settled: { readonly status: string; readonly detail?: unknown }): boolean {
+	return settled.status === "unanswered" && typeof settled.detail === "string" && settled.detail.includes("Usage Policy");
+}
+
+const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and the board are kept.";
+
 /** The answer without the paragraphs already streamed, so the final send never repeats one. */
 function unstreamed(text: string, streamed: readonly string[]): string {
 	if (streamed.length === 0) return text;
@@ -326,6 +334,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 						sent: streamed,
 						onSent: (sent) => runtime.commit(() => running({ phase: "run", streamed: [...sent] }), context).then(() => {}),
 						onError: (error) => log("turn.stream_failed", { task: task.id, error: String(error) }),
+						onPartial: (chars, closed) => log("turn.partial", { task: task.id, chars, closed }),
 					});
 				let settled;
 				let nudge: ReturnType<typeof setTimeout> | undefined;
@@ -338,6 +347,12 @@ export function defineTurn(host: TurnHost): TurnTask {
 						void conversation.submit({ type: "input", content: SLOW_NUDGE, requestId: `${input.key}:nudge`, whenBusy: "steer" }, context).catch(() => {});
 					}, SLOW_NUDGE_MS);
 					settled = await submission.wait(context);
+					if (blockedByPolicy(settled)) {
+						log("turn.policy_reset", { task: task.id, conversation: conversationId });
+						await keyedReset(conversation, `policy-reset:${input.key}`, undefined, Date.now(), context);
+						settled = await (await conversation.submit({ type: "input", content, requestId: `${input.key}:after-reset`, whenBusy: "steer" }, context)).wait(context);
+						if (channel !== undefined) await channel.send({ kind: "text", text: POLICY_RESET_NOTE }, input.person).catch(() => {});
+					}
 				} finally {
 					clearTimeout(nudge);
 					await stopStream();

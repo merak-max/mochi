@@ -34,6 +34,7 @@ export function streamParagraphs(input: {
 	readonly sent: string[];
 	readonly onSent: (sent: readonly string[]) => Promise<void>;
 	readonly onError: (error: unknown) => void;
+	readonly onPartial?: (chars: number, closed: number) => void;
 }): () => Promise<void> {
 	let queue = Promise.resolve();
 	// The closed paragraphs already handled in the current generation; a new generation's text does not start with them.
@@ -44,6 +45,7 @@ export function streamParagraphs(input: {
 			const message = (change.value as { generation?: { message?: AssistantMessage } } | null)?.generation?.message;
 			if (message === undefined) continue;
 			const closed = closedParagraphs(messageText(message));
+			input.onPartial?.(messageText(message).length, closed.length);
 			let same = closed.length >= handled.length;
 			for (let index = 0; same && index < handled.length; index++) same = closed[index] === handled[index];
 			if (!same) handled = [];
