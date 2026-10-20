@@ -1,18 +1,15 @@
 import type { Context } from "@earendil-works/chord";
-import type { Models } from "@earendil-works/pi-ai";
-import { AgentDoc, AssistantEntry, type ConversationId, type Harness, LiveDoc } from "@earendil-works/pi-durable";
+import { AssistantEntry, type ConversationId, type Harness, LiveDoc } from "@earendil-works/pi-durable";
 
 /**
- * Starts pi-durable's own compaction of a conversation once a request used more than `compactAt` of the model's context
- * window. pi-durable compacts only near the full window, which on a 1M-token model is never.
+ * Starts pi-durable's own compaction of a conversation once a request sent more than `compactTokens`. pi-durable compacts
+ * only near the full window, which on a 1M-token model is never. As in uniichat, the window stays small on every model:
+ * compaction keeps the newest turns verbatim and the turn log's summary lines for the rest.
  */
-export function watchCompaction(harness: Harness, models: Models, compactAt: number, context: Context, onError: (error: unknown) => void): () => void {
+export function watchCompaction(harness: Harness, compactTokens: number, context: Context, onError: (error: unknown) => void): () => void {
 	const starting = new Set<ConversationId>();
 	const check = async (conversation: ConversationId, used: number): Promise<void> => {
-		const agent = await harness.snapshot(AgentDoc, conversation, context);
-		if (agent?.model === undefined) return;
-		const model = models.getModel(agent.model.provider, agent.model.modelId);
-		if (model === undefined || used <= compactAt * model.contextWindow) return;
+		if (used <= compactTokens) return;
 		if ((await harness.snapshot(LiveDoc, conversation, context))?.compactions !== undefined) return;
 		const target = await harness.conversation(conversation, context);
 		await target?.compact(undefined, context);

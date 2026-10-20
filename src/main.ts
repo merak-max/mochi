@@ -234,7 +234,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	await mkdir(workDir, { recursive: true });
 	const a2a = a2aServerSetup(config.env);
 	const setup = [...setupReport([...services(config), ["a2a", a2a]]), ...channelReport];
-	for (const line of setup) log("setup", { line });
+	log("setup", { ok: setup.filter((line) => line.startsWith("ok")).map((line) => line.slice(5)), other: setup.filter((line) => !line.startsWith("ok")) });
 	const { models } = config.modelSetup;
 	const profiles = new Profiles(config.home.profilesDir, join(REPO, "agents"), config.modelSetup.ref);
 	const apps = config.appsUrl === undefined ? undefined : connectApps(storedTokenConnector(config.appsUrl, authFile(config.home.dir)), log);
@@ -265,7 +265,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		BACKGROUND_CONTEXT,
 	);
 	mochi.harness.resume();
-	const stopCompaction = watchCompaction(mochi.harness, models, config.modelSetup.compactAt, running, (error) => log("compaction.failed", { error: String(error) }));
+	const stopCompaction = watchCompaction(mochi.harness, config.modelSetup.compactTokens, running, (error) => log("compaction.failed", { error: String(error) }));
 	const facts: DaemonFacts = {
 		startedAt: new Date(),
 		build: buildOf(),
