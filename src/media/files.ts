@@ -3,18 +3,10 @@ import { constants } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { lookup } from "mime-types";
 import type { Bubble } from "../channels/types.ts";
 
-const MIME: Readonly<Record<string, string>> = {
-	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
-	".gif": "image/gif", ".heic": "image/heic", ".heif": "image/heif", ".avif": "image/avif",
-	".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
-	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav",
-	".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac",
-	".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json",
-};
-
-export const mimeOf = (path: string): string => MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
+export const mimeOf = (path: string): string => lookup(path) || "application/octet-stream";
 
 function within(root: string, path: string): boolean {
 	const rel = relative(root, path);

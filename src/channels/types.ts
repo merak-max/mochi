@@ -112,7 +112,9 @@ export function attachmentKind(mimeType: string): Attachment["kind"] {
 	return "file";
 }
 
-/** Splits at the last newline or space before `limit`, never inside a surrogate pair. */
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Splits at the last newline or space before `limit`, else at the last grapheme boundary, so no emoji or letter breaks. */
 export function chunkText(text: string, limit: number): string[] {
 	const chunks: string[] = [];
 	let rest = text;
@@ -123,8 +125,13 @@ export function chunkText(text: string, limit: number): string[] {
 			rest = rest.slice(soft + 1);
 			continue;
 		}
-		const code = rest.charCodeAt(limit - 1);
-		const hard = code >= 0xd800 && code <= 0xdbff ? limit - 1 : limit;
+		let hard = 0;
+		for (const { index, segment } of graphemes.segment(rest)) {
+			const end = index + segment.length;
+			if (end > limit && hard > 0) break;
+			hard = end;
+			if (end >= limit) break;
+		}
 		chunks.push(rest.slice(0, hard));
 		rest = rest.slice(hard);
 	}

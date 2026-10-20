@@ -1,5 +1,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
+import { parseHTML } from "linkedom";
 import { saveOutput } from "./files.ts";
 
 const SEARCH_URL = "https://tenor.com/search/";
@@ -9,22 +10,15 @@ const MAX_GIF_BYTES = 8_000_000;
 
 type GifHit = { url: string; description: string };
 
-const ENTITIES: Readonly<Record<string, string>> = { "&quot;": '"', "&amp;": "&", "&lt;": "<", "&gt;": ">" };
-
-function decode(text: string): string {
-	return text.replace(/&(?:quot|amp|lt|gt|#(\d+));/g, (entity, code: string | undefined) => (code === undefined ? ENTITIES[entity]! : String.fromCodePoint(Number(code))));
-}
-
 function parseTenorPage(html: string): GifHit[] {
+	const { document } = parseHTML(html);
 	const hits: GifHit[] = [];
 	const seen = new Set<string>();
-	for (const figure of html.matchAll(/<figure class="UniversalGifListItem[\s\S]*?<\/figure>/g)) {
-		const image = /<img src="(https:\/\/media\.tenor\.com\/[^"]+\.gif)"[^>]*alt="([^"]*)"/.exec(figure[0]);
-		if (image === null) continue;
-		const url = image[1]!;
-		if (seen.has(url)) continue;
+	for (const image of document.querySelectorAll(`figure.UniversalGifListItem img[src^="https://${MEDIA_HOST}/"]`)) {
+		const url = image.getAttribute("src") ?? "";
+		if (!url.endsWith(".gif") || seen.has(url)) continue;
 		seen.add(url);
-		hits.push({ url, description: decode(image[2]!).replace(/``/g, '"').trim() });
+		hits.push({ url, description: (image.getAttribute("alt") ?? "").replace(/``/g, '"').trim() });
 	}
 	return hits;
 }

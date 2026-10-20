@@ -1,4 +1,5 @@
 import type { JsonValue } from "@earendil-works/chord";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const FIRECRAWL_V2_BASE_URL = "https://api.firecrawl.dev/v2";
 /** Free plans allow about 12 requests a minute, and a script's `Promise.all` reaches that fast. */
@@ -105,23 +106,6 @@ export function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<
 	});
 }
 
-function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		if (signal?.aborted) {
-			reject(signal.reason);
-			return;
-		}
-		const onAbort = () => {
-			clearTimeout(timer);
-			reject(signal?.reason);
-		};
-		const timer = setTimeout(() => {
-			signal?.removeEventListener("abort", onAbort);
-			resolve();
-		}, milliseconds);
-		signal?.addEventListener("abort", onAbort, { once: true });
-	});
-}
 
 /** Firecrawl v2 search, scrape, map and Alexandria, reading only the fields mochi uses. */
 export class FirecrawlClient {
@@ -224,7 +208,7 @@ export class FirecrawlClient {
 			if (response.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
 				const wait = retryAfterSeconds(payload, response) ?? DEFAULT_RATE_LIMIT_WAIT_SECONDS;
 				if (wait <= MAX_RATE_LIMIT_WAIT_SECONDS) {
-					await sleep(wait * 1000 + 250, signal);
+					await sleep(wait * 1000 + 250, undefined, signal === undefined ? {} : { signal });
 					continue;
 				}
 			}
