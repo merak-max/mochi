@@ -22,7 +22,7 @@ import {
 	type Tx,
 	type UserInput,
 } from "@earendil-works/pi-durable";
-import { pace, present } from "../channels/present.ts";
+import { present } from "../channels/present.ts";
 import { type Committer, holdText } from "../context.ts";
 import {
 	type Attachment,
@@ -346,10 +346,6 @@ export function defineTurn(host: TurnHost): TurnTask {
 						if (bubbles.length === 0) return runtime.commit(() => completed("silent"), context);
 						if (sent >= bubbles.length) return runtime.commit(() => finished, context);
 						bubble = bubbles[sent];
-						if (sent > 0 && bubble !== undefined) {
-							void channel.typing(true, person).catch(() => {});
-							await runtime.sleep(runtime.now() + pace(bubble), context);
-						}
 					}
 					try {
 						if (channel === undefined || bubble === undefined) throw new ChannelDown(`${id} is not running in this process`);
@@ -363,8 +359,10 @@ export function defineTurn(host: TurnHost): TurnTask {
 						}
 						const chatThread = task.input.source === "chat" && outgoingBubble.kind === "text" ? task.input.threadOn : undefined;
 						const threadOn = outgoing.replyTo ?? chatThread;
+						const sendStart = Date.now();
 						if (sent === 0 && threadOn !== undefined) await channel.send(outgoingBubble, person, { replyTo: threadOn });
 						else await channel.send(outgoingBubble, person);
+						log("turn.sent", { task: task.id, bubble: sent, ms: Date.now() - sendStart, sinceStart: Date.now() - (task.startedAt ?? Date.now()) });
 					} catch (error) {
 						if (!(error instanceof DeliveryError)) {
 							log("turn.faulted", { task: task.id, answer, error: String(error) });

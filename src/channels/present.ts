@@ -15,11 +15,6 @@ export function present(text: string, profile: ChannelProfile): readonly Bubble[
 	return kept.map((piece): Bubble => (URL_ONLY.test(piece) ? { kind: "link", url: piece } : { kind: "text", text: piece }));
 }
 
-export function pace(bubble: Bubble): number {
-	const chars = bubble.kind === "text" ? bubble.text.length : bubble.kind === "link" ? bubble.url.length : 0;
-	return Math.min(2_200, Math.max(400, chars * 35));
-}
-
 function splitLinks(paragraph: string): string[] {
 	const out: string[] = [];
 	let lines: string[] = [];
