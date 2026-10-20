@@ -26,7 +26,7 @@ const REMEMBERED_MESSAGES = 200;
 const IMESSAGE_PROFILE: ChannelProfile = {
 	id: "imessage",
 	style:
-		"imessage: markdown renders (**bold**, *italic*, lists); no tables or headings. Each blank-line paragraph is a bubble: one to three short ones. A link alone on a line shows a card. " +
+		"imessage: markdown renders (**bold**, *italic*, lists); no tables or headings. Each blank-line paragraph is a bubble. Default to one short bubble; use more only when he asked for detail. A link alone on a line shows a card. " +
 		"Lines: attach: <path>, voice: <path>, effect: <slam|loud|gentle|invisible|confetti|fireworks|lasers|heart|balloons|echo|sparkles|spotlight>, reply: <id>. tools.message edits, unsends, polls.",
 	maxBubbles: 3,
 	maxBubbleChars: 400,
