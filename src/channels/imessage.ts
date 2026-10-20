@@ -227,23 +227,13 @@ async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
 			if (target === undefined) return space.send(content);
 			return space.send(reply(content, target));
 		};
-		// Markdown renders as native bold, italic and lists; text that renders to nothing goes plain.
-		const styled = (text: string): ContentInput => (/[*_~`#\[]|^\s*[-+]\s/m.test(text) ? markdown(text) : text);
-		const sendStyled = async (text: string, targetMessageId: string | undefined) => {
-			try {
-				return await sendThreaded(styled(text), targetMessageId);
-			} catch (error) {
-				if (!(error instanceof Error) || !error.message.includes("renders to empty text")) throw error;
-				return sendThreaded(text, targetMessageId);
-			}
-		};
 		return {
-		send: (text) => sendStyled(text, undefined),
-		sendReply: (text, targetMessageId) => sendStyled(text, targetMessageId),
+		send: (text) => space.send(markdown(text)),
+		sendReply: (text, targetMessageId) => sendThreaded(markdown(text), targetMessageId),
 		sendLink: (url) => space.send(richlink(url)),
 		sendFile: (file, replyTo) => sendThreaded(attachment(Buffer.from(file.bytes), { name: file.name, mimeType: file.mimeType }), replyTo),
 		sendVoice: (file, replyTo) => sendThreaded(voice(Buffer.from(file.bytes), { name: file.name, mimeType: file.mimeType }), replyTo),
-		sendEffect: (text, name, replyTo) => sendThreaded(effect(styled(text), imessage.effect.message[name]), replyTo),
+		sendEffect: (text, name, replyTo) => sendThreaded(effect(markdown(text), imessage.effect.message[name]), replyTo),
 		sendPoll: (title, options) => space.send(poll(title, [...options])),
 		sendContact: (card) => {
 			if (card === undefined) return space.send(nativeContactCard());
