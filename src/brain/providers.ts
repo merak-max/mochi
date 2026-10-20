@@ -1,4 +1,4 @@
-import type { AnthropicMessagesCompat, Api, Model, OpenAIResponsesCompat } from "@earendil-works/pi-ai";
+import type { AnthropicMessagesCompat, Api, Model, ModelInputLimits, OpenAIResponsesCompat } from "@earendil-works/pi-ai";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
@@ -129,6 +129,19 @@ function plain(id: string, api: Api): Model<Api> {
 	return { id, name: id, api, provider: "", baseUrl: "", reasoning: true, input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: CONTEXT_WINDOW, maxTokens: 64_000 };
 }
 
+/**
+ * Bytes per image `read` may hand a script. The catalog allows 4.5 MB, so six screenshots pass codemode's 16 MB output
+ * cap and the script fails. At 1 MB, `read` re-encodes a large photo as JPEG at the same size.
+ */
+const IMAGE_MAX_BYTES = 1024 * 1024;
+
+/** The catalog's input limits, with each image held to `IMAGE_MAX_BYTES`. */
+function withImageBytes(limits: ModelInputLimits | undefined): ModelInputLimits {
+	const resize = limits?.images?.resize;
+	const maxBytes = Math.min(resize?.maxBytes ?? IMAGE_MAX_BYTES, IMAGE_MAX_BYTES);
+	return { ...limits, images: { ...limits?.images, resize: { ...resize, maxBytes } } };
+}
+
 /** A model definition for `id` on a provider: the catalog's prices, limits and quirks where it knows the model. */
 function definition(id: string, config: ProviderConfig, provider: string, url: string, override: ModelOverride = {}): Model<Api> {
 	const wire: Api = config.api === "anthropic" ? "anthropic-messages" : config.api === "responses" ? "openai-responses" : "openai-completions";
@@ -149,6 +162,7 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 		...(override.cost === undefined ? {} : { cost: override.cost }),
 		...(override.maxTokens === undefined ? {} : { maxTokens: override.maxTokens }),
 		promptCache: override.promptCache ?? base.promptCache ?? (wire === "anthropic-messages" ? { short: 300, long: 3600 } : undefined),
+		inputLimits: withImageBytes(base.inputLimits),
 		...(compat === undefined ? {} : { compat }),
 	} as Model<Api>;
 }
