@@ -216,9 +216,12 @@ async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "
 	}
 	lines.push(turn.text);
 	const held = await holdText(host, workDir, turn.conversation ?? ROOT_CONVERSATION_ID, `in:${turn.key}`, lines.join("\n"), context);
-	const text = [turn.tag, held, ...notes].join("\n");
+	const text = [turn.tag, held, ...notes, CHAT_REMINDER].join("\n");
 	return images.length === 0 ? text : [{ type: "text", text }, ...images];
 }
+
+/** Repeated on each chat message, as Claude Code's turn reminder: style rules at the top of a long window fade. */
+const CHAT_REMINDER = "[reply: lead with the answer, one short bubble, no recap]";
 
 async function saveFiles(workDir: string, message: Extract<Inbound, { kind: "message" }>): Promise<SavedFile[]> {
 	if (message.attachments.length === 0) return [];
