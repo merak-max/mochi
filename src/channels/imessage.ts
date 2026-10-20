@@ -26,10 +26,8 @@ const REMEMBERED_MESSAGES = 200;
 const IMESSAGE_PROFILE: ChannelProfile = {
 	id: "imessage",
 	style:
-		"imessage: short text. **bold**, *italic*, ~~strike~~ and - lists render natively; no tables or headings. Each blank-line-separated paragraph is its own bubble, so write one to three short ones. " +
-		"A link alone on its line shows a link card. react sends a tapback. Lines: attach: <path> sends a file (work path or absolute under home). " +
-		"voice: <path> sends a voice note. effect: <slam|loud|gentle|invisible|confetti|fireworks|lasers|heart|balloons|echo|sparkles|spotlight> animates the reply. " +
-		"reply: <id> threads it. tools.message edits, unsends, polls.",
+		"imessage: markdown renders (**bold**, *italic*, lists); no tables or headings. Each blank-line paragraph is a bubble: one to three short ones. A link alone on a line shows a card. " +
+		"Lines: attach: <path>, voice: <path>, effect: <slam|loud|gentle|invisible|confetti|fireworks|lasers|heart|balloons|echo|sparkles|spotlight>, reply: <id>. tools.message edits, unsends, polls.",
 	maxBubbles: 3,
 	maxBubbleChars: 400,
 	paragraphsAreBubbles: true,

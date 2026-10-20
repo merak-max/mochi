@@ -517,8 +517,7 @@ export function reactTool(channels: Channels): ToolRegistration {
 	return defineTool({
 				name: "react",
 				description:
-					"React to an owner message with any one emoji, or none to remove it. messageId is the id= in the message tag; the default is the owner's newest message. " +
-					"Use it to acknowledge a long job, or when a reaction says everything.",
+					"React to an owner message with one emoji, or none to remove it. messageId: the id= in the tag; default the newest. Use it when a reaction says everything.",
 				parameters: Type.Object({
 					reaction: Type.String({ minLength: 1, maxLength: 16 }),
 					messageId: Type.Optional(Type.String({ minLength: 1 })),

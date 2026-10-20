@@ -141,8 +141,7 @@ export function contextFns(workDir: string): ToolRegistration[] {
 		defineTool({
 			name: "context_read",
 			description:
-				`A page of a context value: long input held outside your window, or a value a script kept with context_put. Default page ${count(PAGE_CHARS)} chars; next is the offset of the following page, or null at the end. ` +
-				"Peek at the shape first (a small length), then slice and filter in code instead of printing it.",
+				`A page of a context value (long input, or a context_put value). Default page ${count(PAGE_CHARS)} chars; next is the following offset or null. Peek with a small length, then filter in code.`,
 			parameters: Type.Object({ key: Type.String({ minLength: 1 }), offset: Type.Optional(Type.Integer({ minimum: 0 })), length: Type.Optional(Type.Integer({ minimum: 1 })) }),
 			structuredOutputSchema: Type.Object({ text: Type.String(), next: Type.Union([Type.Integer(), Type.Null()]), chars: Type.Integer() }),
 			replay: "safe",
@@ -159,8 +158,7 @@ export function contextFns(workDir: string): ToolRegistration[] {
 		defineTool({
 			name: "context_put",
 			description:
-				"Keep text of any size outside your window, for later scripts and for agent jobs (pass the key in a job's context). " +
-				"Resolves to { key, chars, lines, path }; path is the file, for bash tools such as grep.",
+				"Keep text of any size outside your window for later scripts and agent jobs. path is the file, for grep.",
 			parameters: Type.Object({ text: Type.String() }),
 			structuredOutputSchema: Type.Object({ key: Type.String(), chars: Type.Integer(), lines: Type.Integer(), path: Type.String() }),
 			replay: "safe",

@@ -260,10 +260,8 @@ export function profileFns(profiles: Profiles, host: () => Host & StopHost, repl
 		defineTool({
 			name: "profile_send",
 			description:
-				"Give a profile a message: a task, a question, or a board item id. Profiles message each other this way too. It works in its own standing conversation with its own memory. " +
-				"Resolves to its answer. With background, it returns at once and the answer arrives here later as a new message. " +
-				"A busy profile does not start your message: it waits until the profile's current turn ends, which can take an hour. The result then starts with NOT STARTED. " +
-				"Never tell the owner that queued work has started; for urgent work use fork_start, agent with background, or an idle profile, or profile_stop first.",
+				"Give a profile a task, question or board item id; it works in its own conversation and memory and resolves to its answer. With background, the answer comes later as a new message. " +
+				"A busy profile queues it and the result starts NOT STARTED: tell the owner it is queued, and give urgent work to fork_start or an idle profile, or call profile_stop first.",
 			parameters: Type.Object({ name: Type.String(), message: Type.String({ minLength: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.String(),
 			replay: "unsafe",

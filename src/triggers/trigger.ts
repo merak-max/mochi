@@ -391,9 +391,8 @@ export function notifyTool(deps: NotifyDeps): ToolRegistration {
 	return defineTool({
 		name: "notify",
 		description:
-			"Send a message now to the owner, or in a trigger run to the trigger's recipients. Refused in root (the owner's own thread): there, your reply is the message. In a trigger run this is the only way to reach " +
-			"them, so call it only when something needs their attention. channel applies to the owner and defaults to where the owner last wrote. Users always get iMessage. " +
-			"attachments: files to send after the text, work-relative or absolute under home, each under 100 MB.",
+			"Message the owner now, or in a trigger run the trigger's recipients, only when it needs their attention. Refused in root: there, your reply is the message. " +
+			"channel defaults to where the owner last wrote; users get iMessage. attachments: work-relative or absolute paths under home, each under 100 MB.",
 		parameters: Type.Object({
 			text: Type.String({ minLength: 1 }),
 			channel: Type.Optional(Type.Union(channelNames.map((id) => Type.Literal(id)))),

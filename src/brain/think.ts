@@ -45,7 +45,7 @@ export function thinkFns(deps: { readonly models: Models; readonly ref: (name: s
 	return [
 		defineTool({
 			name: "llm",
-			description: "One model completion, no tools: the fast model, or model brain or strongest. Hand it a slice of data; only its answer reaches you.",
+			description: "One completion with no tools on a slice of data, model fast by default. Only its answer reaches you.",
 			parameters: Type.Object({ prompt: Type.String(), system: Type.Optional(Type.String()), model: Type.Optional(Type.Union(MODELS.map((name) => Type.Literal(name)))) }),
 			structuredOutputSchema: Type.String(),
 			replay: "safe",

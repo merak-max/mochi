@@ -315,8 +315,7 @@ export function noteTool(index: SearchIndex, ownerOf: OwnerOf) {
 	return defineTool({
 		name: "note",
 		description:
-			"Keep one line in memory for good: a fact about the owner, their people or projects, a preference, a standing rule, a decision, " +
-			"or an event of lasting effect. New conversations see it in the memory section; this one sees it from the next compaction. Do not repeat what memory already holds.",
+			"Keep one line in memory for good: a lasting fact, preference, rule or decision about the owner, their people or projects. New conversations see it at once; this one after the next compaction. Skip what memory already holds.",
 		parameters: Type.Object({ line: Type.String({ minLength: 1 }) }),
 		replay: "safe",
 		execute: async ({ line }, api, context) => {
@@ -357,8 +356,7 @@ export function recallTool(index: SearchIndex) {
 	return defineTool({
 		name: "recall",
 		description:
-			"Search memory and past chats by words, the owner's chat first. Search before you say the owner never told you something. " +
-			"Pass entry instead of query to read the messages around one chat hit.",
+			"Search memory and past chats by words, the owner's chat first. entry instead of query reads the messages around one hit.",
 		parameters: Type.Object({
 			query: Type.Optional(Type.String()),
 			entry: Type.Optional(Type.Integer({ minimum: 1 })),
