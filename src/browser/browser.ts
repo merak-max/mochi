@@ -1,6 +1,6 @@
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
-import { BrowserClient, type BrowserDeps } from "./client.ts";
+import { BrowserClient, type BrowserDeps, type InteractionResult } from "./client.ts";
 import { acquireProfile } from "./profile.ts";
 
 export const BrowseInput = Type.Object({
@@ -18,6 +18,17 @@ const RULES = [
 	"Otherwise report the completed result and visible evidence. Never repeat a completed action.",
 ].join("\n");
 
+const text = (result: InteractionResult): string => (result.output ?? "").trimStart();
+
+/** What Firecrawl returned when the agent gave no final answer: its error, last snapshot, and how it ended. */
+function partial(result: InteractionResult): string {
+	const how = result.killed ? "the browser agent hit its time limit" : result.exitCode ? `the browser agent exited with code ${result.exitCode}` : "the browser agent returned no final answer";
+	const parts = [`Unfinished: ${how}; inspect before retrying.`];
+	if (result.error?.trim()) parts.push(`Error: ${result.error.trim()}`);
+	if (result.result?.trim()) parts.push(`Last page state:\n${result.result.trim().slice(0, 4000)}`);
+	return parts.join("\n");
+}
+
 async function browse(deps: BrowserDeps, args: Static<typeof BrowseInput>, signal?: AbortSignal): Promise<Static<typeof BrowseOutput>> {
 	const url = new URL(args.url);
 	if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) throw new Error("browse needs an HTTP(S) URL without credentials.");
@@ -34,15 +45,18 @@ async function browse(deps: BrowserDeps, args: Static<typeof BrowseInput>, signa
 	let retain = false;
 	try {
 		let result = await client.interact(id, `${RULES}\nCaller task: ${args.task}`, signal);
-		for (let step = 1; result.output.trimStart().startsWith("MOCHI_CONTINUE") && step < 3 && !result.killed; step++) {
+		for (let step = 1; text(result).startsWith("MOCHI_CONTINUE") && step < 3 && !result.killed; step++) {
 			result = await client.interact(id, `${RULES}\nContinue only the unfinished work for caller task: ${args.task}`, signal);
 		}
-		const human = result.output.trimStart().startsWith("MOCHI_NEEDS_HUMAN");
-		const link = human || args.keepOpen ? result.interactiveLiveViewUrl : undefined;
-		if (result.killed || (result.exitCode !== undefined && result.exitCode !== 0)) throw new Error("Firecrawl browser interaction was interrupted; inspect before retrying.");
+		const failed = !text(result) || result.success === false || result.killed === true || (result.exitCode != null && result.exitCode !== 0);
+		const human = text(result).startsWith("MOCHI_NEEDS_HUMAN");
+		// A failed run leaves a session worth a look, so hand back its takeover link instead of throwing it away.
+		const link = (human || failed || args.keepOpen) ? (result.interactiveLiveViewUrl ?? undefined) : undefined;
 		retain = link !== undefined;
-		const answer = result.output.replace(/^\s*MOCHI_(NEEDS_HUMAN|CONTINUE)\s*/, "").trim();
-		const output = result.output.trimStart().startsWith("MOCHI_CONTINUE") ? `Stopped after three prompt calls with unfinished work. ${answer}` : answer;
+		const answer = text(result).replace(/^\s*MOCHI_(NEEDS_HUMAN|CONTINUE)\s*/, "").trim();
+		const output = failed
+			? [partial(result), answer && `Partial answer: ${answer}`].filter(Boolean).join("\n")
+			: text(result).startsWith("MOCHI_CONTINUE") ? `Stopped after three prompt calls with unfinished work. ${answer}` : answer;
 		if (human && link === undefined) return { output: `Human takeover required, but Firecrawl returned no interactive link. ${output}` };
 		return { output, ...(link === undefined ? {} : { liveViewUrl: link }) };
 	} finally {

@@ -3,13 +3,19 @@ import { parseWith } from "../parse.ts";
 
 const Success = Type.Object({ success: Type.Literal(true) }, { additionalProperties: true });
 const Scrape = Type.Object({ success: Type.Literal(true), data: Type.Object({ metadata: Type.Object({ scrapeId: Type.String({ minLength: 1 }) }, { additionalProperties: true }) }, { additionalProperties: true }) }, { additionalProperties: true });
+const Text = Type.Optional(Type.Union([Type.String(), Type.Null()]));
+// Firecrawl marks every field but success and killed nullable; output is null when the agent ran out of time or failed.
 const Interaction = Type.Object({
-	success: Type.Literal(true),
-	output: Type.String(),
-	interactiveLiveViewUrl: Type.Optional(Type.String()),
-	killed: Type.Optional(Type.Boolean()),
-	exitCode: Type.Optional(Type.Integer()),
+	success: Type.Boolean(),
+	output: Text,
+	result: Text,
+	error: Text,
+	liveViewUrl: Text,
+	interactiveLiveViewUrl: Text,
+	killed: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
+	exitCode: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
 }, { additionalProperties: true });
+export type InteractionResult = Static<typeof Interaction>;
 const Session = Type.Object({
 	success: Type.Literal(true),
 	id: Type.String({ minLength: 1 }),
@@ -47,8 +53,8 @@ export class BrowserClient {
 		return result.data.metadata.scrapeId;
 	}
 
-	interact(id: string, prompt: string, signal?: AbortSignal): Promise<Static<typeof Interaction>> {
-		return this.#request(`scrape/${encodeURIComponent(id)}/interact`, "POST", { prompt }, Interaction, signal);
+	interact(id: string, prompt: string, signal?: AbortSignal): Promise<InteractionResult> {
+		return this.#request(`scrape/${encodeURIComponent(id)}/interact`, "POST", { prompt, timeout: 300 }, Interaction, signal);
 	}
 
 	stopScrape(id: string): Promise<Static<typeof Success>> {
@@ -64,7 +70,7 @@ export class BrowserClient {
 	}
 
 	async #request<S extends TSchema>(path: string, method: string, body: object | undefined, schema: S, signal?: AbortSignal): Promise<Static<S>> {
-		const timeout = AbortSignal.timeout(method === "DELETE" ? 30_000 : 240_000);
+		const timeout = AbortSignal.timeout(method === "DELETE" ? 30_000 : 330_000);
 		const response = await fetch(`${this.#baseUrl}/${path}`, {
 			method,
 			headers: { Authorization: `Bearer ${this.#deps.apiKey}`, "Content-Type": "application/json" },
@@ -72,7 +78,7 @@ export class BrowserClient {
 			signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
 		});
 		if (method === "DELETE" && response.status === 404) return parseWith(schema, { success: true }, "expired browser session");
-		if (!response.ok) throw new Error(`Firecrawl browser HTTP ${response.status}.`);
+		if (!response.ok) throw new Error(`Firecrawl browser HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 500)}`);
 		return parseWith(schema, await response.json(), "Firecrawl browser response");
 	}
 }
