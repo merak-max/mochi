@@ -1,29 +1,27 @@
 ---
 name: how
-description: Explain how something works (a product, process, codebase or mochi itself) so the owner can use, fix or decide on it.
+description: Explain how something works (a product, a process, a codebase, mochi itself) so the owner can use, fix or decide on it.
 ---
 
 # How
 
-Build a working mental model of the thing and explain it plainly: what it is, the parts, the flow, and the gotchas. Enough to act on, not a manual.
+Build a working mental model and explain it plainly: what it is, the parts, the flow, the gotchas. Enough to act on, not a manual. If the scope is unclear, state your reading and go.
 
 ## Size it
 
-If the scope is ambiguous, state your reading and go. The owner can redirect.
-
-- **Simple** (one product feature, one rule, one function): explain it yourself or with one fork. Skip to Explain.
+- **Simple** (one feature, one rule, one function): explain it yourself or with one fork. Go to Explain.
 - **Complex** (a whole system, a multi-party process, a large codebase): explore in parallel first.
 
 When in doubt, take the simple path.
 
 ## Explore (complex only)
 
-Split the question into 2 to 4 angles, each a distinct slice. For a visa that might be eligibility, documents, the steps and timeline, and the common rejections. For a codebase, the entry point, the data, the main flow, and the boundaries. Start one explorer per angle in one `fork({ briefs: [...] })` call, each brief built from [references/explorer-prompt.md](references/explorer-prompt.md).
+Split the question into 2 to 4 distinct angles. For a visa: eligibility, documents, steps and timeline, common rejections. For a codebase: entry point, data, main flow, boundaries. Start one explorer per angle in one `fork({ briefs: [...] })` call, each brief built from [references/explorer-prompt.md](references/explorer-prompt.md).
 
 ## Explain
 
-Write the explanation yourself, or for a large result fork one explainer with [references/explainer-prompt.md](references/explainer-prompt.md) and the explorers' findings. Read the result and fix anything that doesn't match the sources.
+Write it yourself, or for a large result fork one explainer with [references/explainer-prompt.md](references/explainer-prompt.md) and the findings. Fix what does not match the sources.
 
-Use these sections and drop the ones that don't apply: what it is, key ideas, how it works, where things are, gotchas. On a chat channel, send the first two or three sentences and offer the rest. Put a long explanation in a file.
+Sections, minus the ones that do not apply: what it is, key ideas, how it works, where things are, gotchas. On a chat channel, send the first two or three sentences and offer the rest. A long explanation goes in a file.
 
-**Reply:** the explanation, with sources for anything the owner might act on.
+**Reply:** the explanation, with sources for what the owner might act on.

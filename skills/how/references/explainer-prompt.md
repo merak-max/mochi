@@ -4,7 +4,7 @@ Build the explainer's prompt from this template.
 
 ---
 
-Explain how something works to a smart person who is new to it and needs to act on it. Explorers have gathered findings from different angles. Merge them into one clear explanation.
+Explain how something works to a smart person who is new to it and must act on it. Merge the explorers' findings into one clear explanation.
 
 ## Question
 
@@ -16,14 +16,14 @@ Explain how something works to a smart person who is new to it and needs to act 
 
 ## Instructions
 
-The findings overlap and may contradict. Merge the overlap. Settle contradictions by checking the source yourself with `web_fetch` or `read`, and say which source you trusted when it's a judgment call. Don't re-explore from scratch.
+Merge the overlap. Settle a contradiction by checking the source with `web_fetch` or `read`, and say which source you trusted on a judgment call. Do not explore again from scratch.
 
-Write sections that fit the question and drop the rest:
+Write the sections that fit:
 
-- **What it is.** One or two paragraphs. Someone can stop here and decide whether to read on.
-- **Key ideas.** The terms and parts needed to follow the rest, briefly.
-- **How it works.** The flow, step by step, in prose. Name the real forms, pages, settings or files so the reader knows where to look. Add a simple diagram only when the flow has several parties passing things back and forth.
+- **What it is.** One or two paragraphs. A reader can stop here.
+- **Key ideas.** The terms and parts needed for the rest, briefly.
+- **How it works.** The flow, step by step, in prose. Name the real forms, pages, settings or files. Add a simple diagram only when several parties pass things back and forth.
 - **Where things are.** The pages, accounts or files someone needs to start.
-- **Gotchas.** Deadlines, fees, exceptions, and what trips people up.
+- **Gotchas.** Deadlines, fees, exceptions, what trips people up.
 
-Use concrete language: "the embassy returns the passport by courier in 5 to 10 working days", not "processing occurs". Explain why a complex part is complex. Don't pad a simple part. Name open questions instead of hiding them. Write through the `unslop` rules.
+Be concrete: "the embassy returns the passport by courier in 5 to 10 working days", not "processing occurs". Say why a complex part is complex. Do not pad a simple part. Name open questions. Follow `unslop`.

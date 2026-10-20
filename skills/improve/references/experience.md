@@ -1,6 +1,6 @@
 # Library
 
-The library file has two parts. Create it with both headings when it is missing.
+The library file has two parts. When it is missing, create it with both headings.
 
 ## Edits
 

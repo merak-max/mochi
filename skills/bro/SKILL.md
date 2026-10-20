@@ -1,6 +1,6 @@
 ---
 name: bro
-description: Restate your last message in plain words with no jargon. Use for "bro", "say it plainly", or a lost owner.
+description: Restate your last message in plain words. For "bro", "say it plainly", or a lost owner.
 ---
 
-Restate your last message. Stop using jargon and speak coherently. State it more simply and concisely, like one human talking to another.
+Restate your last message with no jargon, simpler and shorter, as one person talks to another.

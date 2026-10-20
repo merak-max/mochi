@@ -4,17 +4,17 @@ description: The owner's apps through Executor (mail, calendar, GitHub, the logg
 ---
 # Apps
 
-Executor holds the owner's connected apps. Call them from `codemode` with three tools:
+Call the owner's Executor apps from `codemode`:
 
-- `apps_search({ query })` returns each matching tool's `path` and TypeScript `signature`. Search before each unfamiliar call. Do not guess a path or an argument.
-- `apps_call({ path, args })` calls one tool by its path. The call is real. If a restart interrupts it, the script gets an "interrupted" error and the call does not run again. Read the app's state before you retry.
-- `apps_skills({ app })` returns an app's instructions. Without `app`, it lists the apps. Read it before unfamiliar work in that app.
+- `apps_search({ query })` returns each tool's `path` and `signature`. Search before each unfamiliar call. Take paths and arguments only from the result.
+- `apps_call({ path, args })` acts for real. An interrupted call is reported and never rerun: read the app's state before you retry.
+- `apps_skills({ app })` returns an app's instructions, or lists the apps without `app`. Read it before unfamiliar work in that app.
 
-An app with more than one account takes `args: { accountId, input: { ... } }`. The signature names the `accountId`.
+An app with more than one account takes `args: { accountId, input: { ... } }`.
 
-Mochi accepts Executor approvals by itself, so a gated call runs at once. Only the owner's conversation and trigger runs have these tools.
+Executor approvals pass at once, so a gated call is a one-way door you walk through yourself. Apply the door rules from `mochi-mode` before the call.
 
-For ordinary web search, page reading and site maps, use `web_search`, `web_fetch` and `web_map`. For structured data from a provider (podcasts, app stores, filings and more), find a tool with the free `web_find_tools`, then run it with `web_alexandria`, which spends credits. Use Executor's Firecrawl only for sites where the owner is logged in:
+For web search, page text and site maps, use `web_search`, `web_fetch` and `web_map`. For structured provider data (podcasts, app stores, filings), find a tool with the free `web_find_tools`, then run it with `web_alexandria`, which spends credits. Use Executor's Firecrawl only for sites where the owner is logged in:
 
 1. Scrape the page with `profile: { name: "mochi" }`. Do not pass `saveChanges`.
 2. Call Executor's Firecrawl interact on the returned `scrapeId` with a plain-language prompt.
