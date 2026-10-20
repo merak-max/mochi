@@ -4,6 +4,7 @@ import type { Context } from "@earendil-works/chord";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import type { FastCompletion } from "../turn/lifecycle.ts";
 import { clipBytes, LINE_BYTES, merge, turnLine } from "./memory.ts";
+import { redact } from "./redact.ts";
 
 const context = {} as Context;
 const bytes = (text: string): number => Buffer.byteLength(text, "utf8");
@@ -79,4 +80,67 @@ test("turnLine keeps tool calls and result heads", () => {
 	assert.match(parts[4]!, /^codemode result: (Example Domain ){10}Example Do…$/);
 	assert.equal(parts[5], "notify error: Channel down");
 	assert.equal(parts[6], "mochi: The title is Example Domain.");
+});
+
+const masked: Array<[string, string, string]> = [
+	["bearer header", 'curl -H "Authorization: Bearer abcDEF123456789xyz" https://api.example.com', 'curl -H "Authorization: Bearer [secret]" https://api.example.com'],
+	["authorization in JSON", '{"Authorization":"Basic dXNlcjpwYXNz"}', '{"Authorization":"Basic [secret]"}'],
+	["bare bearer", "send Bearer abcdefghijklmnop0123 now", "send Bearer [secret] now"],
+	["env assignment", "export OPENAI_API_KEY=plainvalue", "export OPENAI_API_KEY=[secret]"],
+	["JSON password", '{"password": "hunter two", "user": "bob"}', '{"password": "[secret]", "user": "bob"}'],
+	["quoted token", "token='abc'", "token='[secret]'"],
+	["client_secret query", "https://x.com/cb?code=1&client_secret=abc&x=2", "https://x.com/cb?code=1&client_secret=[secret]&x=2"],
+	["auth key", "auth: hunter2", "auth: [secret]"],
+	["cookie", "cookie: sid=xyz", "cookie: [secret]"],
+	["session", "session=abc123", "session=[secret]"],
+	["password flag", "mysql --password hunter2 -u root", "mysql --password [secret] -u root"],
+	["sk-", "key sk-proj-abcdefghijklmnop1234 end", "key [secret] end"],
+	["sk-ant-", "sk-ant-api03-abcdefghijklmnop", "[secret]"],
+	["ghp_", "ghp_abcdefghijklmnopqrstuvwxyz0123", "[secret]"],
+	["gho_", "gho_abcdefghijklmnopqrstuvwxyz0123", "[secret]"],
+	["github_pat_", "github_pat_11ABCDEFG0abcdefghijklmn", "[secret]"],
+	["slack", "xoxb-1234567890-abcdef and xoxp-1234567890-abcdef", "[secret] and [secret]"],
+	["AWS key id", "AKIAIOSFODNN7EXAMPLE", "[secret]"],
+	["Google API key", "AIzaSyA1234567890abcdefghijklmnopqrstu", "[secret]"],
+	["Google OAuth", "ya29.a0AfH6SMBabcdefghijklmnop", "[secret]"],
+	["GitLab", "glpat-abcdefghij0123456789", "[secret]"],
+	["npm", "npm_abcdefghijklmnopqrstuvwxyz0123456789", "[secret]"],
+	["JWT", "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig_abc-1 ok", "jwt [secret] ok"],
+	["hex run", "digest 0123456789abcdef0123456789abcdef01234567", "digest [secret]"],
+	["base64 run", "b64 Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFCQ0RFRkdISUpL==", "b64 [secret]"],
+	["URL userinfo", "git clone https://bob:pa55word@github.com/x/y.git", "git clone https://[secret]@github.com/x/y.git"],
+];
+
+for (const [name, input, expected] of masked) {
+	test(`redact masks ${name}`, () => {
+		assert.equal(redact(input), expected);
+	});
+}
+
+test("redact leaves ordinary text alone", () => {
+	const plain = [
+		"read /home/ec2-user/Developer/mochi/node_modules/@earendil-works/pi-ai/dist/types.d.ts",
+		"acc_01JABCDEFGHJKMNPQRSTVWXYZ0 id 123e4567-e89b-12d3-a456-426614174000",
+		"spc-msg-01JAB2CDEFGH3JKMNPQRSTVW4XYZ",
+		"https://github.com/0oAstro/austroporean-cards/blob/main/README.md",
+		"https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+		"https://drive.google.com/file/d/1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV/view",
+		"author=Shaurya auth=true apiKey: process.env.KEY Authorization: $TOKEN",
+		"getElementByIdAndSomethingVeryLongName2 UPPER_CASE_CONSTANT_NAME_FOR_THE_APP_V2",
+		"IMG_20241019_123456_HDR_Portrait_Mode1 Shaurya_Pratap_Singh_Resume_2024_Final_v3",
+		"The tokenizer counts 512 bytes; the password manager is 1Password.",
+	];
+	for (const text of plain) assert.equal(redact(text), text);
+});
+
+test("turnLine masks a secret before it clips, so no half secret is left", () => {
+	const command = `${"x".repeat(95)} sk-ant-api03-abcdefghijklmnopqrstuvwxyz`;
+	const line = turnLine([
+		entry("pi.user", { role: "user", content: "Call the API", timestamp: 0 }),
+		entry("pi.assistant", { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command } }], timestamp: 0 }),
+		entry("pi.tool-result", { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "token: ghp_abcdefghijklmnopqrstuvwxyz0123" }], isError: false, timestamp: 0 }),
+	])!;
+	assert.ok(!line.includes("abcdefghijklmnop"), line);
+	assert.match(line, /tool bash\(command=x{95} \[secret\]\)/);
+	assert.match(line, /bash result: token: \[secret\]$/);
 });

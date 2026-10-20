@@ -24,6 +24,7 @@ import {
 import type { SearchIndex } from "../index/fts.ts";
 import { messageText } from "../text.ts";
 import type { FastCompletion } from "../turn/lifecycle.ts";
+import { redact } from "./redact.ts";
 import { type Block, blockKey, cover, halves, pending, RAW_MAX } from "./tree.ts";
 
 // Two OptMem logs share one tree shape. The memory log holds lines the model chose to keep (`note`); a conversation's
@@ -177,12 +178,12 @@ function toolCallLine(name: string, args: Record<string, unknown>): string {
 			const call = `tools.${match[1]}(`;
 			if (!calls.includes(call)) calls.push(call);
 		}
-		const head = clipChars(oneLine(args.code), TOOL_ARGS_CHARS);
+		const head = clipChars(redact(oneLine(args.code)), TOOL_ARGS_CHARS);
 		return calls.length === 0 ? `codemode(${head})` : `codemode(${head}) calls ${calls.join(" ")}`;
 	}
 	const pairs: string[] = [];
 	for (const [key, value] of Object.entries(args)) pairs.push(`${key}=${typeof value === "string" ? value : JSON.stringify(value)}`);
-	return `${name}(${clipChars(oneLine(pairs.join(", ")), TOOL_ARGS_CHARS)})`;
+	return `${name}(${clipChars(redact(oneLine(pairs.join(", "))), TOOL_ARGS_CHARS)})`;
 }
 
 /** The turn's words and what was done in it: the owner's text, mochi's text, each tool call and the head of its result. */
@@ -200,7 +201,7 @@ export function turnLine(entries: readonly EntryRecord[]): string | undefined {
 				if (part.type === "toolCall") parts.push(`tool ${toolCallLine(part.name, part.arguments)}`);
 			}
 		} else if (ToolResultEntry.is(entry) && message.role === "toolResult") {
-			const head = clipChars(text, TOOL_RESULT_CHARS);
+			const head = clipChars(redact(text), TOOL_RESULT_CHARS);
 			parts.push(`${message.toolName} ${message.isError ? "error" : "result"}: ${head === "" ? "(no text)" : head}`);
 		}
 	}
