@@ -1,22 +1,8 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { type ConversationId, type Harness, LiveDoc } from "@earendil-works/pi-durable";
+import { closedBlocks } from "../channels/present.ts";
 import type { Bubble, Channel } from "../channels/types.ts";
 import { messageText } from "../text.ts";
-
-/** A paragraph is done once a blank line follows it; the last paragraph of a partial may still grow. */
-const PARAGRAPH_END = /\n[ \t]*\n/;
-
-/** The paragraphs of a partial answer that a blank line has closed. */
-export function closedParagraphs(text: string): string[] {
-	const parts = text.split(PARAGRAPH_END);
-	parts.pop();
-	const closed: string[] = [];
-	for (const part of parts) {
-		const trimmed = part.trim();
-		if (trimmed !== "") closed.push(trimmed);
-	}
-	return closed;
-}
 
 /** A line that holds a directive (attach:, voice:, effect:, reply:) waits for the full answer. */
 const DIRECTIVE = /^[ \t]*(attach|voice|effect|reply):/m;
@@ -49,7 +35,7 @@ export function streamParagraphs(input: {
 			const live = change.value as { run?: { taskId: string }; generation?: { message?: AssistantMessage } } | null;
 			const message = live?.generation?.message;
 			if (message === undefined || live?.run === undefined) continue;
-			const closed = closedParagraphs(messageText(message));
+			const closed = closedBlocks(messageText(message));
 			let same = closed.length >= handled.length;
 			for (let index = 0; same && index < handled.length; index++) same = closed[index] === handled[index];
 			if (!same) handled = [];

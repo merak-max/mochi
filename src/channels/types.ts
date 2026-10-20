@@ -9,7 +9,6 @@ export interface ChannelProfile {
 	readonly id: ChatChannelId;
 	readonly style: string;
 	readonly maxBubbles: number;
-	readonly maxBubbleChars: number;
 	readonly paragraphsAreBubbles: boolean;
 	/** The typing indicator stops after this long, so a long job is silent instead of "typing" for minutes. */
 	readonly typingMaxMs: number;

@@ -29,7 +29,6 @@ const IMESSAGE_PROFILE: ChannelProfile = {
 		"imessage: markdown renders (**bold**, *italic*, lists); no tables or headings. Each blank-line paragraph is a bubble. Default to one short bubble; use more only when he asked for detail. A link alone on a line shows a card. " +
 		"Lines: attach: <path>, voice: <path>, effect: <slam|loud|gentle|invisible|confetti|fireworks|lasers|heart|balloons|echo|sparkles|spotlight>, reply: <id>. tools.message edits, unsends, polls.",
 	maxBubbles: 6,
-	maxBubbleChars: 400,
 	paragraphsAreBubbles: true,
 	typingMaxMs: 90_000,
 };

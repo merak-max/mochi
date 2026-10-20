@@ -29,7 +29,6 @@ const WHATSAPP_PROFILE: ChannelProfile = {
 	id: "whatsapp",
 	style: "whatsapp: plain text with *bold* and _italic_, no tables, one message per reply, up to 4,096 characters. react sets an emoji reaction. attach: and voice: (OGG) lines work.",
 	maxBubbles: 3,
-	maxBubbleChars: TEXT_LIMIT,
 	paragraphsAreBubbles: false,
 	typingMaxMs: 90_000,
 };

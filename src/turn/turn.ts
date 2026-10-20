@@ -22,7 +22,7 @@ import {
 	type Tx,
 	type UserInput,
 } from "@earendil-works/pi-durable";
-import { present } from "../channels/present.ts";
+import { blocks, present } from "../channels/present.ts";
 import { type Committer, holdText } from "../context.ts";
 import {
 	type Attachment,
@@ -233,14 +233,10 @@ function blockedByPolicy(settled: { readonly status: string; readonly detail?: u
 
 const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and the board are kept.";
 
-/** The answer without the paragraphs already streamed, so the final send never repeats one. */
+/** The answer without the blocks already streamed, so the final send never repeats one. */
 function unstreamed(text: string, streamed: readonly string[]): string {
 	if (streamed.length === 0) return text;
-	const kept: string[] = [];
-	for (const paragraph of text.split(/\n[ \t]*\n/)) {
-		if (!streamed.includes(paragraph.trim())) kept.push(paragraph);
-	}
-	return kept.join("\n\n");
+	return blocks(text).filter((block) => !streamed.includes(block)).join("\n\n");
 }
 
 /** Steered into a chat run that has sent nothing for `SLOW_NUDGE_MS`, as Claude Code's "it's been a while" reminder. */
