@@ -219,7 +219,7 @@ async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
 	const { Spectrum, attachment, contact, poll, reply, richlink, voice } = await import("spectrum-ts");
 	const { effect, imessage, nativeContactCard } = await import("spectrum-ts/providers/imessage");
 	// @ts-expect-error spectrum-ts 12.10.1 provider types do not resolve under exactOptionalPropertyTypes; runtime accepts an empty config.
-	const app = await Spectrum({ ...credentials, providers: [imessage.config()] });
+	const app = await Spectrum({ ...credentials, providers: [imessage.config()], options: { logLevel: "error" } });
 	const platform = imessage(app);
 	const wrap = (space: Awaited<ReturnType<typeof platform.space.create>>): IMessageSpace => {
 		const sendThreaded = async (content: ContentInput, targetMessageId: string | undefined) => {

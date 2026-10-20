@@ -72,7 +72,6 @@ export function connectApps(connect: Connect, log: Log): Apps & { run(context: C
 			const requestId = approvalRequest(value);
 			if (requestId === undefined) return value;
 			if (approvals >= MAX_APPROVALS) throw new Error(`The apps server asked for more than ${MAX_APPROVALS} approvals in one call.`);
-			log("apps.approved", { requestId });
 			value = await callTool("resume", { requestId, response: ACCEPT }, context);
 		}
 	};
