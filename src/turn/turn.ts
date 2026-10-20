@@ -241,7 +241,7 @@ function unstreamed(text: string, streamed: readonly string[]): string {
 
 /** Steered into a chat run that has sent nothing for `SLOW_NUDGE_MS`, as Claude Code's "it's been a while" reminder. */
 const SLOW_NUDGE = "[the owner has waited a while with no reply: tell him in a few words what you are doing, then continue]";
-const SLOW_NUDGE_MS = 5 * 60_000;
+const SLOW_NUDGE_MS = 290_000;
 
 
 
