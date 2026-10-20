@@ -266,8 +266,8 @@ export async function answerText(tx: Tx, entry: EntryId): Promise<string> {
 
 const TYPING_REFRESH_MS = 5_000;
 
-function keepTyping(channel: Channel | undefined, person: string | undefined): () => Promise<void> {
-	if (channel === undefined) return async () => {};
+function keepTyping(channel: Channel | undefined, person: string | undefined): () => void {
+	if (channel === undefined) return () => {};
 	const typing = (on: boolean) => channel.typing(on, person).catch(() => {});
 	const until = Date.now() + channel.profile.typingMaxMs;
 	void typing(true);
@@ -276,9 +276,9 @@ function keepTyping(channel: Channel | undefined, person: string | undefined): (
 		clearInterval(timer);
 		void typing(false);
 	}, TYPING_REFRESH_MS);
-	return async () => {
+	return () => {
 		clearInterval(timer);
-		await typing(false);
+		void typing(false);
 	};
 }
 
@@ -365,7 +365,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 				} finally {
 					clearTimeout(nudge);
 					await stopStream();
-					await stopTyping();
+					stopTyping();
 				}
 				const sent = [...streamed];
 				const ran = run === undefined ? {} : { run };
