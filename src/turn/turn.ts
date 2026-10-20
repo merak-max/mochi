@@ -484,6 +484,18 @@ export function openTurn(tx: Tx, line: Pick<Line, "id" | "turn">, input: TurnInp
 	return tx.createTask(line.turn, input, { ownership: { kind: "conversation" }, conversationId: line.id, background: true });
 }
 
+/**
+ * Brings `text` into root through a chat Turn on the owner's last chat channel, so root's answer reaches the owner.
+ * A bare submit to root runs it with no Turn, and the answer goes nowhere. False when no chat message came yet.
+ * Not idempotent by itself: call it in the commit that ends the caller's task.
+ */
+export async function openRootWake(tx: Tx, line: Pick<Line, "id" | "turn">, key: string, tag: string, text: string): Promise<boolean> {
+	const last = (await tx.doc(LastInboundDoc)).last;
+	if (last === null) return false;
+	await openTurn(tx, line, { source: "chat", channel: last.channel, key, tag, text, files: [] });
+	return true;
+}
+
 /** `to`: the conversation it goes to; absent, root. */
 type CliInbound = {
 	readonly kind: "cli";

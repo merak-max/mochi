@@ -3,14 +3,14 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
-import { AgentDoc, configure, defineTask, type PromptSection, section, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { AgentDoc, configure, defineTask, type PromptSection, section, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import { holdText } from "../context.ts";
 import { abortTargets } from "../turn/commands.ts";
 import { journaled } from "../journal.ts";
 import { allPages } from "../pages.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { Owner } from "../memory/memory.ts";
-import { answerText } from "../turn/turn.ts";
+import { answerText, type Line, openRootWake } from "../turn/turn.ts";
 
 // A profile is a standing teammate inside this daemon: a name, a role (instructions), a model, a conversation that
 // lives as long as the profile, and its own memory log. Its file is `<home>/profiles/<name>/instructions.md` with
@@ -199,7 +199,7 @@ const DeliveredDoc = defineDocFamily<{ delivered: boolean }, null>({
  * Waits for a profile's answer to a message nobody waits for inline, then sends it back to the asker's conversation as
  * a new message, which wakes the asker. Durable, so a restart still delivers it, once.
  */
-export const defineReply = (harness: () => Pick<Harness, "submission" | "commit">, workDir: string) => defineTask<ReplyInput, { readonly phase: "wait" }, null>({
+export const defineReply = (harness: () => Pick<Harness, "submission" | "commit">, workDir: string, line: () => Line) => defineTask<ReplyInput, { readonly phase: "wait" }, null>({
 	name: "mochi.reply",
 	version: 1,
 	initial: () => ({ phase: "wait" }),
@@ -220,12 +220,23 @@ export const defineReply = (harness: () => Pick<Harness, "submission" | "commit"
 				}, context);
 				if (answer !== "") body = answer;
 			}
+			const done = { status: "terminal", outcome: { status: "completed", result: null } } as const;
+			const key = `reply:${task.id}`;
+			const tag = `[from ${from}] re: ${re}`;
 			const target = await runtime.conversation(to, context);
 			if (target !== undefined && !duplicate) {
-				const held = await holdText(harness(), workDir, to, `in:reply:${task.id}`, body, context);
-				await target.submit({ type: "input", content: `[from ${from}] re: ${re}\n${held}`, requestId: `reply:${task.id}`, whenBusy: "followUp" }, context);
+				let woke = false;
+				if (to === ROOT_CONVERSATION_ID) {
+					await runtime.commit(async (tx) => {
+						woke = await openRootWake(tx, line(), key, tag, body);
+						return woke ? done : undefined;
+					}, context);
+				}
+				if (woke) return;
+				const held = await holdText(harness(), workDir, to, `in:${key}`, body, context);
+				await target.submit({ type: "input", content: `${tag}\n${held}`, requestId: key, whenBusy: "followUp" }, context);
 			}
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+			await runtime.commit(() => done, context);
 		},
 	},
 	abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),

@@ -1,11 +1,11 @@
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
-import { configure, type ConversationId, defineTask, defineTool, type EntryId, type ModelRef, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { configure, type ConversationId, defineTask, defineTool, type EntryId, type ModelRef, ROOT_CONVERSATION_ID, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { copyContext, holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
 import { inheritProfile } from "../profiles/profiles.ts";
 import { forkPoint } from "../seats.ts";
-import { answerText } from "../turn/turn.ts";
+import { answerText, type Line, openRootWake } from "../turn/turn.ts";
 
 // Two kinds of child, both a `mochi.agent` task that owns one conversation:
 //   fork   a copy of the caller, history and all. Its first request reads the caller's prompt cache, so a fork costs
@@ -32,7 +32,7 @@ const FORK_BATCH = 6;
 export const MAX_DEPTH = 3;
 const TOO_DEEP = `Children are ${MAX_DEPTH} deep here. Do this slice yourself.`;
 
-export function defineForkTask(workDir: string) {
+export function defineForkTask(workDir: string, line: () => Line) {
 	return defineTask<ForkInput, { readonly phase: "run" }, ForkResult>({
 		name: "mochi.agent",
 		version: 1,
@@ -47,13 +47,24 @@ export function defineForkTask(workDir: string) {
 				const settled = await submission.wait(context);
 				let result = { failure: settled.reason ?? settled.status } as ForkResult;
 				if (settled.status === "done" && settled.type === "input") await runtime.commit(async (tx) => void (result = { answer: await answerText(tx, settled.answer) }), context);
+				const done = { status: "terminal", outcome: { status: "completed", result } } as const;
 				const back = task.input.back === undefined ? undefined : await runtime.conversation(task.input.back, context);
 				if (back !== undefined) {
 					const body = "answer" in result ? result.answer || "(empty answer)" : `(no answer: ${result.failure})`;
-					const held = await holdText(host, workDir, back.id, `in:fork-back:${task.id}`, body, context);
-					await back.submit({ type: "input", content: `[from fork ${task.input.name}]\n${held}`, requestId: `fork-back:${task.id}`, whenBusy: "followUp" }, context);
+					const key = `fork-back:${task.id}`;
+					const tag = `[from fork ${task.input.name}]`;
+					let woke = false;
+					if (back.id === ROOT_CONVERSATION_ID) {
+						await runtime.commit(async (tx) => {
+							woke = await openRootWake(tx, line(), key, tag, body);
+							return woke ? done : undefined;
+						}, context);
+					}
+					if (woke) return;
+					const held = await holdText(host, workDir, back.id, `in:${key}`, body, context);
+					await back.submit({ type: "input", content: `${tag}\n${held}`, requestId: key, whenBusy: "followUp" }, context);
 				}
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result } }), context);
+				await runtime.commit(() => done, context);
 			},
 		},
 		abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
