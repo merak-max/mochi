@@ -26,7 +26,7 @@ const REMEMBERED_MESSAGES = 200;
 const IMESSAGE_PROFILE: ChannelProfile = {
 	id: "imessage",
 	style:
-		"imessage: plain text. Each blank-line-separated paragraph is its own bubble, so write one to three short ones. " +
+		"imessage: short text. **bold**, *italic*, ~~strike~~ and - lists render natively; no tables or headings. Each blank-line-separated paragraph is its own bubble, so write one to three short ones. " +
 		"A link alone on its line shows a link card. react sends a tapback. Lines: attach: <path> sends a file (work path or absolute under home). " +
 		"voice: <path> sends a voice note. effect: <slam|loud|gentle|invisible|confetti|fireworks|lasers|heart|balloons|echo|sparkles|spotlight> animates the reply. " +
 		"reply: <id> threads it. tools.message edits, unsends, polls.",
@@ -216,7 +216,7 @@ function classifyIMessageError(error: unknown): DeliveryError {
 }
 
 async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
-	const { Spectrum, attachment, contact, poll, reply, richlink, voice } = await import("spectrum-ts");
+	const { Spectrum, attachment, contact, markdown, poll, reply, richlink, voice } = await import("spectrum-ts");
 	const { effect, imessage, nativeContactCard } = await import("spectrum-ts/providers/imessage");
 	// @ts-expect-error spectrum-ts 12.10.1 provider types do not resolve under exactOptionalPropertyTypes; runtime accepts an empty config.
 	const app = await Spectrum({ ...credentials, providers: [imessage.config()], options: { logLevel: "error" } });
@@ -227,13 +227,23 @@ async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
 			if (target === undefined) return space.send(content);
 			return space.send(reply(content, target));
 		};
+		// Markdown renders as native bold, italic and lists; text that renders to nothing goes plain.
+		const styled = (text: string): ContentInput => (/[*_~`#\[]|^\s*[-+]\s/m.test(text) ? markdown(text) : text);
+		const sendStyled = async (text: string, targetMessageId: string | undefined) => {
+			try {
+				return await sendThreaded(styled(text), targetMessageId);
+			} catch (error) {
+				if (!(error instanceof Error) || !error.message.includes("renders to empty text")) throw error;
+				return sendThreaded(text, targetMessageId);
+			}
+		};
 		return {
-		send: (text) => space.send(text),
-		sendReply: (text, targetMessageId) => sendThreaded(text, targetMessageId),
+		send: (text) => sendStyled(text, undefined),
+		sendReply: (text, targetMessageId) => sendStyled(text, targetMessageId),
 		sendLink: (url) => space.send(richlink(url)),
 		sendFile: (file, replyTo) => sendThreaded(attachment(Buffer.from(file.bytes), { name: file.name, mimeType: file.mimeType }), replyTo),
 		sendVoice: (file, replyTo) => sendThreaded(voice(Buffer.from(file.bytes), { name: file.name, mimeType: file.mimeType }), replyTo),
-		sendEffect: (text, name, replyTo) => sendThreaded(effect(text, imessage.effect.message[name]), replyTo),
+		sendEffect: (text, name, replyTo) => sendThreaded(effect(styled(text), imessage.effect.message[name]), replyTo),
 		sendPoll: (title, options) => space.send(poll(title, [...options])),
 		sendContact: (card) => {
 			if (card === undefined) return space.send(nativeContactCard());
