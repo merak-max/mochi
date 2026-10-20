@@ -24,6 +24,7 @@ const DIRECTIVE = /^[ \t]*(attach|voice|effect|reply):/m;
 /**
  * Sends each closed paragraph of the conversation's in-flight answers as soon as it closes, while the run goes on.
  * `sent` lists the paragraph texts already sent, for the final send to skip; `onSent` saves it after each one.
+ * Messages sent close together share one run, so `own` claims the run once; a turn that loses the claim never streams.
  */
 export function streamParagraphs(input: {
 	readonly harness: Harness;
@@ -34,26 +35,33 @@ export function streamParagraphs(input: {
 	readonly sent: string[];
 	readonly onSent: (sent: readonly string[]) => Promise<void>;
 	readonly onError: (error: unknown) => void;
-	readonly onPartial?: (chars: number, closed: number) => void;
+	readonly own: (run: string) => Promise<boolean>;
+	/** The root run this turn's message is in, as soon as a partial shows it. */
+	readonly onRun: (run: string) => void;
 }): () => Promise<void> {
 	let queue = Promise.resolve();
 	// The closed paragraphs already handled in the current generation; a new generation's text does not start with them.
 	let handled: string[] = [];
+	let owner: Promise<boolean> | undefined;
 	const unsubscribe = input.harness.subscribeCommits(({ changes }) => {
 		for (const change of changes) {
 			if (change.type !== "document" || change.record.kind !== LiveDoc.definition.kind || change.conversationId !== input.conversation) continue;
-			const message = (change.value as { generation?: { message?: AssistantMessage } } | null)?.generation?.message;
-			if (message === undefined) continue;
+			const live = change.value as { run?: { taskId: string }; generation?: { message?: AssistantMessage } } | null;
+			const message = live?.generation?.message;
+			if (message === undefined || live?.run === undefined) continue;
 			const closed = closedParagraphs(messageText(message));
-			input.onPartial?.(messageText(message).length, closed.length);
 			let same = closed.length >= handled.length;
 			for (let index = 0; same && index < handled.length; index++) same = closed[index] === handled[index];
 			if (!same) handled = [];
 			const fresh = closed.slice(handled.length);
 			handled = closed;
+			const run = live.run.taskId;
+			input.onRun(run);
 			for (const paragraph of fresh) {
 				if (DIRECTIVE.test(paragraph)) continue;
 				queue = queue.then(async () => {
+					owner ??= input.own(run);
+					if (!(await owner)) return;
 					const bubble: Bubble = { kind: "text", text: paragraph };
 					const first = input.sent.length === 0 && input.threadOn !== undefined;
 					await input.channel.send(bubble, input.person, first ? { replyTo: input.threadOn } : undefined);

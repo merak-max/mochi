@@ -96,8 +96,8 @@ type Answer =
 type Outage = { readonly retryAt: number; readonly attempt: number; readonly downMs: number };
 
 type TurnState =
-	| { readonly phase: "run"; readonly streamed?: readonly string[] }
-	| { readonly phase: "claim"; readonly channel: ChatChannelId; readonly answer: Answer; readonly streamed?: readonly string[] }
+	| { readonly phase: "run"; readonly streamed?: readonly string[]; readonly run?: string }
+	| { readonly phase: "claim"; readonly channel: ChatChannelId; readonly answer: Answer; readonly streamed?: readonly string[]; readonly run?: string }
 	| {
 			readonly phase: "send";
 			readonly channel: ChatChannelId;
@@ -128,6 +128,8 @@ function nextOutage(outage: Outage | null, now: number): Outage | "give-up" {
 const taskFamily = (kind: string) => defineDocFamily<{ task: TaskId | null }, null>({ kind, version: 1, scope: "session", family: true, initial: () => ({ task: null }) });
 const ClaimDoc = taskFamily("mochi.claim");
 const ChannelTailDoc = taskFamily("mochi.channel-tail");
+/** The one Turn that streams a root run, by the run's task id; the other Turns in that run send nothing. */
+const StreamOwnerDoc = taskFamily("mochi.stream-owner");
 
 export const LastInboundDoc = defineDoc<{ last: { channel: ChatChannelId; messageId: string } | null }>({
 	kind: "mochi.last-inbound",
@@ -323,6 +325,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 				const conversationId = input.conversation ?? ROOT_CONVERSATION_ID;
 				const stopTyping = keepTyping(channel, input.person);
 				const streamed = [...(task.state.checkpoint.streamed ?? [])];
+				let run = task.state.checkpoint.run;
 				const stopStream = channel === undefined || !channel.profile.paragraphsAreBubbles
 					? async () => {}
 					: streamParagraphs({
@@ -332,9 +335,19 @@ export function defineTurn(host: TurnHost): TurnTask {
 						person: input.person,
 						threadOn: input.threadOn,
 						sent: streamed,
-						onSent: (sent) => runtime.commit(() => running({ phase: "run", streamed: [...sent] }), context).then(() => {}),
+						onSent: (sent) => runtime.commit(() => running({ phase: "run", streamed: [...sent], ...(run === undefined ? {} : { run }) }), context).then(() => {}),
 						onError: (error) => log("turn.stream_failed", { task: task.id, error: String(error) }),
-						onPartial: (chars, closed) => log("turn.partial", { task: task.id, chars, closed }),
+						own: async (runId) => {
+							const won = await host.harness.commit(async (tx) => {
+								const owner = await tx.doc(StreamOwnerDoc, runId, null);
+								if (owner.task === null) owner.task = task.id;
+								return owner.task === task.id;
+							}, context);
+							return won;
+						},
+						onRun: (runId) => {
+							run = runId;
+						},
 					});
 				let settled;
 				let nudge: ReturnType<typeof setTimeout> | undefined;
@@ -359,15 +372,20 @@ export function defineTurn(host: TurnHost): TurnTask {
 					await stopTyping();
 				}
 				const sent = [...streamed];
+				const ran = run === undefined ? {} : { run };
 				await runtime.commit(() => {
-					if (settled.status === "done") return settled.type === "input" ? running({ phase: "claim", channel: input.channel, answer: { kind: "entry", entry: settled.answer }, streamed: sent }) : completed("silent");
+					if (settled.status === "done") return settled.type === "input" ? running({ phase: "claim", channel: input.channel, answer: { kind: "entry", entry: settled.answer }, streamed: sent, ...ran }) : completed("silent");
 					if (settled.reason === "aborted") return completed("silent");
-					return running({ phase: "claim", channel: input.channel, answer: { kind: "failure", submission: settled.id, reason: settled.reason }, streamed: sent });
+					return running({ phase: "claim", channel: input.channel, answer: { kind: "failure", submission: settled.id, reason: settled.reason }, streamed: sent, ...ran });
 				}, context);
 			},
 			claim: async (task, runtime, context) => {
-				const { channel, answer, streamed } = task.state.checkpoint;
+				const { channel, answer, streamed, run } = task.state.checkpoint;
 				await runtime.commit(async (tx) => {
+					if (run !== undefined) {
+						const owner = await tx.doc(StreamOwnerDoc, run, null);
+						if (owner.task !== null && owner.task !== task.id) return completed("merged");
+					}
 					const claim = await tx.doc(ClaimDoc, claimKey(answer, task.id, channel), null);
 					if (claim.task !== null && claim.task !== task.id) return completed("merged");
 					claim.task = task.id;
