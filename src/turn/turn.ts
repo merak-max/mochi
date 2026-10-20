@@ -47,6 +47,7 @@ import { loadOutgoing } from "../media/files.ts";
 import { prepareInbound } from "../media/inbound.ts";
 import { splitDirectives, withEffect } from "../channels/directives.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
+import { streamParagraphs } from "./stream.ts";
 
 // A Turn is a background task of the ownerless line conversation, so neither Esc nor /stop on root reaches it.
 // The claim commit takes `<answer>:<channel>` in ClaimDoc (the first claimer sends) and appends the Turn to its
@@ -94,12 +95,14 @@ type Answer =
 type Outage = { readonly retryAt: number; readonly attempt: number; readonly downMs: number };
 
 type TurnState =
-	| { readonly phase: "run" }
-	| { readonly phase: "claim"; readonly channel: ChatChannelId; readonly answer: Answer }
+	| { readonly phase: "run"; readonly streamed?: readonly string[] }
+	| { readonly phase: "claim"; readonly channel: ChatChannelId; readonly answer: Answer; readonly streamed?: readonly string[] }
 	| {
 			readonly phase: "send";
 			readonly channel: ChatChannelId;
 			readonly answer: Answer;
+			/** Paragraphs already sent while the answer was written; the final send skips them. */
+			readonly streamed?: readonly string[];
 			readonly after: TaskId | null;
 			readonly sent: number;
 			readonly outage: Outage | null;
@@ -220,6 +223,20 @@ async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "
 	return images.length === 0 ? text : [{ type: "text", text }, ...images];
 }
 
+/** The answer without the paragraphs already streamed, so the final send never repeats one. */
+function unstreamed(text: string, streamed: readonly string[]): string {
+	if (streamed.length === 0) return text;
+	const kept: string[] = [];
+	for (const paragraph of text.split(/\n[ \t]*\n/)) {
+		if (!streamed.includes(paragraph.trim())) kept.push(paragraph);
+	}
+	return kept.join("\n\n");
+}
+
+/** Steered into a chat run that has sent nothing for `SLOW_NUDGE_MS`, as Claude Code's "it's been a while" reminder. */
+const SLOW_NUDGE = "[the owner has waited a while with no reply: tell him in a few words what you are doing, then continue]";
+const SLOW_NUDGE_MS = 20_000;
+
 /** Repeated on each chat message, as Claude Code's turn reminder: style rules at the top of a long window fade. */
 const CHAT_REMINDER = "[reply: lead with the answer, one short bubble, no recap]";
 
@@ -295,24 +312,47 @@ export function defineTurn(host: TurnHost): TurnTask {
 			run: async (task, runtime, context) => {
 				const input = task.input;
 				if (input.source !== "chat") throw new Error("Only a chat Turn runs a conversation.");
-				const stopTyping = keepTyping(channels.get(input.channel), input.person);
+				const channel = channels.get(input.channel);
+				const conversationId = input.conversation ?? ROOT_CONVERSATION_ID;
+				const stopTyping = keepTyping(channel, input.person);
+				const streamed = [...(task.state.checkpoint.streamed ?? [])];
+				const stopStream = channel === undefined || !channel.profile.paragraphsAreBubbles
+					? async () => {}
+					: streamParagraphs({
+						harness: host.harness,
+						conversation: conversationId,
+						channel,
+						person: input.person,
+						threadOn: input.threadOn,
+						sent: streamed,
+						onSent: (sent) => runtime.commit(() => running({ phase: "run", streamed: [...sent] }), context).then(() => {}),
+						onError: (error) => log("turn.stream_failed", { task: task.id, error: String(error) }),
+					});
 				let settled;
+				let nudge: ReturnType<typeof setTimeout> | undefined;
 				try {
-					const conversation = (await runtime.conversation(input.conversation ?? ROOT_CONVERSATION_ID, context))!;
+					const conversation = (await runtime.conversation(conversationId, context))!;
 					const content = await inputOf(workDir, input, media, host.harness, context);
-					settled = await (await conversation.submit({ type: "input", content, requestId: input.key, whenBusy: "steer" }, context)).wait(context);
+					const submission = await conversation.submit({ type: "input", content, requestId: input.key, whenBusy: "steer" }, context);
+					nudge = setTimeout(() => {
+						if (streamed.length > 0) return;
+						void conversation.submit({ type: "input", content: SLOW_NUDGE, requestId: `${input.key}:nudge`, whenBusy: "steer" }, context).catch(() => {});
+					}, SLOW_NUDGE_MS);
+					settled = await submission.wait(context);
 				} finally {
+					clearTimeout(nudge);
+					await stopStream();
 					await stopTyping();
 				}
-				const channel = input.channel;
+				const sent = [...streamed];
 				await runtime.commit(() => {
-					if (settled.status === "done") return settled.type === "input" ? running({ phase: "claim", channel, answer: { kind: "entry", entry: settled.answer } }) : completed("silent");
+					if (settled.status === "done") return settled.type === "input" ? running({ phase: "claim", channel: input.channel, answer: { kind: "entry", entry: settled.answer }, streamed: sent }) : completed("silent");
 					if (settled.reason === "aborted") return completed("silent");
-					return running({ phase: "claim", channel, answer: { kind: "failure", submission: settled.id, reason: settled.reason } });
+					return running({ phase: "claim", channel: input.channel, answer: { kind: "failure", submission: settled.id, reason: settled.reason }, streamed: sent });
 				}, context);
 			},
 			claim: async (task, runtime, context) => {
-				const { channel, answer } = task.state.checkpoint;
+				const { channel, answer, streamed } = task.state.checkpoint;
 				await runtime.commit(async (tx) => {
 					const claim = await tx.doc(ClaimDoc, claimKey(answer, task.id, channel), null);
 					if (claim.task !== null && claim.task !== task.id) return completed("merged");
@@ -321,7 +361,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 					const previous = tail.task;
 					tail.task = task.id;
 					const live = previous !== null && previous !== task.id && (await tx.task(previous))?.state.status !== "terminal";
-					return running({ phase: "send", channel, answer, after: live ? previous : null, sent: 0, outage: null });
+					return running({ phase: "send", channel, answer, after: live ? previous : null, sent: 0, outage: null, ...(streamed === undefined ? {} : { streamed }) });
 				}, context);
 			},
 			send: async (task, runtime, context) => {
@@ -343,7 +383,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 					if (channel !== undefined) {
 						// Attachment bubbles are placeholders until their turn to send, so a file read never shifts `sent` indexes.
 						const bubbles: Bubble[] = [
-							...withEffect(present(outgoing.text, channel.profile), outgoing.effect),
+							...withEffect(present(unstreamed(outgoing.text, state.streamed ?? []), channel.profile), outgoing.effect),
 							...outgoing.files.map((file) => ({ kind: "file" as const, name: file.path, mimeType: "application/octet-stream", bytes: new Uint8Array(), voice: file.voice })),
 						];
 						if (bubbles.length === 0) return runtime.commit(() => completed("silent"), context);
@@ -363,7 +403,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 						const chatThread = task.input.source === "chat" && outgoingBubble.kind === "text" ? task.input.threadOn : undefined;
 						const threadOn = outgoing.replyTo ?? chatThread;
 						const sendStart = Date.now();
-						if (sent === 0 && threadOn !== undefined) await channel.send(outgoingBubble, person, { replyTo: threadOn });
+						if (sent === 0 && threadOn !== undefined && (state.streamed ?? []).length === 0) await channel.send(outgoingBubble, person, { replyTo: threadOn });
 						else await channel.send(outgoingBubble, person);
 						log("turn.sent", { task: task.id, bubble: sent, ms: Date.now() - sendStart, sinceStart: Date.now() - (task.startedAt ?? Date.now()) });
 					} catch (error) {
