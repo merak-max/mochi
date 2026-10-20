@@ -17,7 +17,7 @@ Leave what went right. Do not restate what the harness already says clearly.
 
 Read the library first. Do not repeat an edit it marks `hurt`. Build on lessons it marks `helped`.
 
-Write facts about THIS owner's setup as labelled facts ("in this setup, the iitd mail list tool pages at 20"). Write procedure so it holds for the next task of the same kind.
+Write facts about THIS owner's setup as labelled facts ("in this setup, the work mail list tool pages at 20"). Write procedure so it holds for the next task of the same kind.
 
 Commit to the single most defensible version. A later step merges.
 

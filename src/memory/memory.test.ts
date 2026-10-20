@@ -122,12 +122,12 @@ test("redact leaves ordinary text alone", () => {
 		"read /home/ec2-user/Developer/mochi/node_modules/@earendil-works/pi-ai/dist/types.d.ts",
 		"acc_01JABCDEFGHJKMNPQRSTVWXYZ0 id 123e4567-e89b-12d3-a456-426614174000",
 		"spc-msg-01JAB2CDEFGH3JKMNPQRSTVW4XYZ",
-		"https://github.com/0oAstro/austroporean-cards/blob/main/README.md",
+		"https://github.com/example-org/example-cards/blob/main/README.md",
 		"https://www.youtube.com/watch?v=dQw4w9WgXcQ",
 		"https://drive.google.com/file/d/1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV/view",
-		"author=Shaurya auth=true apiKey: process.env.KEY Authorization: $TOKEN",
+		"author=Ada auth=true apiKey: process.env.KEY Authorization: $TOKEN",
 		"getElementByIdAndSomethingVeryLongName2 UPPER_CASE_CONSTANT_NAME_FOR_THE_APP_V2",
-		"IMG_20241019_123456_HDR_Portrait_Mode1 Shaurya_Pratap_Singh_Resume_2024_Final_v3",
+		"IMG_20241019_123456_HDR_Portrait_Mode1 Ada_Lovelace_Resume_2024_Final_v3",
 		"The tokenizer counts 512 bytes; the password manager is 1Password.",
 	];
 	for (const text of plain) assert.equal(redact(text), text);
