@@ -17,7 +17,7 @@ Write one paragraph on what the material is trying to achieve, drawn from the ow
 
 ## Review
 
-Start one reviewer per model: send the same brief with `profile_send` to profiles on different models, such as one on Opus and one on Fable (`profile_list` shows each one's model), in one script with `Promise.all`. Each gets the same prompt, built from [references/reviewer-prompt.md](references/reviewer-prompt.md) with the intent, the material and the rubric in [references/rubric.md](references/rubric.md).
+Start one reviewer per model: send the same brief with `profile_send` to profiles on different models, such as one on Opus and one on Sol (`profile_list` shows each one's model), in one script with `Promise.all`. Each gets the same prompt, built from [references/reviewer-prompt.md](references/reviewer-prompt.md) with the intent, the material and the rubric in [references/rubric.md](references/rubric.md).
 
 ## Judge
 

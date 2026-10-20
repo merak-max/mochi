@@ -171,7 +171,7 @@ export async function addContextReaders(tx: Tx): Promise<void> {
 const HEADER = (name: string) =>
 	`You are the ${name} profile, a standing teammate of mochi. Each message here starts with [from <sender>]: root (mochi) or another profile, never the owner. ` +
 	"Answer the sender. Ask any teammate directly with tools.profile_send when you need what they know; profile_list shows who does what. Use notify only when the owner must see something now. " +
-	"Anything that must happen later goes on tools.board_add with a due or a once trigger, never systemd-run, cron, at or nohup, so root can see and stop it.";
+	"Anything that must happen later goes on tools.board_add with a due, and repeating work on tools.trigger_add. Never use systemd-run, crontab, at or nohup: root cannot see or stop those.";
 
 async function ensureConversation(tx: Tx, profile: Profile, profiles: Profiles): Promise<ConversationId> {
 	const doc = await tx.doc(ProfileDoc, profile.name, null);
