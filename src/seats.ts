@@ -1,12 +1,10 @@
-import type { Message, ModelThinkingLevel, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	type ConversationId,
 	type ConversationOwnership,
 	type EntryId,
 	defineExtension,
-	GenerationTask,
-	hook,
 	type Extension,
 	type ModelRef,
 	type PromptSection,
@@ -120,23 +118,6 @@ function withDeadline(code: string): string {
 }
 
 /**
- * Anthropic rejects an `is_error` tool result that holds anything but text, and the result stays in history, so every
- * later turn would fail. Such a result goes out as a plain one; its text already says the call failed.
- */
-const imagesOnFailure = hook(GenerationTask, {
-	beforeRequest: (request) => {
-		if (!request.messages.some(failedWithImages)) return undefined;
-		const messages: Message[] = [];
-		for (const message of request.messages) messages.push(failedWithImages(message) ? { ...message, isError: false } : message);
-		return { messages };
-	},
-});
-
-function failedWithImages(message: Message): message is ToolResultMessage {
-	return message.role === "toolResult" && message.isError && message.content.some((item) => item.type !== "text");
-}
-
-/**
  * One `seat-<seat>` extension per seat: its model tools, `codemode` with its prompt section, and the library tools its
  * scripts may call. Throws when the tables and the definitions disagree.
  */
@@ -157,7 +138,7 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 			scripted.push(entry.inline ? { ...each, callers: ["tools"] } : { ...each, callers: ["tools"], deferred: true });
 		}
 		const sections = seat === "agent" ? [...agentSections, ...(codemode.sections ?? []), ...everySeat] : [...(codemode.sections ?? []), ...everySeat];
-		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted], sections, hooks: [imagesOnFailure] });
+		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted], sections });
 	});
 }
 
