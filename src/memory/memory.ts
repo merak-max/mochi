@@ -77,10 +77,10 @@ const OldMemoryDoc = defineDoc<{ notes: Record<string, { subject: string; kind: 
 });
 
 function render(tree: Tree, [lo, hi]: Block): string {
-	if (hi - lo === 1) return `#${lo} ${tree.lines[lo]!.at} ${tree.lines[lo]!.text}`;
+	if (hi - lo === 1) return `#${lo} ${tree.lines[lo]!.at} ${clipBytes(tree.lines[lo]!.text, LINE_BYTES)}`;
 	const summary = tree.blocks[blockKey([lo, hi])];
-	if (summary !== undefined) return `#${lo}-${hi - 1} ${summary}`;
-	return tree.lines.slice(lo, hi).map((line, i) => `#${lo + i} ${line.at} ${line.text}`).join("\n");
+	if (summary !== undefined) return `#${lo}-${hi - 1} ${clipBytes(summary, LINE_BYTES)}`;
+	return tree.lines.slice(lo, hi).map((line, i) => `#${lo + i} ${line.at} ${clipBytes(line.text, LINE_BYTES)}`).join("\n");
 }
 
 function wake(tree: Tree, upTo = tree.lines.length): string {
@@ -256,11 +256,18 @@ async function keepsHistory(harness: Harness, conversation: ConversationId, cont
 	return !(Array.isArray(extensions) && extensions.includes("seat-trigger"));
 }
 
-/** Builds every block that is due, smallest first, one commit each, so a crash resumes at the next missing block. */
+/**
+ * Builds every block that is due, smallest first, one commit each, so a crash resumes at the next missing block. A summary
+ * over `LINE_BYTES`, written before that limit, counts as missing and is written again.
+ */
 async function buildBlocks(read: () => Promise<Tree>, write: (key: string, summary: string) => Promise<void>, fast: FastCompletion, context: Context): Promise<void> {
 	for (;;) {
 		const tree = await read();
-		const next = pending(tree.lines.length, (block) => tree.blocks[blockKey(block)] !== undefined)[0];
+		const built = (block: Block): boolean => {
+			const summary = tree.blocks[blockKey(block)];
+			return summary !== undefined && bytes(summary) <= LINE_BYTES;
+		};
+		const next = pending(tree.lines.length, built)[0];
 		if (next === undefined) return;
 		const input = mergeInput(tree, next);
 		if (input === undefined) return;
