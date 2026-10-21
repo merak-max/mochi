@@ -4,29 +4,59 @@ import type { Bubble, ChannelProfile } from "./types.ts";
 const URL_ONLY = /^https?:\/\/\S+$/;
 
 /** U+200D and U+200C are content in emoji sequences and in Devanagari, Malayalam and Persian, so only these blanks are stripped. */
-const TRUE_BLANKS = /[​﻿⁠]/gu;
+const TRUE_BLANKS = /[\u200B\uFEFF\u2060]/gu;
 
-/** A markdown block's own text: one per paragraph, code block, heading or quote, and one per list item. */
-function blockTexts(tokens: readonly Token[]): string[] {
+/** True when the text opens a quotation it does not close, such as the first paragraph of a quoted draft. */
+function opensQuote(text: string): boolean {
+	const straight = text.split('"').length - 1;
+	const opening = text.split("\u201C").length - 1;
+	const closing = text.split("\u201D").length - 1;
+	return straight % 2 === 1 || opening > closing;
+}
+
+/**
+ * The bubbles of a markdown text: one per paragraph, code block, heading, quote or list. A whole list is one bubble, and
+ * a paragraph that ends with a colon stays with the list after it. A quotation that spans paragraphs, such as a draft,
+ * is one bubble.
+ */
+function groups(tokens: readonly Token[]): string[] {
 	const out: string[] = [];
+	let open = "";
+	let joinNextList = false;
 	for (const token of tokens) {
 		if (token.type === "space") continue;
-		if (token.type === "list") {
-			for (const item of token.items) out.push(item.raw.trim());
+		const text = token.raw.trim();
+		if (text === "") continue;
+		if (open !== "") {
+			open = `${open}\n\n${text}`;
+			if (!opensQuote(open)) {
+				out.push(open);
+				open = "";
+			}
 			continue;
 		}
-		const text = token.raw.trim();
-		if (text !== "") out.push(text);
+		if (token.type === "list" && joinNextList) {
+			out[out.length - 1] = `${out[out.length - 1]}\n${text}`;
+			joinNextList = false;
+			continue;
+		}
+		joinNextList = token.type === "paragraph" && text.endsWith(":");
+		if (opensQuote(text)) {
+			open = text;
+			continue;
+		}
+		out.push(text);
 	}
+	if (open !== "") out.push(open);
 	return out;
 }
 
-/** The blocks of `text`, as marked parses CommonMark and GFM. */
+/** The bubbles of `text`, as marked parses CommonMark and GFM. */
 export function blocks(text: string): string[] {
-	return blockTexts(Lexer.lex(text));
+	return groups(Lexer.lex(text));
 }
 
-/** The blocks of a partial answer that a later block has closed; the last one may still grow. */
+/** The bubbles of a partial answer that a later bubble has closed; the last one may still grow. */
 export function closedBlocks(text: string): string[] {
 	const all = blocks(text);
 	all.pop();
