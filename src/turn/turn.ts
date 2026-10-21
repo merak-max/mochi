@@ -252,12 +252,6 @@ function unstreamed(text: string, streamed: readonly string[]): string {
 	return blocks(text).filter((block) => !streamed.includes(block)).join("\n\n");
 }
 
-/** Steered into a chat run that has sent nothing for `SLOW_NUDGE_MS`, as Claude Code's "it's been a while" reminder. */
-const SLOW_NUDGE = "[the owner has waited a while with no reply: tell him in a few words what you are doing, then continue]";
-const SLOW_NUDGE_MS = 290_000;
-
-
-
 async function saveFiles(workDir: string, message: Extract<Inbound, { kind: "message" }>): Promise<SavedFile[]> {
 	if (message.attachments.length === 0) return [];
 	const dir = join("inbox", message.messageId.replace(/[^A-Za-z0-9._-]/g, "_"));
@@ -410,15 +404,10 @@ export function defineTurn(host: TurnHost): TurnTask {
 						},
 					});
 				let settled;
-				let nudge: ReturnType<typeof setTimeout> | undefined;
 				try {
 					const conversation = (await runtime.conversation(conversationId, context))!;
 					const content = await inputOf(workDir, input, media, host.harness, context);
 					const submission = await conversation.submit({ type: "input", content, requestId: input.key, whenBusy: "steer" }, context);
-					nudge = setTimeout(() => {
-						if (streamed.length > 0) return;
-						void conversation.submit({ type: "input", content: SLOW_NUDGE, requestId: `${input.key}:nudge`, whenBusy: "steer" }, context).catch(() => {});
-					}, SLOW_NUDGE_MS);
 					settled = await submission.wait(context);
 					if (blockedByPolicy(settled)) {
 						log("turn.policy_reset", { task: task.id, conversation: conversationId });
@@ -427,7 +416,6 @@ export function defineTurn(host: TurnHost): TurnTask {
 						if (channel !== undefined) await channel.send({ kind: "text", text: POLICY_RESET_NOTE }, input.person).catch(() => {});
 					}
 				} finally {
-					clearTimeout(nudge);
 					await stopStream();
 					stopTyping();
 				}
