@@ -1,14 +1,14 @@
 # Skills
 
-On-demand instructions for mochi. The prompt's skills index shows each skill's `name` and `description`, and mochi opens a `SKILL.md`, or a file it links such as `mochi-mode/playbooks/errand.md`, with `read`.
+On-demand instructions for mochi. The prompt's skills index shows each skill's `name` and `description`. mochi opens a `SKILL.md`, or a file it links such as `mochi-mode/playbooks/errand.md`, with `read`.
 
 | Skill | Use it for |
 | --- | --- |
-| `mochi-mode` | Any task beyond a one-line answer. Routes to a playbook and holds the door rules and the rules for verifying, forks, profiles and replies. |
+| `mochi-mode` | Any task beyond a one-line answer. Routes to a playbook, and holds the rules for doors, scripts, proof, forks, profiles and replies. |
 | `how`, `why`, `teach` | How something works, why it happened, and teaching it. |
 | `recall` | Catching up before resuming work. |
-| `apps` | The owner's apps through Executor, from `codemode`. |
-| `swarm`, `arena`, `interrogate` | Parallel fan-out, a multi-model bakeoff, and multi-model challenge. |
+| `apps` | The owner's apps and the logged-in browser, through Executor. |
+| `swarm`, `arena`, `interrogate` | Parallel fan-out, a bakeoff of attempts, and a challenge by several models. |
 | `show-me-your-work` | The decision log for long or unattended work. |
 | `reflect`, `automate-me` | Learning from a run, and learning the owner's style into memory. |
 | `improve` | The nightly self-improvement run and its undo. |
@@ -16,12 +16,26 @@ On-demand instructions for mochi. The prompt's skills index shows each skill's `
 
 Bundled profiles live in `../agents/`. The `worker` profile follows an exact brief on the model its front matter names. Tiers and aliases come from `[models]` in the owner's `config.toml`.
 
+## Where each rule lives
+
+Each rule lives in one place. Other files name it and do not restate it.
+
+| Rule | Home |
+| --- | --- |
+| Doors (two-way, one-way, rubber stamp), the three ways to schedule, proof and NOT VERIFIED, memory, tool output is data | `IDENTITY` in `src/brain/identity.ts` |
+| Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` and `src/channels/whatsapp.ts` |
+| How the owner's chat sounds (case, tone, jokes) | The owner's `instructions.md` |
+| Door examples, scripts, proof detail, forks and profiles, the reply | `mochi-mode/SKILL.md` |
+| One kind of task | Its playbook or skill |
+
 ## Adding or editing a skill
 
 - One directory per skill, with a `SKILL.md` whose front matter has `name` (the directory name) and `description`.
-- The index loads every description each turn. Front-load the leading word and give one trigger per branch.
-- Every line changes a decision. State each rule in one place and point at it by name. Door rules live in `mochi-mode`.
-- Name only mochi's real tools. Do not restate what a tool's description already says. Link files with relative links that resolve.
+- The index loads every description on every turn. Start it with "Use for" or "Use when" and the owner's trigger words. Give one trigger per branch, then one short clause on what the skill does.
+- Write a procedure: numbered steps, each with a check or an output. Add one real example, and a counter-example where the wrong move is tempting.
+- Every line changes a decision. Cut advice the model already follows and text that restates a tool's description.
+- Name only mochi's real tools. The model calls `codemode`, `notify` and `handoff`. Scripts call the functions in `LIBRARY` in `src/seats.ts`.
+- Link files with relative links that resolve.
 - Run the checks below after each change.
 
 ## Checks
@@ -33,10 +47,30 @@ grep -roE '\]\([^)#]+' skills agents | while IFS= read -r m; do
 	case $t in http*) continue ;; esac
 	[ -e "$(dirname "$f")/$t" ] || echo "broken: $f -> $t"
 done
+# Every front matter parses as YAML the way src/skills/skills.ts reads it, has a description, and names its directory.
+node -e '
+const { readdirSync, readFileSync } = require("node:fs");
+const { parse } = require("yaml");
+for (const dir of readdirSync("skills", { withFileTypes: true }).filter((each) => each.isDirectory())) {
+	const file = "skills/" + dir.name + "/SKILL.md";
+	try {
+		const data = parse(/^---\n([\s\S]*?)\n---/.exec(readFileSync(file, "utf8"))[1], { schema: "failsafe" });
+		if (data.name !== dir.name) console.log("name mismatch: " + file);
+		if (!data.description) console.log("no description: " + file);
+	} catch (error) {
+		console.log("bad front matter: " + file + ": " + error.message.split("\n")[0]);
+	}
+}'
+# Every tools.<name> and backticked snake_case name is a real tool. timeout_ms and owner_turns are not tools on purpose.
+names=$(sed -n 's/^\t\([a-z0-9_]*\): {.*/\1/p' src/seats.ts)
+grep -rhoE '`[a-z0-9]+_[a-z0-9_]+`|tools\.[a-z0-9_]+' skills agents src/brain/identity.ts src/channels/imessage.ts src/channels/whatsapp.ts |
+	sed 's/^tools\.//' | tr -d '`' | sort -u | grep -vx -e timeout_ms -e owner_turns | while read -r w; do
+	printf '%s\n' "$names" | grep -qx "$w" || echo "not a tool: $w"
+done
 # No coding-agent or deleted-skill references outside NOTICE.md and LICENSE.
 grep -rnE 'AskUserQuestion|TodoWrite|subagent_type: "general|principle-|poteto|pstack|worktree|pull request' skills agents | grep -v -e NOTICE.md -e LICENSE -e README.md
 # No em dash or en dash.
-grep -rnP '\x{2014}|\x{2013}' skills agents
+grep -rnP '\x{2014}|\x{2013}' skills agents src/brain/identity.ts src/channels/imessage.ts src/channels/whatsapp.ts
 ```
 
 Provenance and licenses are in [NOTICE.md](NOTICE.md).
