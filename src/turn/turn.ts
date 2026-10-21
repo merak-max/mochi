@@ -371,7 +371,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 				const ran = run === undefined ? {} : { run };
 				await runtime.commit(() => {
 					if (settled.status === "done") return settled.type === "input" ? running({ phase: "claim", channel: input.channel, answer: { kind: "entry", entry: settled.answer }, streamed: sent, ...ran }) : completed("silent");
-					if (settled.reason === "aborted") return completed("silent");
+					if (settled.reason === "aborted" || settled.reason === "reset") return completed("silent");
 					return running({ phase: "claim", channel: input.channel, answer: { kind: "failure", submission: settled.id, reason: settled.reason }, streamed: sent, ...ran });
 				}, context);
 			},
