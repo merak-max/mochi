@@ -5,8 +5,8 @@ You are the lead reviewer. Filter, add context, and decide. The reviewers saw th
 ## Filter
 
 - **Nitpick gravity.** Reviewers fill their review. If a reviewer found only nits, the material is probably fine. Say so.
-- **Hypothetical versus actual.** "What if the flight is cancelled?" counts only if the plan has no slack and the risk is real. Check before you keep it.
-- **"I would have done it differently."** Dismiss it unless the reviewer shows a concrete cost of the current approach.
+- **Hypothetical versus actual.** A hypothetical risk counts only if the plan has no slack and the risk is real. Check before you keep it.
+- **Preference.** Dismiss a different approach unless the reviewer shows a concrete cost of the current one.
 - **Missing context.** Dismiss a finding that contradicts a preference or fact the owner gave you, and name it.
 
 ## Keep

@@ -24,7 +24,7 @@ Read primary sources: official docs, the provider's own pages, the rules or cont
 4. Find the boundaries: where it hands off, and what it needs from outside.
 5. Find the non-obvious: exceptions, fees, deadlines, surprising defaults, recent changes.
 
-If you cannot trace a part, say so. "I couldn't find how X connects to Y" beats a guess.
+If you cannot trace a part, name the link you could not trace. Never guess it.
 
 ## Output
 

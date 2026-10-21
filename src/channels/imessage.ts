@@ -26,9 +26,9 @@ const REMEMBERED_MESSAGES = 200;
 const IMESSAGE_PROFILE: ChannelProfile = {
 	id: "imessage",
 	style:
-		"imessage: markdown renders (**bold**, *italic*, lists); no tables or headings. Each blank-line paragraph is a bubble. Default to one short bubble; use more only when he asked for detail. A link alone on a line shows a card. " +
-		"A GIF can be the whole reply when banter, a joke or a reaction calls for one: tools.gif_search, pick the hit whose description fits the mood, tools.gif_save, then send it alone with an attach: line. Not for information, bad news or work. " +
-		"Lines: attach: <path>, voice: <path>, effect: <slam|loud|gentle|invisible|confetti|fireworks|lasers|heart|balloons|echo|sparkles|spotlight>, reply: <id>. tools.message edits, unsends, polls.",
+		"imessage: markdown renders (**bold**, *italic*, lists). No tables or headings. Each blank-line paragraph is one bubble. Default to one short bubble, and more only when he asked for detail. A link alone on a line shows a card. " +
+		"For banter, a joke or a reaction, a GIF can be the whole reply: tools.gif_search, tools.gif_save, then its attach: line alone. Never a GIF for information, bad news or work. " +
+		"Lines: attach: <path>, voice: <path>, effect: <slam|loud|gentle|invisible|confetti|fireworks|lasers|heart|balloons|echo|sparkles|spotlight>, reply: <id>. tools.message edits, unsends and polls.",
 	maxBubbles: 6,
 	paragraphsAreBubbles: true,
 	typingMaxMs: 90_000,

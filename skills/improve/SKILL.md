@@ -1,6 +1,6 @@
 ---
 name: improve
-description: mochi's nightly self-improvement run (the improve trigger runs it), and the owner's "undo <edit id>" for one of its edits.
+description: Use when the improve trigger runs, or for "undo <edit id>". Nightly self-improvement of mochi's skills.
 ---
 
 # Improve

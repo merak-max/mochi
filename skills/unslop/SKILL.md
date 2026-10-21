@@ -1,6 +1,6 @@
 ---
 name: unslop
-description: Rules that cut AI tells. Read before you write more than a few lines for the owner or in their name.
+description: Use before you write more than a few lines for the owner or in the owner's name. Rules that cut AI tells.
 ---
 
 # Unslop
@@ -9,8 +9,8 @@ Scan for the patterns below, then rewrite. Keep the meaning and the intended ton
 
 ## Content
 
-3. **Superficial -ing phrases.** "highlighting...", "ensuring...", "showcasing...". Delete, or expand with real sources.
-5. **Vague attributions.** "Experts believe", "Some critics argue". Name the source or delete.
+3. **Superficial -ing phrases.** A trailing -ing clause that claims significance. Delete it, or expand it with real sources.
+5. **Vague attributions.** Claims credited to unnamed experts or critics. Name the source or delete.
 
 ## Language
 
@@ -18,29 +18,29 @@ Scan for the patterns below, then rewrite. Keep the meaning and the intended ton
 8. **Fancy "is".** "serves as", "stands as", "boasts", "features". Say "is" or "has".
 9. **"Not just X, but Y."** State the point.
 10. **Rule of three.** Use the natural number of items.
-11. **Synonym cycling.** Flight, trip, journey and itinerary for one thing. Pick one and repeat it.
+11. **Synonym cycling.** Several names for one thing. Pick one and repeat it.
 12. **False ranges.** "from X to Y" with no real scale. List the topics.
 
 ## Style
 
 13. **Dashes.** Never an em dash or an en dash, and no hyphen as a dash. End the sentence, or use a comma, a colon or parentheses.
-14. **Colon as a crutch.** A colon before a list, an example or an explanation is fine. Cut the colon that props up comparison framing: "If you're coming from traditional automation: instead of registering event handlers, you describe conditions" becomes "Describe when the reminder should fire in plain English."
+14. **Colon as a crutch.** A colon before a list or an explanation is fine. Cut the colon that props up comparison framing, and state the point on its own.
 15. **Boldface overuse.** Do not bold every proper noun or acronym.
-16. **Inline-header lists.** A bold label and colon that restate the line ("**Performance:** Performance improved...") become prose. A bold lead-in that ends in a period and is followed by new detail ("**Schema in TypeScript.** Tables live in one file.") is fine.
+16. **Inline-header lists.** A bold label and colon that the line then restates become prose. A bold lead-in that ends in a period and is followed by new detail is fine.
 17. **Title case headings.** Use sentence case.
 18. **Decorative emojis.** Remove them from headings and bullets.
 19. **Curly quotes.** Use straight quotes.
 
 ## Communication artifacts
 
-20. **Chatbot phrases.** "I hope this helps!", "Let me know if...", "Certainly!", "Found the smoking gun!" Remove.
-22. **Sycophancy.** "Great question! You're absolutely right!" Answer directly.
+20. **Chatbot phrases.** Offers of more help, eager openers and triumphant announcements. Remove.
+22. **Sycophancy.** Praise for the question or agreement for its own sake. Answer directly.
 
 ## Filler
 
 23. **Filler phrases.** "In order to" becomes "to". "Due to the fact that" becomes "because". "It is important to note that" goes.
-24. **Excessive hedging.** "could potentially possibly be argued that it might" becomes "may".
-25. **Generic conclusions.** "The future looks bright." State specific plans or facts.
+24. **Excessive hedging.** Stacked hedges. Use one hedge word at most.
+25. **Generic conclusions.** A closing line that could end any text. State specific plans or facts.
 
 ## Jargon
 
@@ -48,10 +48,10 @@ Scan for the patterns below, then rewrite. Keep the meaning and the intended ton
 
 ## Plain speech
 
-27. **Say what it does, not how it feels.** "SQL you can read" names a feeling. "`.toSQL()` returns the exact string sent to the database" names the mechanism. If a sentence cannot become a concrete instruction, fact or number, cut it. If it could appear unchanged in another project's docs, cut it.
+27. **Say what it does, not how it feels.** Name the mechanism or the number, not the feeling. If a sentence cannot become a concrete instruction, fact or number, cut it. If it could appear unchanged in another project's docs, cut it.
 28. **Dense sentences.** If the reader must backtrack, split the sentence or drop clauses. One idea per sentence.
-29. **Active voice.** Name the actor: "queries are validated" becomes "the compiler validates queries". Use the passive only when the actor is unknown or does not matter.
-30. **Adverbs.** "runs quickly" becomes "is fast" or the number. "significantly improves" becomes the measured delta.
+29. **Active voice.** Name the actor. Use the passive only when the actor is unknown or does not matter.
+30. **Adverbs.** Replace the adverb with a stronger verb, the number, or the measured delta.
 31. **The plain word.** "utilize" and "leverage" are "use", "facilitate" is "help", "numerous" is "many", "in the event that" is "if".
-32. **Mannered prose.** Aphorisms ("wire it or delete it"), fragments for effect, personified code ("the plan holds it"), figurative verbs ("rides along"), stock framing. "A dial worth turning" becomes "a parameter worth varying".
-33. **Over-compression.** Dropped articles, verbless fragments, arrows and abbreviations. "Parser rejects bad date → exit 2, no write" becomes "The parser rejects a bad date, exits with code 2, and writes nothing."
+32. **Mannered prose.** Aphorisms, fragments for effect, personified code, figurative verbs and stock framing. Say the literal thing.
+33. **Over-compression.** Dropped articles, verbless fragments, arrows and abbreviations. Write whole sentences.

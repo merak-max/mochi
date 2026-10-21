@@ -26,4 +26,4 @@ Write the sections that fit:
 - **Where things are.** The pages, accounts or files someone needs to start.
 - **Gotchas.** Deadlines, fees, exceptions, what trips people up.
 
-Be concrete: "the embassy returns the passport by courier in 5 to 10 working days", not "processing occurs". Say why a complex part is complex. Do not pad a simple part. Name open questions. Follow `unslop`.
+Be concrete: name who does each step, how, and how long it takes. Say why a complex part is complex. Do not pad a simple part. Name open questions. Follow `unslop`.

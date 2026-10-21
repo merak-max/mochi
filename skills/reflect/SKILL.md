@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: "Turn a finished conversation or run into concrete fixes: a memory line, trigger or skill edit. For \"reflect\" or repeats."
+description: Use for "reflect", or the same mistake twice. Turns a finished run into a memory line, a trigger or a skill edit.
 ---
 
 # Reflect
@@ -27,7 +27,7 @@ Weigh the three outputs per [references/synthesizer.md](references/synthesizer.m
 
 ## 4. Apply
 
-Route each Accepted item to a mechanism where one can enforce it: a classify step instead of "don't over-notify", a trigger instead of "remember to check", a `note` instead of a repeated correction.
+Route each Accepted item to a mechanism that enforces it (a classify step, a trigger, a `note`) instead of a reminder in prose.
 
 - Memory lines, trigger fixes and classify steps are two-way doors. Apply them and report them.
 - A skill edit changes every future run. Show it and apply what the owner approves.

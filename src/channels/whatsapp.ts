@@ -27,7 +27,7 @@ const SEND_TIMEOUT_MS = 30_000;
 
 const WHATSAPP_PROFILE: ChannelProfile = {
 	id: "whatsapp",
-	style: "whatsapp: plain text with *bold* and _italic_, no tables, one message per reply, up to 4,096 characters. react sets an emoji reaction. attach: and voice: (OGG) lines work.",
+	style: "whatsapp: plain text with *bold* and _italic_. No tables. One message per reply, up to 4,096 characters. tools.react sets an emoji reaction. attach: and voice: (OGG) lines work.",
 	maxBubbles: 3,
 	paragraphsAreBubbles: false,
 	typingMaxMs: 90_000,

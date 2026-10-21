@@ -18,6 +18,6 @@ For each lesson give:
 - **Evidence.** The moment, as an entry id or a short quote.
 - **Routing.** A note (`rule`, `preference`, `person`, `fact`), a trigger or gate, a skill and section, `tune description: <skill>`, or `new skill: <name>`.
 
-Skip trivial and soon-stale details (exact prices, one-time ids). Return a numbered list with no commentary.
+Skip trivial and soon-stale details. Return a numbered list with no commentary.
 
 <TRANSCRIPT OR DIGEST>
