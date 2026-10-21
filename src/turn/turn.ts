@@ -48,6 +48,7 @@ import { prepareInbound } from "../media/inbound.ts";
 import { splitDirectives, withEffect } from "../channels/directives.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
 import { keyedReset } from "./lifecycle.ts";
+import { type Known, LATER_CHECK_MS, LATER_POLL_MS, LATER_WAIT_MS, uncovered } from "./later.ts";
 import { streamParagraphs } from "./stream.ts";
 
 // A Turn is a background task of the ownerless line conversation, so neither Esc nor /stop on root reaches it.
@@ -77,6 +78,8 @@ type ChatTurn = {
 	readonly person?: string;
 	readonly replyTo?: ReplyTarget;
 	readonly threadOn?: string;
+	/** When the message was sent, in ms; absent on Turns stored before the later-message check. */
+	readonly at?: number;
 };
 export type RunTurn = {
 	readonly source: "run";
@@ -233,6 +236,16 @@ function blockedByPolicy(settled: { readonly status: string; readonly detail?: u
 
 const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and the board are kept.";
 
+const HELD_NOTE = "[context, no reply needed: your answer above was not sent, because he wrote again before it went out. Your next reply must answer everything he wrote since your last sent reply.]";
+const UNHELD_NOTE = "[context, no reply needed: your answer above was sent after all.]";
+
+/** Resolves to undefined after `ms`, so a slow platform call never holds a reply. */
+function within<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const late = new Promise<undefined>((resolve) => (timer = setTimeout(() => resolve(undefined), ms)));
+	return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
 /** The answer without the blocks already streamed, so the final send never repeats one. */
 function unstreamed(text: string, streamed: readonly string[]): string {
 	if (streamed.length === 0) return text;
@@ -301,6 +314,57 @@ function claimKey(answer: Answer, task: TaskId, channel: ChatChannelId): string 
 
 export function defineTurn(host: TurnHost): TurnTask {
 	const { users, channels, workDir, media, log } = host;
+
+	const knownOf = async (conversation: ConversationId, key: string, context: Context): Promise<Known> => {
+		const record = await host.harness.commit((tx) => tx.submissionByRequest(conversation, key), context);
+		if (record === undefined) return { kind: "missing" };
+		return { kind: "submitted", answer: record.status === "done" ? record.answer : undefined };
+	};
+
+	/**
+	 * Before an answer goes out, asks the platform whether the owner wrote again after this Turn's message. A newer message
+	 * that this answer does not cover means the answer is stale: the model gets a note, and the newer message's own run
+	 * answers everything in one reply. Bounded and fail-open: a slow or failing check, or a newer message that never
+	 * reaches mochi within `LATER_WAIT_MS`, sends the answer as it is.
+	 */
+	const holdForLater = async (taskId: TaskId, input: ChatTurn, channel: Channel, conversationId: ConversationId, answer: EntryId, context: Context): Promise<boolean> => {
+		if (input.at === undefined || channel.laterMessages === undefined) return false;
+		const started = Date.now();
+		const ownId = input.key.slice(input.channel.length + 1);
+		let later;
+		try {
+			later = await within(channel.laterMessages(new Date(input.at), input.person), LATER_CHECK_MS);
+		} catch (error) {
+			log("turn.later_check", { task: taskId, ms: Date.now() - started, result: "error", error: String(error) });
+			return false;
+		}
+		if (later === undefined) {
+			log("turn.later_check", { task: taskId, ms: Date.now() - started, result: "timeout" });
+			return false;
+		}
+		const keys = new Map<string, Known>();
+		for (const message of later) {
+			const key = requestKey(input.channel, message.id);
+			keys.set(key, await knownOf(conversationId, key, context));
+		}
+		const open = uncovered(later, ownId, (id) => requestKey(input.channel, id), (key) => keys.get(key) ?? { kind: "missing" }, answer);
+		log("turn.later_check", { task: taskId, ms: Date.now() - started, result: open.length === 0 ? "clear" : "held", newer: open.length });
+		if (open.length === 0) return false;
+		const conversation = await host.harness.conversation(conversationId, context);
+		if (conversation === undefined) return false;
+		await conversation.submit({ type: "write", requestId: `held:${taskId}`, entry: { kind: "mochi.held", model: [{ role: "user", content: HELD_NOTE, timestamp: Date.now() }] } }, context);
+		const until = Date.now() + LATER_WAIT_MS;
+		for (;;) {
+			let arrived = true;
+			for (const key of open) if ((await knownOf(conversationId, key, context)).kind === "missing") arrived = false;
+			if (arrived) return true;
+			if (Date.now() >= until) break;
+			await new Promise((resolve) => setTimeout(resolve, LATER_POLL_MS));
+		}
+		log("turn.later_missing", { task: taskId, keys: open });
+		await conversation.submit({ type: "write", requestId: `unheld:${taskId}`, entry: { kind: "mochi.held", model: [{ role: "user", content: UNHELD_NOTE, timestamp: Date.now() }] } }, context);
+		return false;
+	};
 	return defineTask<TurnInput, TurnState, TurnResult>({
 		name: "mochi.turn",
 		version: 2,
@@ -369,6 +433,10 @@ export function defineTurn(host: TurnHost): TurnTask {
 				}
 				const sent = [...streamed];
 				const ran = run === undefined ? {} : { run };
+				if (settled.status === "done" && settled.type === "input" && sent.length === 0 && channel !== undefined) {
+					const held = await holdForLater(task.id, input, channel, conversationId, settled.answer, context);
+					if (held) return runtime.commit(() => completed("merged"), context);
+				}
 				await runtime.commit(() => {
 					if (settled.status === "done") return settled.type === "input" ? running({ phase: "claim", channel: input.channel, answer: { kind: "entry", entry: settled.answer }, streamed: sent, ...ran }) : completed("silent");
 					if (settled.reason === "aborted" || settled.reason === "reset") return completed("silent");
@@ -553,7 +621,7 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 			const files = await saveFiles(line.workDir, inbound);
 			const preparedMedia = files.length === 0 ? undefined : await prepareInbound(files, line.workDir, line.media, context.abortSignal);
 			const thread = inbound.replyTo === undefined ? {} : { replyTo: inbound.replyTo, threadOn: inbound.messageId };
-			const turn: ChatTurn = { source: "chat", channel: inbound.channel, key, tag, text: inbound.text, files, ...(preparedMedia === undefined ? {} : { preparedMedia }), ...thread };
+			const turn: ChatTurn = { source: "chat", channel: inbound.channel, key, tag, text: inbound.text, files, at: inbound.at.getTime(), ...(preparedMedia === undefined ? {} : { preparedMedia }), ...thread };
 			const opened = await harness.commit(async (tx) => {
 				const known = user === undefined ? ROOT_CONVERSATION_ID : (await tx.doc(UserDoc, user.handle, null)).conversation;
 				if (known !== null) {

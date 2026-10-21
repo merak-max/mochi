@@ -14,6 +14,7 @@ import {
 	DeliveryError,
 	type Env,
 	type Inbound,
+	type LaterMessage,
 	type MessageRequest,
 	type ReplyTarget,
 	SendRejected,
@@ -84,7 +85,32 @@ interface IMessageSpace {
 interface IMessageApp {
 	readonly messages: AsyncIterable<readonly [IMessageSpace, IMessageMessage]>;
 	dm(handle: string): Promise<IMessageSpace>;
+	/** Messages from `handle` after `after` in their DM, oldest first; undefined when the SDK does not expose history. */
+	from(handle: string, after: Date): Promise<readonly LaterMessage[] | undefined>;
 	stop(): Promise<void>;
+}
+
+/** The fields of Photon's message history that mochi reads. */
+type PhotonHistoryMessage = {
+	readonly guid: string;
+	readonly isFromMe: boolean;
+	readonly itemType?: string;
+	readonly reactionTargetGuid?: string;
+	readonly content?: { readonly text?: string; readonly attachments?: readonly unknown[] };
+};
+type PhotonMessages = { listInChat(chat: string, options: { pageSize: number; isFromMe: boolean; after: Date }): Promise<{ messages: readonly PhotonHistoryMessage[] }> };
+
+/**
+ * Spectrum 12.10.1 has no public history call, so this reaches the advanced-imessage client under it. Undefined when
+ * that shape changes, and the caller then sends without the check.
+ */
+type PhotonPlatform = { client?: readonly { client?: { messages?: Partial<PhotonMessages> } }[] };
+
+function photonMessages(app: unknown): PhotonMessages | undefined {
+	const platforms = (app as { __internal?: { platforms?: Map<string, PhotonPlatform> | Record<string, PhotonPlatform> } }).__internal?.platforms;
+	const platform = platforms instanceof Map ? platforms.get("imessage") : platforms?.imessage;
+	const messages = platform?.client?.[0]?.client?.messages;
+	return typeof messages?.listInChat === "function" ? (messages as PhotonMessages) : undefined;
 }
 
 const LINK = { tickMs: 30_000, silentProbeMs: 5 * 60_000, failedProbesToRebuild: 2, rebuildDelayMs: 5_000 };
@@ -250,6 +276,20 @@ async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
 			for await (const [space, message] of app.messages) yield [wrap(space as Parameters<typeof wrap>[0]), message as unknown as IMessageMessage] as const;
 		})(),
 		dm: async (handle) => wrap(await platform.space.create(handle)),
+		from: async (handle, after) => {
+			const history = photonMessages(app);
+			if (history === undefined) return undefined;
+			const { messages } = await history.listInChat(`any;-;${handle}`, { pageSize: 20, isFromMe: false, after });
+			const out: LaterMessage[] = [];
+			for (const message of messages) {
+				if (message.isFromMe || message.reactionTargetGuid !== undefined) continue;
+				if (message.itemType !== undefined && message.itemType !== "normal") continue;
+				const text = message.content?.text ?? "";
+				if (text === "" && (message.content?.attachments?.length ?? 0) === 0) continue;
+				out.push({ id: message.guid, text });
+			}
+			return out.reverse();
+		},
 		stop: () => app.stop(),
 	};
 }
@@ -446,6 +486,13 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 
 		async message(request) {
 			return runMessage(request);
+		},
+
+		async laterMessages(after, person) {
+			if (!app) throw new ChannelDown("iMessage is not connected");
+			const found = await app.from(person ?? owner, after);
+			if (found === undefined) throw new Error("This Spectrum version does not expose message history.");
+			return found;
 		},
 
 		async typing(on, person) {
