@@ -15,7 +15,7 @@ Read the memory section of your prompt, and `recall` lines on how the owner writ
 
 Mine three places, one fork each, in a single `fork` call. Each fork returns patterns with entry ids or message links.
 
-- **Corrections in past chats.** `recall` for "too long", "shorter", "don't", "always", "never", "I prefer", and the owner's rewrites of mochi's drafts.
+- **Corrections in past chats.** The owner's complaints, standing orders and rewrites of mochi's drafts, found with `recall`.
 - **The owner's sent messages and mail**, through the `apps` skill: greetings, sign-offs, length, language mix, formality by recipient, emoji.
 - **Choices the owner made.** Bookings, purchases and plans the owner accepted or rejected, and why.
 
@@ -23,7 +23,7 @@ Keep a pattern only when it shows up in two or more places or times.
 
 ## 3. Ask once
 
-Send the owner one message with the five or so patterns you are least sure of, each a short statement to confirm or correct. Add one open question: "Anything else I should always or never do?"
+Send the owner one message with the five or so patterns you are least sure of, each a short statement to confirm or correct. Add one open question about what else you should always or never do.
 
 ## 4. Write the memory lines
 
@@ -32,10 +32,7 @@ Send the owner one message with the five or so patterns you are least sure of, e
 
 Every line shows in every prompt, so keep the lines few and short, and skip what memory already holds. Use the owner's words where you can.
 
-| Weak line | Strong line |
-| --- | --- |
-| "Communicates clearly with professors." | "To professors: 'Dear Prof. <last name>', 3 lines at most, signs 'Best, <first name>'." |
-| "Prefers concise messages." | "One bubble, unless the owner asks for detail." |
+A line names something you can check in a message: a greeting, a sign-off, a length, a case, a language. Drop a line that only praises or describes.
 
 ## 5. Test
 

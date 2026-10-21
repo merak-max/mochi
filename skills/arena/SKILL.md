@@ -14,7 +14,7 @@ Every candidate gets the same brief. The brief is the contract.
 1. Name the artifact each candidate produces.
 2. Write a rubric of 3 to 6 concrete criteria. Only you and the judge see it.
 3. Use three runners by default, more when the task has several distinct directions. Forks share your model, so for model diversity use profiles on different models (`profile_list`).
-4. Give each candidate its own output path, such as `<slug>/arena/<n>.md` in the work directory.
+4. Give each candidate its own output file under `<slug>/arena/` in the work directory.
 
 ## 2. Fan out
 

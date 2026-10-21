@@ -33,4 +33,4 @@ Use the rubric lenses that fit. Check what you can with the web tools and say wh
 3. **Evidence.** Why you believe it, with sources.
 4. **Suggestion.** A concrete alternative, if you have one.
 
-Separate "this is wrong" from "I would have done it differently". Do not restate or praise the material. If you find nothing wrong, say "no findings".
+Separate errors from preferences. Do not restate or praise the material. If you find nothing wrong, say "no findings".

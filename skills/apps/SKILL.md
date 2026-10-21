@@ -13,11 +13,6 @@ Executor holds the owner's apps. Scripts reach it with three tools:
 
 An app with more than one account takes `args: { accountId, input: { ... } }`.
 
-```js
-const { items } = await tools.apps_search({ query: "github list issues" });
-return await tools.apps_call({ path: items[0].path, args: { accountId: "acc_...", input: { owner: "o", repo: "r", state: "open" } } });
-```
-
 Executor passes its approvals at once, so a gated call is a one-way door that you open yourself. Apply the door rules before the call.
 
 ## Pick the web tool
@@ -25,7 +20,7 @@ Executor passes its approvals at once, so a gated call is a one-way door that yo
 | Need | Tool |
 | --- | --- |
 | Search, page text, a site map | `web_search`, `web_fetch`, `web_map` |
-| Structured provider data (podcasts, app stores, filings) | Find a tool with `web_find_tools` (free), then run it with `web_alexandria` (spends credits) |
+| Structured provider data | Find a tool with `web_find_tools` (free), then run it with `web_alexandria` (spends credits) |
 | A site where the owner is logged in | Executor's Firecrawl, below |
 
 ## The logged-in browser

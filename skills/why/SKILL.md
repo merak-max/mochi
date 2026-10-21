@@ -1,6 +1,6 @@
 ---
 name: why
-description: Use for "why did X happen" (a charge, a rejection, a past decision). Finds the cause in the record, with its confidence.
+description: Use for "why did X happen", or a cause the owner wants to know. Finds the cause in the record, with its confidence.
 ---
 
 # Why
@@ -9,7 +9,7 @@ Find what led to something, from the record, and say how sure you are. Separate 
 
 ## 1. Pin the target
 
-Name the thing (a charge, a decision, a rule, a message, an act of mochi) and the question about it. If it is vague, state your best reading in one line and go.
+Name the thing and the question about it. If it is vague, state your best reading in one line and go.
 
 ## 2. Anchor it
 
@@ -25,7 +25,7 @@ One investigator per source that could hold the evidence:
 4. **The public record.** Official pages, terms, changelogs, news, status pages.
 5. **Files and code.** The work directory, or a repository with its history.
 
-Skip a source only with a written reason, such as "no bank app connected". A skipped source is a gap in the answer.
+Skip a source only with a written reason. A skipped source is a gap in the answer.
 
 When one source already holds a direct answer, answer yourself and say which sources you did not search. Otherwise start the investigators in one `fork({ briefs: [...] })` call, each brief built from [references/investigator-prompt.md](references/investigator-prompt.md).
 

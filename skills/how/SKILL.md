@@ -1,6 +1,6 @@
 ---
 name: how
-description: Use for "how does X work" (a product, a process, a codebase, mochi itself). For causes, use why.
+description: Use for "how does X work", about a product, a process, a codebase or mochi itself. For causes, use why.
 ---
 
 # How
@@ -17,11 +17,6 @@ When in doubt, take the simple path.
 ## 2. Explore (complex only)
 
 Split the question into 2 to 4 distinct angles. Start one explorer per angle in one `fork({ briefs: [...] })` call, each brief built from [references/explorer-prompt.md](references/explorer-prompt.md).
-
-| Question | Angles |
-| --- | --- |
-| "How does the Schengen visa work for me?" | eligibility, documents, steps and timeline, common rejections |
-| "How does this repo send mail?" | entry point, data, main flow, boundaries |
 
 ## 3. Explain
 

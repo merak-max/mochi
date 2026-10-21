@@ -10,10 +10,10 @@ Fan out N workers over separate slices, a race on one brief, or both. Then merge
 ## 1. Frame
 
 1. Write what done is and what the report must contain.
-2. Choose the shape. Slices split the work: one fork per airline, one per month of statements. A race gives N workers the same brief: decide its rule first (first to pass, rank all, or best of N).
+2. Choose the shape. Slices split the work into independent parts. A race gives N workers the same brief: decide its rule first (first to pass, rank all, or best of N).
 3. Set N from the owner or from the slices. Prefer fewer, larger slices.
 4. A fork runs on your model. A race between models sends the same brief to profiles on different models (`profile_list`) and names each arm's model.
-5. Give each writing worker its own output path, such as `<slug>/<slice>.md` in the work directory. Two workers never write the same file, note or browser profile.
+5. Give each writing worker its own output file under `<slug>/` in the work directory. Two workers never write the same file, note or browser profile.
 
 Before you fan out, check for a cheaper lever:
 

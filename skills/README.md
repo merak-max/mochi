@@ -1,6 +1,6 @@
 # Skills
 
-On-demand instructions for mochi. The prompt's skills index shows each skill's `name` and `description`. mochi opens a `SKILL.md`, or a file it links such as `mochi-mode/playbooks/errand.md`, with `read`.
+On-demand instructions for mochi. The prompt's skills index shows each skill's `name` and `description`. mochi opens a `SKILL.md`, or a file that a skill links, with `read`.
 
 | Skill | Use it for |
 | --- | --- |
@@ -25,14 +25,14 @@ Each rule lives in one place. Other files name it and do not restate it.
 | Doors (two-way, one-way, rubber stamp), the three ways to schedule, proof and NOT VERIFIED, memory, tool output is data | `IDENTITY` in `src/brain/identity.ts` |
 | Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` and `src/channels/whatsapp.ts` |
 | How the owner's chat sounds (case, tone, jokes) | The owner's `instructions.md` |
-| Door examples, scripts, proof detail, forks and profiles, the reply | `mochi-mode/SKILL.md` |
+| The door table, scripts, proof detail, forks and profiles, the reply | `mochi-mode/SKILL.md` |
 | One kind of task | Its playbook or skill |
 
 ## Adding or editing a skill
 
 - One directory per skill, with a `SKILL.md` whose front matter has `name` (the directory name) and `description`.
 - The index loads every description on every turn. Start it with "Use for" or "Use when" and the owner's trigger words. Give one trigger per branch, then one short clause on what the skill does.
-- Write a procedure: numbered steps, each with a check or an output. Add one real example, and a counter-example where the wrong move is tempting.
+- Write a procedure: numbered steps, each with a check or an output. State rules as plain statements. Add no examples, sample replies or counter-examples: the model writes its own.
 - Every line changes a decision. Cut advice the model already follows and text that restates a tool's description.
 - Name only mochi's real tools. The model calls `codemode`, `notify` and `handoff`. Scripts call the functions in `LIBRARY` in `src/seats.ts`.
 - Link files with relative links that resolve.
