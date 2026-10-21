@@ -44,7 +44,7 @@ From about two weeks of my own use, on one 8-core ARM EC2 box in Mumbai:
 
 - Reply delivery: the send itself has a median of 661 ms, p90 3.4 s and p99 12 s over 299 sends. Most of the tail is Photon's servers in us-west-1. (`jq` over `turn.sent` lines in `mochi.log`.)
 - Your message to its first bubble is mostly the model writing. A one-line Opus reply takes 4 to 11 s.
-- Cost: over 8 days the gateway logged about $1,110, of which Opus was $723. That is the price of using the strongest model as the brain for everything, and it is the first thing I would change for you.
+- Cost: most of the spend is the brain model. Opus as the brain for every reply is the expensive choice, and it is the first thing to change if you run this on a budget.
 
 ## Start
 
