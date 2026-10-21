@@ -1,6 +1,6 @@
 ---
 name: technical-writing
-description: "Standard for guides, how-tos, references, proposals and READMEs: Diátaxis structure, plain global English."
+description: "Use when you write a guide, a how-to, a reference, a proposal or a README. Diátaxis and plain global English."
 ---
 
 # Technical writing

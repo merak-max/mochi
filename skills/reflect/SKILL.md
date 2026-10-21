@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: "Turn a finished conversation or run into concrete fixes: a memory line, trigger or skill edit. For \"reflect\" or repeats."
+description: Use for "reflect", or the same mistake twice. Turns a finished run into a memory line, a trigger or a skill edit.
 ---
 
 # Reflect

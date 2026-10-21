@@ -1,6 +1,6 @@
 ---
 name: unslop
-description: Rules that cut AI tells. Read before you write more than a few lines for the owner or in their name.
+description: Use before you write more than a few lines for the owner or in the owner's name. Rules that cut AI tells.
 ---
 
 # Unslop

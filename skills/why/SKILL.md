@@ -1,6 +1,6 @@
 ---
 name: why
-description: Find why something happened or is the way it is, with evidence and honest confidence. For "why did X happen".
+description: Use for "why did X happen" (a charge, a rejection, a past decision). Finds the cause in the record, with its confidence.
 ---
 
 # Why
