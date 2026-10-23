@@ -14,6 +14,7 @@ import { codingTools } from "./media/read-image.ts";
 import type { Channels } from "./channels/types.ts";
 import { workEnv } from "./env/work-env.ts";
 import type { SearchIndex } from "./index/fts.ts";
+import { type FileIndexes, searchFns } from "./search/search.ts";
 import type { Log } from "./log.ts";
 import { contextFns, contextSection } from "./context.ts";
 import { defineForkTask, forkFns } from "./fork/fork.ts";
@@ -56,6 +57,8 @@ interface MochiOptions {
 	/** The apps MCP server; absent, the apps functions say it is not connected. */
 	readonly apps?: Apps;
 	readonly index: SearchIndex;
+	/** fff file indexes for find and grep, one per root. */
+	readonly files: FileIndexes;
 	/** Skill directories, `<dir>/<name>/SKILL.md`: bundled first, then the owner's, which replace bundled ones by name. */
 	readonly skillDirs: readonly string[];
 	readonly profiles: Profiles;
@@ -102,6 +105,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const forkTask = defineForkTask(options.workDir, lineOf);
 	const library: ToolRegistration[] = [
 		...(await codingTools()),
+		...searchFns(options.files),
 		noteTool(index, ownerIn),
 		zoomTool(ownerIn),
 		recallTool(index),

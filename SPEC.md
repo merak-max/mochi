@@ -81,7 +81,7 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 
 | Area | Functions |
 |---|---|
-| Files and shell | `bash`, `read`, `edit`, `write` (the daemon user's full access; bash defaults to a 600 s timeout) |
+| Files and shell | `bash`, `read`, `edit`, `write` (the daemon user's full access; bash defaults to a 600 s timeout), `find` and `grep` (fff-node: one in-process index per root, frecency ranked, gitignore aware; the root defaults to the home dir) |
 | Memory | `note`, `recall`, `zoom`, `history` |
 | Models | `llm` (the fast model unless `model` names `brain` or `strongest`, no tools), `classify` (the classifier model) |
 | Context | `context_read`, `context_put`, `context_list` |

@@ -15,6 +15,7 @@ import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./chann
 import { type Config, unknownKeys, type ChatUser, loadConfig } from "./config.ts";
 import { type Home, resolveHome } from "./home.ts";
 import { SearchIndex } from "./index/fts.ts";
+import { FileIndexes } from "./search/search.ts";
 import { acquireLock } from "./lock.ts";
 import { log, setLogFile } from "./log.ts";
 import { broken, off, ready, type Setup, setupReport } from "./setup.ts";
@@ -228,6 +229,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const controller = new AbortController();
 	const running = withAbortSignal(controller.signal, BACKGROUND_CONTEXT);
 	const index = new SearchIndex(join(config.home.dir, "index.sqlite"));
+	const files = new FileIndexes();
 
 	const { channels, report: channelReport } = channelSet === "terminal" ? { channels: new Map() as Channels, report: [] } : configuredChannels(config.env, config.users);
 	const workDir = join(config.home.dir, "work");
@@ -250,6 +252,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env, ...(config.file.providers === undefined ? {} : { providers: config.file.providers }) } }),
 			...(apps === undefined ? {} : { apps }),
 			index,
+			files,
 			skillDirs: [join(REPO, "skills"), config.home.skillsDir],
 			profiles,
 			workDir,
@@ -303,6 +306,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		channelsRunning.abort();
 		await Promise.allSettled(inbound);
 		index.close();
+		files.close();
 		rmSync(socketPath(config.home.dir), { force: true });
 		releaseLock();
 	};

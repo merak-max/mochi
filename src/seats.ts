@@ -46,6 +46,8 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	bash: { seats: ALL, inline: true },
 	edit: { seats: ALL, inline: true },
 	write: { seats: ALL, inline: true },
+	find: { seats: ALL, inline: true },
+	grep: { seats: ALL, inline: true },
 	recall: { seats: ALL, inline: true },
 	history: { seats: NOT_USER, inline: false },
 	note: { seats: AGENT, inline: true },
