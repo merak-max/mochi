@@ -111,6 +111,7 @@ const ProfileDoc = defineDocFamily<{ conversation: ConversationId | null }, null
 	scope: "session",
 	family: true,
 	initial: () => ({ conversation: null }),
+	checkpointWhen: () => false,
 });
 
 /** Which profile owns each conversation: its standing one and each trigger run that names it. */
@@ -120,6 +121,7 @@ const ProfileOfDoc = defineDocFamily<{ profile: string | null }, null>({
 	scope: "session",
 	family: true,
 	initial: () => ({ profile: null }),
+	checkpointWhen: () => false,
 });
 
 /** The memory owner of a conversation, through a committed reader (prompt sections) or a transaction. */
@@ -193,6 +195,7 @@ const DeliveredDoc = defineDocFamily<{ delivered: boolean }, null>({
 	scope: "session",
 	family: true,
 	initial: () => ({ delivered: false }),
+	checkpointWhen: () => false,
 });
 
 /**

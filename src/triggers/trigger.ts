@@ -78,7 +78,7 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, cla
 				const next = plan(task.input.trigger, last, runtime.now());
 				switch (next.kind) {
 					case "listen":
-						for (;;) await runtime.sleep(runtime.now() + DAY_MS, context);
+						return runtime.sleepUntil(runtime.now() + DAY_MS, { phase: "wait", last }, context);
 					case "done":
 						return runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
 					case "miss":
@@ -89,7 +89,7 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, cla
 			},
 			fire: async (task, runtime, context) => {
 				const { slot, last } = task.state.checkpoint;
-				await runtime.sleep(slot, context);
+				if (runtime.now() < slot) return runtime.sleepUntil(slot, task.state.checkpoint, context);
 				const now = runtime.now();
 				if (late(task.input.trigger, slot, now)) return runtime.commit(() => missed(task.input.trigger, slot), context);
 				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "run", slot, deadline: now + deadlineMs, last } }), context);
@@ -123,7 +123,14 @@ export function defineTrigger({ timeZone, deadlineMs, log, harness, catalog, cla
 				const content = `[${trigger.kind} ${trigger.id}] Current time: ${formatStamp(new Date(slot), timeZone)}\n${body}`;
 				const submission = await conversation.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context);
 				const race = withCancel(context);
-				const settled = await Promise.race([submission.wait(race.context), runtime.sleep(deadline, race.context).then(() => undefined)]).finally(() => race.cancel());
+				let disarm = (): void => {};
+				const timedOut = new Promise<undefined>((resolve) => {
+					disarm = runtime.setTimer(() => resolve(undefined), deadline - runtime.now());
+				});
+				const settled = await Promise.race([submission.wait(race.context), timedOut]).finally(() => {
+					race.cancel();
+					disarm();
+				});
 				if (settled === undefined) {
 					await conversation.abort(context);
 					log("trigger.timed_out", { id: trigger.id, slot: iso(slot) });

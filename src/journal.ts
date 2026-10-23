@@ -6,6 +6,7 @@ const Journal = defineDoc<{ created: Record<string, TaskId> }>({
 	version: 1,
 	scope: "task",
 	initial: () => ({ created: {} }),
+	checkpointWhen: () => false,
 });
 
 /**

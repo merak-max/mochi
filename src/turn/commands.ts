@@ -42,6 +42,7 @@ const CommandDoc = defineDocFamily<{ task: TaskId<CommandReply> | null }, null>(
 	scope: "session",
 	family: true,
 	initial: () => ({ task: null }),
+	checkpointWhen: () => false,
 });
 
 interface CommandDeps {

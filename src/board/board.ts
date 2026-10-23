@@ -35,10 +35,11 @@ const BoardDoc = defineDoc<{ next: number; tasks: Record<string, BoardTask> }>({
 	version: 1,
 	scope: "session",
 	initial: () => ({ next: 1, tasks: {} }),
+	checkpointWhen: () => false,
 });
 
 /** The task one board_add call made, scoped to that call's task. */
-const BoardCallDoc = defineDoc<{ id: number | null }>({ kind: "mochi.board-call", version: 1, scope: "task", initial: () => ({ id: null }) });
+const BoardCallDoc = defineDoc<{ id: number | null }>({ kind: "mochi.board-call", version: 1, scope: "task", initial: () => ({ id: null }), checkpointWhen: () => false });
 
 const parseDue = (due: string): number => {
 	const at = Date.parse(due);
@@ -228,7 +229,7 @@ export function defineSweep(deps: { readonly harness: () => Harness; readonly fo
 		initial: () => ({ phase: "sweep", next: 0 }),
 		phases: {
 			sweep: async (task, runtime, context) => {
-				await runtime.sleep(task.state.checkpoint.next, context);
+				if (runtime.now() < task.state.checkpoint.next) return runtime.sleepUntil(task.state.checkpoint.next, task.state.checkpoint, context);
 				const harness = deps.harness();
 				const now = runtime.now();
 				const due = dueTasks(Object.values((await harness.snapshot(BoardDoc, context))?.tasks ?? {}), now);

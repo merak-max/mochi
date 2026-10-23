@@ -4,6 +4,7 @@ import { mkdir, open, readdir, readFile, rm, stat, writeFile } from "node:fs/pro
 import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
+import { awaitWithContext } from "@earendil-works/chord/context";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { defineTask, defineTool, type NextTaskState, ROOT_CONVERSATION_ID, type Task, type TaskId, type ToolExecutionApi, type ToolRegistration, type TaskRuntime } from "@earendil-works/pi-durable";
 import { type Committer, holdText } from "../context.ts";
@@ -214,7 +215,7 @@ export function defineProcWatch(deps: ProcWatchDeps): ProcTask {
 						const tag = code === null ? `[process ${name} ended, exit code unknown]` : `[process ${name} exited code=${code}]`;
 						return wake(task, runtime, "exit", tag, files, { status: "terminal", outcome: { status: "completed", result: { code } } }, context);
 					}
-					await runtime.sleep(runtime.now() + deps.pollMs, context);
+					await awaitWithContext(new Promise<void>((resolve) => runtime.setTimer(resolve, deps.pollMs)), context);
 				}
 			},
 		},

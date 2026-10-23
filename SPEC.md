@@ -1,6 +1,6 @@
 # Mochi spec
 
-Mochi is a personal agent that runs all day on the owner's machine. The owner texts it on iMessage or WhatsApp, or types in a terminal. It works through code mode scripts, keeps an append-only memory, forks copies of itself for parallel slices, and hands standing work to profiles. pi-durable (`@earendil-works/pi-durable`, pinned at 1.2.0) supplies crash recovery, message queueing, compaction and the task tree.
+Mochi is a personal agent that runs all day on the owner's machine. The owner texts it on iMessage or WhatsApp, or types in a terminal. It works through code mode scripts, keeps an append-only memory, forks copies of itself for parallel slices, and hands standing work to profiles. pi-durable (`@earendil-works/pi-durable`, pinned at 1.4.0) supplies crash recovery, message queueing, compaction and the task tree.
 
 ## Thesis
 

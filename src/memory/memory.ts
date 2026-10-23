@@ -41,10 +41,10 @@ type Tree = { readonly lines: Line[]; readonly blocks: Record<string, string> };
 
 const empty = (): Tree => ({ lines: [], blocks: {} });
 
-export const MemoryLog = defineDoc<Tree>({ kind: "mochi.memory-log", version: 1, scope: "session", initial: empty });
+export const MemoryLog = defineDoc<Tree>({ kind: "mochi.memory-log", version: 1, scope: "session", initial: empty, checkpointWhen: () => false });
 
 /** A profile's own memory log, by profile name. Root's is `MemoryLog`. */
-const ProfileMemoryLog = defineDocFamily<Tree, null>({ kind: "mochi.profile-memory", version: 1, scope: "session", family: true, initial: empty });
+const ProfileMemoryLog = defineDocFamily<Tree, null>({ kind: "mochi.profile-memory", version: 1, scope: "session", family: true, initial: empty, checkpointWhen: () => false });
 
 /** Whose memory a conversation reads and writes: a profile's name, or root. */
 export type Owner = { readonly profile: string } | "root";
@@ -66,6 +66,7 @@ const TurnLog = defineDoc<Tree & { readonly upTo: number }>({
 	history: "latest",
 	fork: "initial",
 	initial: () => ({ ...empty(), upTo: 0 }),
+	checkpointWhen: () => false,
 });
 
 const OldMemoryDoc = defineDoc<{ notes: Record<string, { subject: string; kind: string; body: string; updated: string }> }>({
@@ -75,6 +76,7 @@ const OldMemoryDoc = defineDoc<{ notes: Record<string, { subject: string; kind: 
 	history: "rewindable",
 	fork: "current",
 	initial: () => ({ notes: {} }),
+	checkpointWhen: () => false,
 });
 
 function render(tree: Tree, [lo, hi]: Block): string {

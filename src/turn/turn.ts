@@ -128,7 +128,7 @@ function nextOutage(outage: Outage | null, now: number): Outage | "give-up" {
 	return { retryAt: now + delayOf(attempt), attempt, downMs };
 }
 
-const taskFamily = (kind: string) => defineDocFamily<{ task: TaskId | null }, null>({ kind, version: 1, scope: "session", family: true, initial: () => ({ task: null }) });
+const taskFamily = (kind: string) => defineDocFamily<{ task: TaskId | null }, null>({ kind, version: 1, scope: "session", family: true, initial: () => ({ task: null }), checkpointWhen: () => false });
 const ClaimDoc = taskFamily("mochi.claim");
 const ChannelTailDoc = taskFamily("mochi.channel-tail");
 /** The one Turn that streams a root run, by the run's task id; the other Turns in that run send nothing. */
@@ -139,6 +139,7 @@ export const LastInboundDoc = defineDoc<{ last: { channel: ChatChannelId; messag
 	version: 2,
 	scope: "session",
 	initial: () => ({ last: null }),
+	checkpointWhen: () => false,
 	migrate: (value) => {
 		const route = (value as { route?: { channel?: string; messageId?: string } | null }).route;
 		const chat = route?.channel !== undefined && route.channel !== "cli" && route.messageId !== undefined;
@@ -151,6 +152,7 @@ const LineDoc = defineDoc<{ conversation: ConversationId | null }>({
 	version: 1,
 	scope: "session",
 	initial: () => ({ conversation: null }),
+	checkpointWhen: () => false,
 });
 
 const UserDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
@@ -159,6 +161,7 @@ const UserDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
 	scope: "session",
 	family: true,
 	initial: () => ({ conversation: null }),
+	checkpointWhen: () => false,
 });
 
 function userInstructions(user: ChatUser): string {
@@ -508,10 +511,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 								log("turn.undelivered", { task: task.id, channel: id, answer, sent });
 								return runtime.commit(() => ({ status: "terminal", outcome: { status: "failed", error: { message: `${id} stayed down` } } }), context);
 							}
-							outage = next;
-							await runtime.commit(() => running({ ...state, sent, outage }), context);
-							await runtime.sleep(next.retryAt, context);
-							continue;
+							return runtime.sleepUntil(next.retryAt, { ...state, sent, outage: next }, context);
 						}
 					}
 					sent++;

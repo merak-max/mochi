@@ -46,6 +46,7 @@ const A2AContextDoc = defineDocFamily<{ conversation: ConversationId | null }, n
 	scope: "session",
 	family: true,
 	initial: () => ({ conversation: null }),
+	checkpointWhen: () => false,
 });
 
 type A2ATask = { peer: string; contextId: string; conversation: ConversationId; submission: SubmissionId };
@@ -56,6 +57,7 @@ const A2ATaskDoc = defineDocFamily<{ task: A2ATask | null }, null>({
 	scope: "session",
 	family: true,
 	initial: () => ({ task: null }),
+	checkpointWhen: () => false,
 });
 
 interface A2AServerSettings {

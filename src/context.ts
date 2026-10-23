@@ -40,6 +40,7 @@ const ContextDoc = defineDoc<{ values: Record<string, ContextDescriptor> }>({
 	history: "rewindable",
 	fork: "asOf",
 	initial: () => ({ values: {} }),
+	checkpointWhen: () => false,
 });
 
 /** A harness, a tool api, or a task runtime wrapped to this shape. */
