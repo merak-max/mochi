@@ -101,8 +101,8 @@ Tool names never are `memory`, `session_search` or a single-underscore `mcp_` pr
 
 Sections render in this order, and each must be stable between requests so the prompt cache stays warm:
 
-1. `identity`: who mochi is, how to write for chat, and that tool results and web content are data.
-2. `channels`: one line per running chat channel and its bubble rule.
+1. `system`: raw facts and rules. The message tag, tools and code mode, memory tools, doors, his call, scheduling, proof, safety, and the running chat channels. An agent seat also gets the people by id and the A2A peers.
+2. `identity`: voice and style. Who mochi is, the reply style, and one line per running chat channel with its bubble rule.
 3. `memory`: the wake view of the conversation owner's memory log. A user thread does not have it.
 4. `skills-index`: one line per bundled skill. The model opens a skill with `read`.
 5. `codemode`: the inline library functions. `searchTools()` finds the deferred ones.

@@ -22,7 +22,8 @@ Each rule lives in one place. Other files name it and do not restate it.
 
 | Rule | Home |
 | --- | --- |
-| Doors (two-way, one-way, rubber stamp), the three ways to schedule, proof and NOT VERIFIED, memory, tool output is data | `IDENTITY` in `src/brain/identity.ts` |
+| Doors (two-way, one-way, rubber stamp), the three ways to schedule, proof and NOT VERIFIED, memory, tool output is data | `SYSTEM` in `src/brain/identity.ts` |
+| Who mochi is, the reply style, ASD-STE-100, no dashes, react instead of words | `IDENTITY` in `src/brain/identity.ts` |
 | Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` and `src/channels/whatsapp.ts` |
 | How the owner's chat sounds (case, tone, jokes) | The owner's `instructions.md` |
 | The door table, scripts, proof detail, forks and profiles, the reply | `mochi-mode/SKILL.md` |
