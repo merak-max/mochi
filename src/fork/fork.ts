@@ -1,5 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
+import type { Static } from "typebox";
 import { configure, type ConversationId, defineTask, defineTool, type EntryId, type ModelRef, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { copyContext, holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
@@ -29,8 +30,6 @@ type ForkResult = { readonly answer: string } | { readonly failure: string };
 
 /** How many children of one call run at once; the rest wait their turn. */
 const FORK_BATCH = 6;
-export const MAX_DEPTH = 3;
-const TOO_DEEP = `Children are ${MAX_DEPTH} deep here. Do this slice yourself.`;
 
 export function defineForkTask(workDir: string) {
 	return defineTask<ForkInput, { readonly phase: "run" }, ForkResult>({
@@ -129,69 +128,53 @@ const MODELS = ["brain", "fast", "strongest"] as const;
 
 export function forkFns(deps: ForkDeps): ToolRegistration[] {
 	const { task, scratchDir } = deps;
-	const Name = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" });
-	const Brief = Type.Object({ name: Name, brief: Type.String({ minLength: 1 }) });
 	const Job = Type.Object({
-		name: Name,
+		name: Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" }),
 		brief: Type.String({ minLength: 1 }),
+		fork: Type.Optional(Type.Boolean()),
 		context: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 		model: Type.Optional(Type.Union(MODELS.map((model) => Type.Literal(model)))),
 	});
-	const start = (api: ToolExecutionApi, briefs: readonly { name: string; brief: string }[], first: number, background: boolean, context: Context) =>
+
+	/** Starts one batch of children in one commit, journaled so a replay starts none twice. */
+	const start = (api: ToolExecutionApi, jobs: readonly Static<typeof Job>[], first: number, background: boolean, models: readonly (ModelRef | undefined)[], context: Context) =>
 		api.commit(async (tx) => {
-			const at = await forkPoint(tx, api.conversationId);
 			const depth = (await depthOf(tx, api.conversationId)) + 1;
-			if (depth > MAX_DEPTH) throw new Error(TOO_DEEP);
+			const at = await forkPoint(tx, api.conversationId);
+			const options: TaskOptions = background ? { ownership: { kind: "conversation" }, background: true } : { ownership: { kind: "task", taskId: api.taskId } };
 			const ids: TaskId<ForkResult>[] = [];
-			for (const [offset, each] of briefs.entries()) {
+			for (const [offset, job] of jobs.entries()) {
 				const index = first + offset;
-				const options: TaskOptions = background ? { ownership: { kind: "conversation" }, background: true } : { ownership: { kind: "task", taskId: api.taskId } };
-				const input: ForkInput = { name: each.name, brief: briefOf(each.name, background, each.brief, scratchDir(each.name)), depth, ...(background ? { back: api.conversationId } : {}) };
-				const { id } = await journaled(tx, api.taskId, `fork:${index}`, () => startFork(tx, task, api.conversationId, at, input, options));
-				ids.push(id);
+				const scratch = scratchDir(job.name);
+				const back = background ? { back: api.conversationId } : {};
+				const model = models[index];
+				const withModel = model === undefined ? {} : { model };
+				let started;
+				if (job.fork === true) {
+					const input: ForkInput = { name: job.name, brief: briefOf(job.name, background, job.brief, scratch), depth, ...back, ...withModel };
+					started = await journaled(tx, api.taskId, `agent:${index}`, () => startFork(tx, task, api.conversationId, at, input, options));
+				} else {
+					const keys = job.context ?? [];
+					const input: ForkInput = { name: job.name, brief: jobBriefOf(job.name, job.brief, keys, scratch), depth, ...back, ...withModel };
+					started = await journaled(tx, api.taskId, `agent:${index}`, () => startChild(tx, task, api.conversationId, input, options, keys));
+				}
+				ids.push(started.id);
 			}
 			return ids;
 		}, context);
+
 	return [
-		defineTool({
-			name: "fork",
-			description:
-				`Copies of you with this conversation, one per brief, ${FORK_BATCH} at a time; resolves to answers in brief order. They reuse this chat's prompt cache. ` +
-				"The script's timeout (10 min default) cancels unfinished children and loses every answer, so slices that take minutes go to fork_start.",
-			parameters: Type.Object({ briefs: Type.Array(Brief, { minItems: 1 }) }),
-			structuredOutputSchema: Type.Array(Type.String()),
-			replay: "safe",
-			execute: async ({ briefs }, api, context) => {
-				const answers: string[] = [];
-				for (let from = 0; from < briefs.length; from += FORK_BATCH) {
-					const batch = briefs.slice(from, from + FORK_BATCH);
-					const ids = await start(api, batch, from, false, context);
-					answers.push(...(await Promise.all(ids.map((id, i) => waitFor(api, batch[i]!.name, id, context)))));
-				}
-				return { structuredOutput: answers };
-			},
-		}),
-		defineTool({
-			name: "fork_start",
-			description: "fork in the background: returns at once, and each fork's answer arrives here as a [name] note on your next turn.",
-			parameters: Type.Object({ briefs: Type.Array(Brief, { minItems: 1 }) }),
-			structuredOutputSchema: Type.Array(Type.String()),
-			replay: "safe",
-			execute: async ({ briefs }, api, context) => {
-				await start(api, briefs, 0, true, context);
-				return { structuredOutput: briefs.map((each) => each.name) };
-			},
-		}),
 		defineTool({
 			name: "agent",
 			description:
-				`Fresh agents with your tools and none of this conversation, one per job, ${FORK_BATCH} at a time; resolves to [{ name, answer }]. ` +
-				"Pass data as context keys (context_put it first); model fast for bulk reading. The script's timeout (10 min default) cancels unfinished jobs and loses every answer: " +
-				"work that takes minutes goes to fork_start or profile_send with background.",
-			parameters: Type.Object({ jobs: Type.Array(Job, { minItems: 1 }) }),
+				`Starts child agents, one per job, ${FORK_BATCH} at a time, and resolves to [{ name, answer }] in job order. ` +
+				"fork: true copies this conversation, so the child knows everything here and reuses the prompt cache; otherwise the child starts fresh with only its brief and the context keys you pass. " +
+				"background: true returns the names at once, and each answer arrives later as a [name] note on your next turn. The script's timeout (10 min default) cancels unfinished foreground children, so work that takes minutes runs in the background. " +
+				"model fast suits bulk reading.",
+			parameters: Type.Object({ jobs: Type.Array(Job, { minItems: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.Array(Type.Object({ name: Type.String(), answer: Type.String() })),
 			replay: "safe",
-			execute: async ({ jobs }, api, context) => {
+			execute: async ({ jobs, background }, api, context) => {
 				const models: (ModelRef | undefined)[] = [];
 				for (const job of jobs) {
 					if (job.model === undefined) {
@@ -202,23 +185,14 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 					if (api.models.getModel(model.provider, model.modelId) === undefined) throw new Error(`Model ${job.model} (${model.provider}/${model.modelId}) is not configured.`);
 					models.push(model);
 				}
+				if (background === true) {
+					await start(api, jobs, 0, true, models, context);
+					return { structuredOutput: jobs.map((job) => ({ name: job.name, answer: "started in the background" })) };
+				}
 				const answers: { name: string; answer: string }[] = [];
 				for (let from = 0; from < jobs.length; from += FORK_BATCH) {
 					const batch = jobs.slice(from, from + FORK_BATCH);
-					const ids = await api.commit(async (tx) => {
-						const depth = (await depthOf(tx, api.conversationId)) + 1;
-						if (depth > MAX_DEPTH) throw new Error(TOO_DEEP);
-						const created: TaskId<ForkResult>[] = [];
-						for (const [offset, job] of batch.entries()) {
-							const index = from + offset;
-							const keys = job.context ?? [];
-							const model = models[index];
-							const input: ForkInput = { name: job.name, brief: jobBriefOf(job.name, job.brief, keys, scratchDir(job.name)), depth, ...(model === undefined ? {} : { model }) };
-							const { id } = await journaled(tx, api.taskId, `agent:${index}`, () => startChild(tx, task, api.conversationId, input, { ownership: { kind: "task", taskId: api.taskId } }, keys));
-							created.push(id);
-						}
-						return created;
-					}, context);
+					const ids = await start(api, batch, from, false, models, context);
 					const settled = await Promise.all(ids.map((id, i) => waitFor(api, batch[i]!.name, id, context)));
 					for (const [i, answer] of settled.entries()) answers.push({ name: batch[i]!.name, answer });
 				}

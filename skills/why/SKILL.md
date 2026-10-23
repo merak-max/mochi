@@ -27,7 +27,7 @@ One investigator per source that could hold the evidence:
 
 Skip a source only with a written reason. A skipped source is a gap in the answer.
 
-When one source already holds a direct answer, answer yourself and say which sources you did not search. Otherwise start the investigators in one `fork({ briefs: [...] })` call, each brief built from [references/investigator-prompt.md](references/investigator-prompt.md).
+When one source already holds a direct answer, answer yourself and say which sources you did not search. Otherwise start the investigators in one `agent({ jobs: [...] })` call with `fork: true` on each job, each brief built from [references/investigator-prompt.md](references/investigator-prompt.md).
 
 ## 4. Synthesize
 

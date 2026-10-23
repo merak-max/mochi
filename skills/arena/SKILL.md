@@ -18,7 +18,7 @@ Every candidate gets the same brief. The brief is the contract.
 
 ## 2. Fan out
 
-Start the forked candidates in one `fork({ briefs: [...] })` call. Each fork brief names only its output path, and asks for a short rationale with the options it rejected. For other models, send the brief and the shared background to each profile with `profile_send`, in one script with `Promise.all`. If one candidate fails, continue with N-1 and say so.
+Start the forked candidates in one `agent({ jobs: [...] })` call with `fork: true` on each job. Each fork brief names only its output path, and asks for a short rationale with the options it rejected. For other models, send the brief and the shared background to each profile with `profile_send`, in one script with `Promise.all`. If one candidate fails, continue with N-1 and say so.
 
 ## 3. Judge
 

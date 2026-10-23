@@ -63,8 +63,6 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	agent: { seats: AGENT, inline: true },
 	apps_search: { seats: NOT_USER, inline: true },
 	apps_call: { seats: NOT_USER, inline: true },
-	fork: { seats: AGENT, inline: true },
-	fork_start: { seats: AGENT, inline: false },
 	trigger_add: { seats: AGENT, inline: true },
 	trigger_list: { seats: AGENT_TRIGGER, inline: true },
 	trigger_remove: { seats: AGENT_TRIGGER, inline: false },

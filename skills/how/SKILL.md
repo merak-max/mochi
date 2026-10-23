@@ -16,7 +16,7 @@ When in doubt, take the simple path.
 
 ## 2. Explore (complex only)
 
-Split the question into 2 to 4 distinct angles. Start one explorer per angle in one `fork({ briefs: [...] })` call, each brief built from [references/explorer-prompt.md](references/explorer-prompt.md).
+Split the question into 2 to 4 distinct angles. Start one explorer per angle in one `agent({ jobs: [...] })` call with `fork: true` on each job, each brief built from [references/explorer-prompt.md](references/explorer-prompt.md).
 
 ## 3. Explain
 

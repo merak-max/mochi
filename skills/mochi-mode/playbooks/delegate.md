@@ -4,10 +4,10 @@
 
 1. Pick the worker.
    - Yourself: a few tool calls, or the owner waits in the chat.
-   - `fork`: a slice that needs this conversation.
+   - `agent` with `fork: true`: a slice that needs this conversation.
    - `agent`: one slice of data with a full brief.
    - A profile: only when the work is its role.
-   - Work that can take more than a few minutes goes to `fork_start` or `profile_send` with `background`. One slow inline child loses the answers of the whole batch.
+   - Work that can take more than a few minutes goes to `agent` with `background: true`, or `profile_send` with `background`. One slow inline child loses the answers of the whole batch.
 2. Check that the work started. A `profile_send` result that starts with `NOT STARTED` waits behind the profile's current turn, which can take an hour. Send the work to a free worker, call `profile_stop` first when the current turn is the wrong work, or tell the owner it is queued.
 3. Keep one lead per workstream. Before you send a profile a stop, a scope change or a correction, read the result of your last `profile_send` to it. If that result was `NOT STARTED`, or the owner said stop, call `profile_stop` first: a stop sent as a message waits behind the queue it should cancel. Then send one complete brief that starts "This replaces my brief of <time>." Send no addenda.
 4. Write the brief for a reader with no memory of this chat. It holds each of these:

@@ -13,7 +13,7 @@ Pin the conversation or run: root's recent turns, a trigger's run history, or a 
 
 ## 2. Review from three angles
 
-Start three read-only reviewers in one `fork({ briefs: [...] })` call, each brief with the digest or entry range and its prompt:
+Start three read-only reviewers in one `agent({ jobs: [...] })` call with `fork: true` on each job, each brief with the digest or entry range and its prompt:
 
 | Lens | Prompt |
 |---|---|

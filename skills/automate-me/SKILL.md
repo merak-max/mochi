@@ -13,7 +13,7 @@ Read the memory section of your prompt, and `recall` lines on how the owner writ
 
 ## 2. Mine the evidence
 
-Mine three places, one fork each, in a single `fork` call. Each fork returns patterns with entry ids or message links.
+Mine three places, one fork each, in a single `agent` call with `fork: true`. Each fork returns patterns with entry ids or message links.
 
 - **Corrections in past chats.** The owner's complaints, standing orders and rewrites of mochi's drafts, found with `recall`.
 - **The owner's sent messages and mail**, through the `apps` skill: greetings, sign-offs, length, language mix, formality by recipient, emoji.

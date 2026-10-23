@@ -25,7 +25,7 @@ Before you fan out, check for a cheaper lever:
 
 ## 2. Fan out
 
-Start every worker in one `fork({ briefs: [...] })` call, or with `fork_start` for slices that take minutes. Each brief names its exact slice, how to check its work, and what to return. A self-contained mechanical slice can go to the `worker` profile with `profile_send`. Each worker reports `PASS`, `ISSUES` or `BLOCKED` with evidence (links, quotes, prices with their source), and lists every problem, not only the first.
+Start every worker in one `agent({ jobs: [...] })` call with `fork: true` on each job, or with `background: true` for slices that take minutes. Each brief names its exact slice, how to check its work, and what to return. A self-contained mechanical slice can go to the `worker` profile with `profile_send`. Each worker reports `PASS`, `ISSUES` or `BLOCKED` with evidence (links, quotes, prices with their source), and lists every problem, not only the first.
 
 ## 3. Merge
 
