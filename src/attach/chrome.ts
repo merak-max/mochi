@@ -1,31 +1,21 @@
-import { readFileSync } from "node:fs";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-// One daifuku: a soft dome with a flat base. The cut-out at its upper left is the highlight; "~" cells draw in the accent.
+// The MAGI: three hexagonal cores, MELCHIOR above, BALTHASAR and CASPER below. "~" before a cell draws it in the
+// accent, so each core's "()" lamp is lit.
 const MARK = [
 	"",
-	"     ▗▄▄▄▄▄▄▖",
-	"  ▗▟█~▀~▜███████▙▖",
-	" ▗██▙▄▄█████████▖",
-	" ▐██████████████▌",
-	" ▝██████████████▘",
+	"          ______",
+	"         /      \\",
+	"  ______/   ~(~)   \\______",
+	" /      \\        /      \\",
+	"/   ~(~)   \\______/   ~(~)   \\",
+	"\\        /      \\        /",
+	" \\______/        \\______/",
 	"",
 ];
 
 export type SplashFacts = { readonly build: string; readonly model: string; readonly home: string };
-
-/** Pre-colored rows from <home>/mark.ans, used as they are; the built-in mark when the file is absent. */
-export function loadMark(homeDir: string): string[] | undefined {
-	let text: string;
-	try {
-		text = readFileSync(`${homeDir}/mark.ans`, "utf8");
-	} catch {
-		return undefined;
-	}
-	const rows = text.replace(/\n+$/, "").split("\n");
-	return rows.length === 0 ? undefined : rows;
-}
 
 function markRow(row: string, theme: Theme): string {
 	let out = "";
@@ -41,8 +31,8 @@ function markRow(row: string, theme: Theme): string {
 	return out;
 }
 
-export function splash(facts: () => SplashFacts, theme: Theme, custom?: readonly string[]): Component {
-	const mark = custom ?? MARK.map((row) => markRow(row, theme));
+export function splash(facts: () => SplashFacts, theme: Theme): Component {
+	const mark = MARK.map((row) => markRow(row, theme));
 	const markWidth = Math.max(...mark.map((row) => visibleWidth(row)));
 	return {
 		render(width) {
