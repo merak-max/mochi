@@ -10,7 +10,7 @@ import { journaled } from "../journal.ts";
 import { allPages } from "../pages.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { Owner } from "../memory/memory.ts";
-import { answerText, type Line, openRootWake } from "../turn/turn.ts";
+import { answerText, submitNote } from "../turn/turn.ts";
 
 // A profile is a standing teammate inside this daemon: a name, a role (instructions), a model, a conversation that
 // lives as long as the profile, and its own memory log. Its file is `<home>/profiles/<name>/instructions.md` with
@@ -202,7 +202,7 @@ const DeliveredDoc = defineDocFamily<{ delivered: boolean }, null>({
  * Waits for a profile's answer to a message nobody waits for inline, then sends it back to the asker's conversation as
  * a new message, which wakes the asker. Durable, so a restart still delivers it, once.
  */
-export const defineReply = (harness: () => Pick<Harness, "submission" | "commit">, workDir: string, line: () => Line) => defineTask<ReplyInput, { readonly phase: "wait" }, null>({
+export const defineReply = (harness: () => Pick<Harness, "submission" | "commit">, workDir: string) => defineTask<ReplyInput, { readonly phase: "wait" }, null>({
 	name: "mochi.reply",
 	version: 1,
 	initial: () => ({ phase: "wait" }),
@@ -228,16 +228,8 @@ export const defineReply = (harness: () => Pick<Harness, "submission" | "commit"
 			const tag = `[from ${from}] re: ${re}`;
 			const target = await runtime.conversation(to, context);
 			if (target !== undefined && !duplicate) {
-				let woke = false;
-				if (to === ROOT_CONVERSATION_ID) {
-					await runtime.commit(async (tx) => {
-						woke = await openRootWake(tx, line(), key, tag, body);
-						return woke ? done : undefined;
-					}, context);
-				}
-				if (woke) return;
 				const held = await holdText(harness(), workDir, to, `in:${key}`, body, context);
-				await target.submit({ type: "input", content: `${tag}\n${held}`, requestId: key, whenBusy: "followUp" }, context);
+				await submitNote(target, key, `${tag}\n${held}`, context);
 			}
 			await runtime.commit(() => done, context);
 		},

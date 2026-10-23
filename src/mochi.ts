@@ -101,8 +101,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.profiles, classify: options.classify, workDir: options.workDir });
 	const procDir = join(options.workDir, ".procs");
 	const procWatch = defineProcWatch({ dir: procDir, workDir: options.workDir, harness: () => harness, line: lineOf, pollMs: PROC_POLL_MS, log });
-	const reply = defineReply(() => harness, options.workDir, lineOf);
-	const forkTask = defineForkTask(options.workDir, lineOf);
+	const reply = defineReply(() => harness, options.workDir);
+	const forkTask = defineForkTask(options.workDir);
 	const library: ToolRegistration[] = [
 		...(await codingTools()),
 		...searchFns(options.files),

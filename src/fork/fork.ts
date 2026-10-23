@@ -1,11 +1,11 @@
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
-import { configure, type ConversationId, defineTask, defineTool, type EntryId, type ModelRef, ROOT_CONVERSATION_ID, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { configure, type ConversationId, defineTask, defineTool, type EntryId, type ModelRef, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { copyContext, holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
 import { inheritProfile } from "../profiles/profiles.ts";
 import { forkPoint } from "../seats.ts";
-import { answerText, type Line, openRootWake } from "../turn/turn.ts";
+import { answerText, submitNote } from "../turn/turn.ts";
 
 // Two kinds of child, both a `mochi.agent` task that owns one conversation:
 //   fork   a copy of the caller, history and all. Its first request reads the caller's prompt cache, so a fork costs
@@ -32,7 +32,7 @@ const FORK_BATCH = 6;
 export const MAX_DEPTH = 3;
 const TOO_DEEP = `Children are ${MAX_DEPTH} deep here. Do this slice yourself.`;
 
-export function defineForkTask(workDir: string, line: () => Line) {
+export function defineForkTask(workDir: string) {
 	return defineTask<ForkInput, { readonly phase: "run" }, ForkResult>({
 		name: "mochi.agent",
 		version: 1,
@@ -52,17 +52,8 @@ export function defineForkTask(workDir: string, line: () => Line) {
 				if (back !== undefined) {
 					const body = "answer" in result ? result.answer || "(empty answer)" : `(no answer: ${result.failure})`;
 					const key = `fork-back:${task.id}`;
-					const tag = `[from fork ${task.input.name}]`;
-					let woke = false;
-					if (back.id === ROOT_CONVERSATION_ID) {
-						await runtime.commit(async (tx) => {
-							woke = await openRootWake(tx, line(), key, tag, body);
-							return woke ? done : undefined;
-						}, context);
-					}
-					if (woke) return;
 					const held = await holdText(host, workDir, back.id, `in:${key}`, body, context);
-					await back.submit({ type: "input", content: `${tag}\n${held}`, requestId: key, whenBusy: "followUp" }, context);
+					await submitNote(back, key, `[${task.input.name}]\n${held}`, context);
 				}
 				await runtime.commit(() => done, context);
 			},
@@ -107,7 +98,7 @@ export async function startChild(tx: Tx, task: ForkTask, caller: ConversationId,
 
 const briefOf = (name: string, background: boolean, brief: string, scratch: string): string =>
 	`You are ${name}, a fork of this conversation made by the script above. ` +
-	(background ? "You run in the background. Your answer merges back into the conversation that forked you as a new message, not to the owner. " : "Your answer goes back to that script, not to the owner. ") +
+	(background ? "You run in the background. Your answer reaches the conversation that forked you as a note on its next turn, not the owner. " : "Your answer goes back to that script, not to the owner. ") +
 	`Keep your files in ${scratch}; for code, work in a git worktree of your own, never the shared checkout.\n\n${brief}`;
 
 function jobBriefOf(name: string, brief: string, keys: readonly string[], scratch: string): string {
@@ -182,7 +173,7 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 		}),
 		defineTool({
 			name: "fork_start",
-			description: "fork in the background: returns at once, and each fork's answer merges back here as a new message when it finishes.",
+			description: "fork in the background: returns at once, and each fork's answer arrives here as a [name] note on your next turn.",
 			parameters: Type.Object({ briefs: Type.Array(Brief, { minItems: 1 }) }),
 			structuredOutputSchema: Type.Array(Type.String()),
 			replay: "safe",

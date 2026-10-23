@@ -445,11 +445,9 @@ export function openTurn(tx: Tx, line: Pick<Line, "id" | "turn">, input: TurnInp
  * A bare submit to root runs it with no Turn, and the answer goes nowhere. False when no chat message came yet.
  * Not idempotent by itself: call it in the commit that ends the caller's task.
  */
-export async function openRootWake(tx: Tx, line: Pick<Line, "id" | "turn">, key: string, tag: string, text: string): Promise<boolean> {
-	const last = (await tx.doc(LastInboundDoc)).last;
-	if (last === null) return false;
-	await openTurn(tx, line, { source: "chat", channel: last.channel, key, tag, text, files: [] });
-	return true;
+/** Writes `text` into a conversation as a note. It joins the next turn and starts no run. */
+export async function submitNote(conversation: Pick<Conversation, "submit">, requestId: string, text: string, context: Context): Promise<void> {
+	await conversation.submit({ type: "write", requestId, entry: { kind: "mochi.note", model: [{ role: "user", content: text, timestamp: Date.now() }] } }, context);
 }
 
 /** `to`: the conversation it goes to; absent, root. */
