@@ -5,7 +5,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
 
 /** Bump on every change to Request, Results or ServerMessage. A client says its number in hello; the daemon refuses another. */
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 
 /** A conversation id, or a label such as "main" or "profile:relay". Only the daemon resolves labels. */
 const TargetSchema = Type.Union([Type.Integer({ minimum: 1 }), Type.String({ minLength: 1, maxLength: 200 })]);
@@ -67,6 +67,22 @@ export type AgentSummary = {
 /** `roles`: the config names that pick this model, such as brain, fast, strongest, classifier or an alias. */
 export type ModelSummary = ModelRef & { readonly name: string; readonly contextWindow: number; readonly roles: readonly string[] };
 
+/** Tokens one model or tool used. mochi carries no prices; the model provider bills. */
+export type TokenCounts = { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cacheWrite: number; readonly total: number };
+export type TokenUsage = { readonly models: Readonly<Record<string, TokenCounts>>; readonly tools: Readonly<Record<string, TokenCounts>> };
+
+/** pi-durable's usage ledger with its cost fields left out. */
+export function tokenUsage(state: UsageState): TokenUsage {
+	const counts = (bucket: UsageState["models"]): Record<string, TokenCounts> => {
+		const out: Record<string, TokenCounts> = {};
+		for (const [key, usage] of Object.entries(bucket)) {
+			out[key] = { input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite, total: usage.totalTokens };
+		}
+		return out;
+	};
+	return { models: counts(state.models), tools: counts(state.tools) };
+}
+
 export type DaemonInfo = { readonly protocol: number; readonly pid: number; readonly startedAt: string; readonly build: string };
 
 export type DaemonStatus = DaemonInfo & {
@@ -76,7 +92,7 @@ export type DaemonStatus = DaemonInfo & {
 	readonly channels: readonly string[];
 	/** The boot setup report, one line per boundary. */
 	readonly setup: readonly string[];
-	readonly usage: UsageState;
+	readonly usage: TokenUsage;
 	readonly liveTasks: number;
 };
 
@@ -94,7 +110,7 @@ export type Results = {
 	configure: null;
 	agents: readonly AgentSummary[];
 	models: readonly ModelSummary[];
-	usage: UsageState;
+	usage: TokenUsage;
 	status: DaemonStatus;
 	wait: Answer;
 	export: Page<EntryRecord, Cursor>;

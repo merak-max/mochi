@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
-import type { Cursor, UsageState } from "@earendil-works/pi-durable";
+import type { Cursor } from "@earendil-works/pi-durable";
 import type { AttachClient } from "./client.ts";
-import type { AgentSummary, ModelSummary, Target } from "./protocol.ts";
+import type { AgentSummary, ModelSummary, Target, TokenUsage } from "./protocol.ts";
 
 const print = (text: string) => process.stdout.write(`${text}\n`);
 
@@ -37,10 +37,10 @@ function agentRow(agent: AgentSummary, labelOf: ReadonlyMap<number, string>): st
 	return [String(agent.id), agent.kind, agent.label, parent, agent.state, agent.model ?? "-", agent.title ?? ""];
 }
 
-function totalCost(usage: UsageState): number {
+function totalTokens(usage: TokenUsage): number {
 	let total = 0;
-	for (const each of Object.values(usage.models)) total += each.cost.total;
-	for (const each of Object.values(usage.tools)) total += each.cost.total;
+	for (const each of Object.values(usage.models)) total += each.total;
+	for (const each of Object.values(usage.tools)) total += each.total;
 	return total;
 }
 
@@ -67,7 +67,7 @@ export async function runStatus(client: AttachClient, json: boolean): Promise<vo
 	print(`home ${status.home}`);
 	print(`channels: ${status.channels.length === 0 ? "none" : status.channels.join(", ")}`);
 	print(`live tasks: ${status.liveTasks}`);
-	print(`usage: $${totalCost(status.usage).toFixed(2)} in total`);
+	print(`usage: ${totalTokens(status.usage).toLocaleString("en-US")} tokens in total`);
 	print("setup:");
 	for (const line of status.setup) print(`  ${line}`);
 }

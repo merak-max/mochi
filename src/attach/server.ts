@@ -19,6 +19,7 @@ import {
 	readLines,
 	type Target,
 	type ServerMessage,
+	tokenUsage,
 	writeLine,
 } from "./protocol.ts";
 import { resolveTarget, roster, type RosterDeps } from "./roster.ts";
@@ -104,13 +105,13 @@ export async function listenAttach(path: string, deps: AttachDeps, context: Cont
 			case "models":
 				return modelSummaries(models, facts.roles);
 			case "usage":
-				return harness.usage(context);
+				return tokenUsage(await harness.usage(context));
 			case "status": {
 				const graph = await harness.taskGraph(context);
 				const liveTasks = Object.keys(graph.value.tasks).length;
 				graph.dispose();
 				const { home, scheduling, channels, setup } = facts;
-				return { ...info, home, scheduling, channels, setup, usage: await harness.usage(context), liveTasks };
+				return { ...info, home, scheduling, channels, setup, usage: tokenUsage(await harness.usage(context)), liveTasks };
 			}
 			case "wait":
 				return answerOf(harness, request.submissionId as SubmissionId, context);

@@ -35,7 +35,7 @@ import {
 	VStack,
 } from "@earendil-works/pi-tui";
 import type { AttachClient } from "./client.ts";
-import type { AgentSummary, ModelSummary, Target } from "./protocol.ts";
+import type { AgentSummary, ModelSummary, Target, TokenUsage } from "./protocol.ts";
 import { centered, loadMark, type SplashFacts, splash, splitTag, spread } from "./chrome.ts";
 import { toolRenderers } from "./renderers.ts";
 
@@ -316,8 +316,8 @@ class MochiTui {
 			for (const child of children(node)) visit(child, depth + 1);
 		};
 		for (const node of nodes) if (node.owner === undefined && !owned.has(node.conversationId)) visit(node, 0);
-		const spend = Object.entries(state.usage?.models ?? {}).map(([model, usage]) => `${model} $${usage.cost.total.toFixed(3)}`);
-		if (spend.length > 0) lines.push(`  spend: ${spend.join(", ")}`);
+		const used = Object.entries(state.usage?.models ?? {}).map(([model, usage]) => `${model} ${formatTokens(usage.total)}`);
+		if (used.length > 0) lines.push(`  tokens: ${used.join(", ")}`);
 		for (const line of lines) this.#activity.addChild(new TruncatedText(dim(line), 1, 0));
 	}
 
@@ -331,7 +331,7 @@ class MochiTui {
 		const model = agent.model === undefined ? "no model" : `${agent.model.provider}/${agent.model.modelId}`;
 		this.splashFacts = { build: state.client.daemon?.build ?? "", model, home: state.home };
 		const width = this.ui.terminal.columns;
-		this.#topBar.setText(centered(`${theme.fg("text", label)}  ${dim("$" + usage.cost.toFixed(2))}`, width));
+		this.#topBar.setText(centered(`${theme.fg("text", label)}  ${dim(`${formatTokens(usage.total)} tokens`)}`, width));
 		const mode = this.#expanded ? "Expanded mode (Ctrl+O to collapse)" : "Collapsed mode (Ctrl+O to expand)";
 		const left = status === "" ? "" : theme.fg("muted", status);
 		let right = `${model}:${agent.thinkingLevel ?? "off"} · ${formatTokens(tokens)}`;
@@ -437,7 +437,7 @@ interface Snapshot {
 	readonly client: AttachClient;
 	readonly conversations: readonly AgentSummary[];
 	readonly models: readonly ModelSummary[];
-	readonly usage: UsageState | undefined;
+	readonly usage: TokenUsage | undefined;
 	readonly activity: boolean;
 	readonly home: string;
 	readonly notices: readonly { readonly text: string; readonly error: boolean }[];
@@ -651,10 +651,10 @@ function formatTokens(count: number): string {
 	return `${(count / 1_000_000).toFixed(1)}M`;
 }
 
-function totalUsage(state: UsageState): { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cost: number } {
+function totalUsage(state: UsageState): { readonly input: number; readonly output: number; readonly cacheRead: number; readonly total: number } {
 	const all = [...Object.values(state.models), ...Object.values(state.tools)];
 	const sum = (pick: (usage: Usage) => number) => all.reduce((total, usage) => total + pick(usage), 0);
-	return { input: sum((usage) => usage.input), output: sum((usage) => usage.output), cacheRead: sum((usage) => usage.cacheRead), cost: sum((usage) => usage.cost.total) };
+	return { input: sum((usage) => usage.input), output: sum((usage) => usage.output), cacheRead: sum((usage) => usage.cacheRead), total: sum((usage) => usage.totalTokens) };
 }
 
 function contextTokens(entries: readonly EntryRecord[]): number | undefined {

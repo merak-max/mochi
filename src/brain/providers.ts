@@ -31,7 +31,6 @@ export type ProviderConfig = Static<typeof ProviderSchema>;
 
 const ModelOverrideSchema = Type.Object(
 	{
-		cost: Type.Optional(Type.Object({ input: Type.Number(), output: Type.Number(), cacheRead: Type.Number(), cacheWrite: Type.Number() }, { additionalProperties: false })),
 		contextWindow: Type.Optional(Type.Integer({ minimum: 1 })),
 		maxTokens: Type.Optional(Type.Integer({ minimum: 1 })),
 		/** Seconds a prompt cache entry lives: the short (default) and long retention. */
@@ -54,7 +53,7 @@ export const ModelsSchema = Type.Object(
 		classifier: Type.Optional(Type.String({ minLength: 3 })),
 		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a profile or a trigger may use. */
 		aliases: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), Type.String({ minLength: 3 }))),
-		/** Facts about a model pi-ai's catalog does not know, by `<provider>/<id>`: dollars per million tokens and limits. */
+		/** Limits of a model pi-ai's catalog does not know, by `<provider>/<id>`. */
 		overrides: Type.Optional(Type.Record(Type.String({ minLength: 3 }), ModelOverrideSchema)),
 	},
 	{ additionalProperties: false },
@@ -103,7 +102,13 @@ function defaultModels(providers: Record<string, ProviderConfig>): Required<Pick
 /** A model the catalog does not know: this much context, until `[models.overrides]` says otherwise. */
 const CONTEXT_WINDOW = 200_000;
 
-/** pi-ai's classifier catalog entry for an id served by any System One provider, for its prices and limits. */
+/**
+ * pi-ai requires a price on every model and multiplies each response's tokens by it. mochi carries no prices: the model
+ * provider bills, so every model gets this one.
+ */
+const NO_PRICE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+/** pi-ai's classifier catalog entry for an id served by any System One provider, for its limits. */
 function classifierCatalog(id: string): object | undefined {
 	for (const provider of ["openrouter", "typesafe", "opencode"] as const) {
 		try {
@@ -126,7 +131,7 @@ function catalog(provider: "anthropic" | "openai", id: string): Model<Api> | und
 }
 
 function plain(id: string, api: Api): Model<Api> {
-	return { id, name: id, api, provider: "", baseUrl: "", reasoning: true, input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: CONTEXT_WINDOW, maxTokens: 64_000 };
+	return { id, name: id, api, provider: "", baseUrl: "", reasoning: true, input: ["text", "image"], cost: NO_PRICE, contextWindow: CONTEXT_WINDOW, maxTokens: 64_000 };
 }
 
 /**
@@ -142,11 +147,11 @@ function withImageBytes(limits: ModelInputLimits | undefined): ModelInputLimits 
 	return { ...limits, images: { ...limits?.images, resize: { ...resize, maxBytes } } };
 }
 
-/** A model definition for `id` on a provider: the catalog's prices, limits and quirks where it knows the model. */
+/** A model definition for `id` on a provider: the catalog's limits and quirks where it knows the model. */
 function definition(id: string, config: ProviderConfig, provider: string, url: string, override: ModelOverride = {}): Model<Api> {
 	const wire: Api = config.api === "anthropic" ? "anthropic-messages" : config.api === "responses" ? "openai-responses" : "openai-completions";
 	const known = catalog(config.api === "anthropic" ? "anthropic" : "openai", id);
-	const base = known === undefined || known.api !== wire ? { ...plain(id, wire), ...(known === undefined ? {} : { cost: known.cost, contextWindow: known.contextWindow, maxTokens: known.maxTokens, reasoning: known.reasoning }) } : known;
+	const base = known === undefined || known.api !== wire ? { ...plain(id, wire), ...(known === undefined ? {} : { contextWindow: known.contextWindow, maxTokens: known.maxTokens, reasoning: known.reasoning }) } : known;
 	const compat =
 		wire === "anthropic-messages"
 			? ({ ...(base.compat as AnthropicMessagesCompat | undefined), supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } satisfies AnthropicMessagesCompat)
@@ -158,8 +163,8 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 		id,
 		provider,
 		baseUrl: url,
+		cost: NO_PRICE,
 		contextWindow: override.contextWindow ?? base.contextWindow,
-		...(override.cost === undefined ? {} : { cost: override.cost }),
 		...(override.maxTokens === undefined ? {} : { maxTokens: override.maxTokens }),
 		promptCache: override.promptCache ?? base.promptCache ?? (wire === "anthropic-messages" ? { short: 300, long: 3600 } : undefined),
 		inputLimits: withImageBytes(base.inputLimits),
@@ -223,7 +228,7 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 				id: provider,
 				name: provider,
 				auth: { apiKey: { name: keyEnv, resolve: async () => ({ auth: { apiKey, ...(config.headers === undefined ? {} : { headers: config.headers }) }, source: keyEnv }) } },
-				models: [{ ...(known ?? { name: id, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192 }), id, provider, baseUrl, api: "typesafe-system-one", type: "classifier" } as never],
+				models: [{ ...(known ?? { name: id, input: ["text"], contextWindow: 8192 }), cost: NO_PRICE, id, provider, baseUrl, api: "typesafe-system-one", type: "classifier" } as never],
 				classifiers: { "typesafe-system-one": typesafeSystemOneApi() },
 			}),
 		);

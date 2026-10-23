@@ -91,13 +91,13 @@ async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "
 	}, context);
 	const older = entries.flatMap((entry) => entry.model ?? []).reduce((sum, message) => {
 		if (day(message.timestamp) >= day(now)) return sum;
-		return sum + (message.role === "assistant" ? message.usage.cost.total : message.role === "toolResult" ? message.usage?.cost.total ?? 0 : 0);
+		return sum + (message.role === "assistant" ? message.usage.totalTokens : message.role === "toolResult" ? message.usage?.totalTokens ?? 0 : 0);
 	}, 0);
-	const total = [...Object.values(usage.models), ...Object.values(usage.tools)].reduce((sum, value) => sum + value.cost.total, 0);
+	const total = [...Object.values(usage.models), ...Object.values(usage.tools)].reduce((sum, value) => sum + value.totalTokens, 0);
 	const activity = live?.run === undefined ? "idle" : `busy, ${plain(live.tools?.filter((tool) => tool.status !== "done").map((tool) => tool.name).join(", ") || "answering")}`;
 	return [
 		`${activity}. thread about ${Math.round(tokens).toLocaleString("en-US")} tokens.`,
-		`reset ${resetAt === undefined ? "not yet" : relativeTime(resetAt, now)}. today about $${Math.max(0, total - older).toFixed(2)}.`,
+		`reset ${resetAt === undefined ? "not yet" : relativeTime(resetAt, now)}. today about ${Math.max(0, total - older).toLocaleString("en-US")} tokens.`,
 		`${active.length} live triggers, ${next}.`,
 		`channels ${deps.channels.length === 0 ? "none" : deps.channels.map(plain).sort().join(", ")}.`,
 	].join("\n");

@@ -195,7 +195,7 @@ It edits only `<home>/skills` (which replaces a bundled skill of the same name) 
 
 ## Models and config
 
-`[providers.<name>]` is an endpoint, its protocol and the variable with its key. The protocols are `anthropic`, `responses`, `chat` and `classifier` (System One). A gateway is one provider per protocol it serves. `[models]` names `brain`, `fast`, `strongest`, `classifier` and `aliases`, each `<provider>/<id>`. Without `[models] classifier`, an `OPENROUTER_API_KEY` alone turns on the classifier protocol's default endpoint and model. `[models.overrides]` sets a model's cost, context window and cache life.
+`[providers.<name>]` is an endpoint, its protocol and the variable with its key. The protocols are `anthropic`, `responses`, `chat` and `classifier` (System One). A gateway is one provider per protocol it serves. `[models]` names `brain`, `fast`, `strongest`, `classifier` and `aliases`, each `<provider>/<id>`. Without `[models] classifier`, an `OPENROUTER_API_KEY` alone turns on the classifier protocol's default endpoint and model. `[models.overrides]` sets a model's context window, output limit and cache life. mochi carries no prices: token counts stay, and the model provider bills.
 
 Other config keys: `timeZone`, `appsUrl` (an MCP server with `execute` and `skills`; `MOCHI_APPS_URL` overrides it), `[web]` (`keyEnv`, `url`, `browserProfile`), `[media]` (images, video, and speech through the OpenAI audio API on a named provider), `[[users]]`, `[a2a.peers]`, and `[[triggers]]`. Boot logs one `setup` line per boundary, and names config keys mochi does not read.
 
