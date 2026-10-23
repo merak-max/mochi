@@ -22,7 +22,7 @@ import {
 	type Tx,
 	type UserInput,
 } from "@earendil-works/pi-durable";
-import { blocks, present } from "../channels/present.ts";
+import { present } from "../channels/present.ts";
 import { type Committer, holdText } from "../context.ts";
 import {
 	type Attachment,
@@ -48,14 +48,15 @@ import { prepareInbound } from "../media/inbound.ts";
 import { splitDirectives, withEffect } from "../channels/directives.ts";
 import { type CommandInput, type CommandReply, type CommandTurn, commandOf } from "./commands.ts";
 import { keyedReset } from "./lifecycle.ts";
-import { type Known, LATER_CHECK_MS, LATER_POLL_MS, LATER_WAIT_MS, uncovered } from "./later.ts";
-import { streamParagraphs } from "./stream.ts";
 
 // A Turn is a background task of the ownerless line conversation, so neither Esc nor /stop on root reaches it.
 // The claim commit takes `<answer>:<channel>` in ClaimDoc (the first claimer sends) and appends the Turn to its
 // channel's chain in ChannelTailDoc; `send` waits for the previous tail to finish, so messages never interleave.
 
 const requestKey = (channel: ChannelId, messageId: string): string => `${channel}:${messageId}`;
+
+/** A final text of exactly this sends nothing. */
+export const NO_REPLY = "NO_REPLY";
 
 type Origin = { readonly kind: "trigger"; readonly id: string } | { readonly kind: "conversation"; readonly id: ConversationId };
 
@@ -132,7 +133,6 @@ const taskFamily = (kind: string) => defineDocFamily<{ task: TaskId | null }, nu
 const ClaimDoc = taskFamily("mochi.claim");
 const ChannelTailDoc = taskFamily("mochi.channel-tail");
 /** The one Turn that streams a root run, by the run's task id; the other Turns in that run send nothing. */
-const StreamOwnerDoc = taskFamily("mochi.stream-owner");
 
 export const LastInboundDoc = defineDoc<{ last: { channel: ChatChannelId; messageId: string } | null }>({
 	kind: "mochi.last-inbound",
@@ -239,21 +239,6 @@ function blockedByPolicy(settled: { readonly status: string; readonly detail?: u
 
 const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and the board are kept.";
 
-const HELD_NOTE = "[context, no reply needed: your answer above was not sent, because he wrote again before it went out. Your next reply must answer everything he wrote since your last sent reply.]";
-const UNHELD_NOTE = "[context, no reply needed: your answer above was sent after all.]";
-
-/** Resolves to undefined after `ms`, so a slow platform call never holds a reply. */
-function within<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const late = new Promise<undefined>((resolve) => (timer = setTimeout(() => resolve(undefined), ms)));
-	return Promise.race([work, late]).finally(() => clearTimeout(timer));
-}
-
-/** The answer without the blocks already streamed, so the final send never repeats one. */
-function unstreamed(text: string, streamed: readonly string[]): string {
-	if (streamed.length === 0) return text;
-	return blocks(text).filter((block) => !streamed.includes(block)).join("\n\n");
-}
 
 async function saveFiles(workDir: string, message: Extract<Inbound, { kind: "message" }>): Promise<SavedFile[]> {
 	if (message.attachments.length === 0) return [];
@@ -312,56 +297,6 @@ function claimKey(answer: Answer, task: TaskId, channel: ChatChannelId): string 
 export function defineTurn(host: TurnHost): TurnTask {
 	const { users, channels, workDir, media, log } = host;
 
-	const knownOf = async (conversation: ConversationId, key: string, context: Context): Promise<Known> => {
-		const record = await host.harness.commit((tx) => tx.submissionByRequest(conversation, key), context);
-		if (record === undefined) return { kind: "missing" };
-		return { kind: "submitted", answer: record.status === "done" ? record.answer : undefined };
-	};
-
-	/**
-	 * Before an answer goes out, asks the platform whether the owner wrote again after this Turn's message. A newer message
-	 * that this answer does not cover means the answer is stale: the model gets a note, and the newer message's own run
-	 * answers everything in one reply. Bounded and fail-open: a slow or failing check, or a newer message that never
-	 * reaches mochi within `LATER_WAIT_MS`, sends the answer as it is.
-	 */
-	const holdForLater = async (taskId: TaskId, input: ChatTurn, channel: Channel, conversationId: ConversationId, answer: EntryId, context: Context): Promise<boolean> => {
-		if (input.at === undefined || channel.laterMessages === undefined) return false;
-		const started = Date.now();
-		const ownId = input.key.slice(input.channel.length + 1);
-		let later;
-		try {
-			later = await within(channel.laterMessages(new Date(input.at), input.person), LATER_CHECK_MS);
-		} catch (error) {
-			log("turn.later_check", { task: taskId, ms: Date.now() - started, result: "error", error: String(error) });
-			return false;
-		}
-		if (later === undefined) {
-			log("turn.later_check", { task: taskId, ms: Date.now() - started, result: "timeout" });
-			return false;
-		}
-		const keys = new Map<string, Known>();
-		for (const message of later) {
-			const key = requestKey(input.channel, message.id);
-			keys.set(key, await knownOf(conversationId, key, context));
-		}
-		const open = uncovered(later, ownId, (id) => requestKey(input.channel, id), (key) => keys.get(key) ?? { kind: "missing" }, answer);
-		log("turn.later_check", { task: taskId, ms: Date.now() - started, result: open.length === 0 ? "clear" : "held", newer: open.length });
-		if (open.length === 0) return false;
-		const conversation = await host.harness.conversation(conversationId, context);
-		if (conversation === undefined) return false;
-		await conversation.submit({ type: "write", requestId: `held:${taskId}`, entry: { kind: "mochi.held", model: [{ role: "user", content: HELD_NOTE, timestamp: Date.now() }] } }, context);
-		const until = Date.now() + LATER_WAIT_MS;
-		for (;;) {
-			let arrived = true;
-			for (const key of open) if ((await knownOf(conversationId, key, context)).kind === "missing") arrived = false;
-			if (arrived) return true;
-			if (Date.now() >= until) break;
-			await new Promise((resolve) => setTimeout(resolve, LATER_POLL_MS));
-		}
-		log("turn.later_missing", { task: taskId, keys: open });
-		await conversation.submit({ type: "write", requestId: `unheld:${taskId}`, entry: { kind: "mochi.held", model: [{ role: "user", content: UNHELD_NOTE, timestamp: Date.now() }] } }, context);
-		return false;
-	};
 	return defineTask<TurnInput, TurnState, TurnResult>({
 		name: "mochi.turn",
 		version: 2,
@@ -381,31 +316,6 @@ export function defineTurn(host: TurnHost): TurnTask {
 				const channel = channels.get(input.channel);
 				const conversationId = input.conversation ?? ROOT_CONVERSATION_ID;
 				const stopTyping = keepTyping(channel, input.person);
-				const streamed = [...(task.state.checkpoint.streamed ?? [])];
-				let run = task.state.checkpoint.run;
-				const stopStream = channel === undefined || !channel.profile.paragraphsAreBubbles
-					? async () => {}
-					: streamParagraphs({
-						harness: host.harness,
-						conversation: conversationId,
-						channel,
-						person: input.person,
-						threadOn: input.threadOn,
-						sent: streamed,
-						onSent: (sent) => runtime.commit(() => running({ phase: "run", streamed: [...sent], ...(run === undefined ? {} : { run }) }), context).then(() => {}),
-						onError: (error) => log("turn.stream_failed", { task: task.id, error: String(error) }),
-						own: async (runId) => {
-							const won = await host.harness.commit(async (tx) => {
-								const owner = await tx.doc(StreamOwnerDoc, runId, null);
-								if (owner.task === null) owner.task = task.id;
-								return owner.task === task.id;
-							}, context);
-							return won;
-						},
-						onRun: (runId) => {
-							run = runId;
-						},
-					});
 				let settled;
 				try {
 					const conversation = (await runtime.conversation(conversationId, context))!;
@@ -419,28 +329,17 @@ export function defineTurn(host: TurnHost): TurnTask {
 						if (channel !== undefined) await channel.send({ kind: "text", text: POLICY_RESET_NOTE }, input.person).catch(() => {});
 					}
 				} finally {
-					await stopStream();
 					stopTyping();
 				}
-				const sent = [...streamed];
-				const ran = run === undefined ? {} : { run };
-				if (settled.status === "done" && settled.type === "input" && sent.length === 0 && channel !== undefined) {
-					const held = await holdForLater(task.id, input, channel, conversationId, settled.answer, context);
-					if (held) return runtime.commit(() => completed("merged"), context);
-				}
 				await runtime.commit(() => {
-					if (settled.status === "done") return settled.type === "input" ? running({ phase: "claim", channel: input.channel, answer: { kind: "entry", entry: settled.answer }, streamed: sent, ...ran }) : completed("silent");
+					if (settled.status === "done") return settled.type === "input" ? running({ phase: "claim", channel: input.channel, answer: { kind: "entry", entry: settled.answer } }) : completed("silent");
 					if (settled.reason === "aborted" || settled.reason === "reset") return completed("silent");
-					return running({ phase: "claim", channel: input.channel, answer: { kind: "failure", submission: settled.id, reason: settled.reason }, streamed: sent, ...ran });
+					return running({ phase: "claim", channel: input.channel, answer: { kind: "failure", submission: settled.id, reason: settled.reason } });
 				}, context);
 			},
 			claim: async (task, runtime, context) => {
-				const { channel, answer, streamed, run } = task.state.checkpoint;
+				const { channel, answer } = task.state.checkpoint;
 				await runtime.commit(async (tx) => {
-					if (run !== undefined) {
-						const owner = await tx.doc(StreamOwnerDoc, run, null);
-						if (owner.task !== null && owner.task !== task.id) return completed("merged");
-					}
 					const claim = await tx.doc(ClaimDoc, claimKey(answer, task.id, channel), null);
 					if (claim.task !== null && claim.task !== task.id) return completed("merged");
 					claim.task = task.id;
@@ -448,7 +347,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 					const previous = tail.task;
 					tail.task = task.id;
 					const live = previous !== null && previous !== task.id && (await tx.task(previous))?.state.status !== "terminal";
-					return running({ phase: "send", channel, answer, after: live ? previous : null, sent: 0, outage: null, ...(streamed === undefined ? {} : { streamed }) });
+					return running({ phase: "send", channel, answer, after: live ? previous : null, sent: 0, outage: null });
 				}, context);
 			},
 			send: async (task, runtime, context) => {
@@ -462,6 +361,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 				else if (answer.kind === "input") text = task.input.text;
 				else await runtime.commit(async (tx) => void (text = await answerText(tx, answer.entry)), context);
 				const finished = task.input.source === "run" ? running({ phase: "record" }) : completed("sent");
+				if (text.trim() === NO_REPLY) return runtime.commit(() => completed("silent"), context);
 				const outgoing = splitDirectives(text);
 				let retried = false;
 				for (;;) {
@@ -470,7 +370,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 					if (channel !== undefined) {
 						// Attachment bubbles are placeholders until their turn to send, so a file read never shifts `sent` indexes.
 						const bubbles: Bubble[] = [
-							...withEffect(present(unstreamed(outgoing.text, state.streamed ?? []), channel.profile), outgoing.effect),
+							...withEffect(present(outgoing.text, channel.profile), outgoing.effect),
 							...outgoing.files.map((file) => ({ kind: "file" as const, name: file.path, mimeType: "application/octet-stream", bytes: new Uint8Array(), voice: file.voice })),
 						];
 						if (bubbles.length === 0) return runtime.commit(() => completed("silent"), context);
@@ -490,7 +390,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 						const chatThread = task.input.source === "chat" && outgoingBubble.kind === "text" ? task.input.threadOn : undefined;
 						const threadOn = outgoing.replyTo ?? chatThread;
 						const sendStart = Date.now();
-						if (sent === 0 && threadOn !== undefined && (state.streamed ?? []).length === 0) await channel.send(outgoingBubble, person, { replyTo: threadOn });
+						if (sent === 0 && threadOn !== undefined) await channel.send(outgoingBubble, person, { replyTo: threadOn });
 						else await channel.send(outgoingBubble, person);
 						log("turn.sent", { task: task.id, bubble: sent, ms: Date.now() - sendStart, sinceStart: Date.now() - (task.startedAt ?? Date.now()) });
 					} catch (error) {
@@ -648,6 +548,23 @@ async function threadOf(host: Pick<Line, "root" | "harness">, user: ChatUser | u
 	if (user === undefined) return host.root;
 	const id = await host.harness.commit((tx) => ensureUser(tx, user), context);
 	return conversationOf(host, id, context);
+}
+
+/** One bubble to the owner on the channel they last wrote from, now, for an ack or progress. The final text is still the reply. */
+export function sendTool(channels: Channels): ToolRegistration {
+	return defineTool({
+		name: "send",
+		description: "Send one bubble to the owner now, for an ack or progress mid-task. Your final text is still the reply.",
+		parameters: Type.Object({ text: Type.String({ minLength: 1 }) }),
+		execute: async (args, api, context) => {
+			const last = (await api.snapshot(LastInboundDoc, context))?.last;
+			if (last == null) throw new Error("The owner has not written on a chat channel yet, so there is nowhere to send.");
+			const channel = channels.get(last.channel);
+			if (channel === undefined) throw new Error(`Channel ${last.channel} is not running.`);
+			await channel.send({ kind: "text", text: args.text });
+			return { output: [{ type: "text", text: `Sent on ${last.channel}.` }] };
+		},
+	});
 }
 
 export function reactTool(channels: Channels): ToolRegistration {

@@ -102,12 +102,8 @@ export interface Channel {
 	react?(messageId: string, reaction: Reaction | "none"): Promise<void>;
 	/** Resolves to one line for the model. */
 	message?(request: MessageRequest): Promise<string>;
-	/** Messages the owner (or `person`) sent after `after`, as the platform's own history lists them, oldest first. */
-	laterMessages?(after: Date, person?: string): Promise<readonly LaterMessage[]>;
 }
 
-/** A message from the platform's history: its id, as inbound messages carry it, and its text. */
-export type LaterMessage = { readonly id: string; readonly text: string };
 
 export type Channels = ReadonlyMap<ChatChannelId, Channel>;
 

@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import type { AttachClient } from "./client.ts";
 import type { Target } from "./protocol.ts";
+import { NO_REPLY } from "../turn/turn.ts";
 
 export type LinesOptions = { readonly json: boolean; readonly id?: string; readonly to?: Target };
 
@@ -26,7 +27,9 @@ export async function runLines(client: AttachClient, prompt: string | undefined,
 		});
 		const answer = await client.request({ op: "wait", submissionId });
 		if (options.json) continue;
-		if (answer.status === "done") process.stdout.write(`mochi> ${answer.text}\n`);
+		if (answer.status === "done") {
+			if (answer.text.trim() !== NO_REPLY) process.stdout.write(`mochi> ${answer.text}\n`);
+		}
 		else process.stdout.write(`mochi! unanswered: ${answer.reason}\n`);
 	}
 }

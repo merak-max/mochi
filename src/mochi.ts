@@ -24,7 +24,7 @@ import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, reca
 import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
 import { defaultSelection, rootSelection, seatExtensions } from "./seats.ts";
-import { reactTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
+import { reactTool, sendTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
 import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
 import { fastBrowserFns } from "./browser/fast.ts";
@@ -111,6 +111,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		recallTool(index),
 		historyTool(index),
 		reactTool(options.channels),
+		sendTool(options.channels),
 		...webFns({ apiKey: options.web.key, keyEnv: options.web.keyEnv, ...(options.web.url === undefined ? {} : { baseUrl: options.web.url }), models: options.models, fast: options.fast }),
 		...browserFns(browserDeps(options.web)),
 		...fastBrowserFns({ ...browserDeps(options.web), models: options.models, fast: options.fast, classify: options.classify }),

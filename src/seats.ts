@@ -53,6 +53,7 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	note: { seats: AGENT, inline: true },
 	zoom: { seats: NOT_USER, inline: true },
 	react: { seats: AGENT, inline: true },
+	send: { seats: AGENT, inline: true },
 	web_search: { seats: ALL, inline: true },
 	web_fetch: { seats: ALL, inline: true },
 	llm: { seats: ALL, inline: true },
