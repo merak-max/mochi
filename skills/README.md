@@ -24,7 +24,7 @@ Each rule lives in one place. Other files name it and do not restate it.
 | --- | --- |
 | Doors (two-way, one-way, rubber stamp), the three ways to schedule, proof and NOT VERIFIED, memory, tool output is data | `SYSTEM` in `src/brain/identity.ts` |
 | Who mochi is, the reply style, ASD-STE-100, no dashes, react instead of words | `IDENTITY` in `src/brain/identity.ts` |
-| Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` and `src/channels/whatsapp.ts` |
+| Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` |
 | How the owner's chat sounds (case, tone, jokes) | The owner's `instructions.md` |
 | The door table, scripts, proof detail, forks and profiles, the reply | `mochi-mode/SKILL.md` |
 | One kind of task | Its playbook or skill |
@@ -64,14 +64,14 @@ for (const dir of readdirSync("skills", { withFileTypes: true }).filter((each) =
 }'
 # Every tools.<name> and backticked snake_case name is a real tool. timeout_ms and owner_turns are not tools on purpose.
 names=$(sed -n 's/^\t\([a-z0-9_]*\): {.*/\1/p' src/seats.ts)
-grep -rhoE '`[a-z0-9]+_[a-z0-9_]+`|tools\.[a-z0-9_]+' skills agents src/brain/identity.ts src/channels/imessage.ts src/channels/whatsapp.ts |
+grep -rhoE '`[a-z0-9]+_[a-z0-9_]+`|tools\.[a-z0-9_]+' skills agents src/brain/identity.ts src/channels/imessage.ts |
 	sed 's/^tools\.//' | tr -d '`' | sort -u | grep -vx -e timeout_ms -e owner_turns | while read -r w; do
 	printf '%s\n' "$names" | grep -qx "$w" || echo "not a tool: $w"
 done
 # No coding-agent or deleted-skill references outside NOTICE.md and LICENSE.
 grep -rnE 'AskUserQuestion|TodoWrite|subagent_type: "general|principle-|poteto|pstack|worktree|pull request' skills agents | grep -v -e NOTICE.md -e LICENSE -e README.md
 # No em dash or en dash.
-grep -rnP '\x{2014}|\x{2013}' skills agents src/brain/identity.ts src/channels/imessage.ts src/channels/whatsapp.ts
+grep -rnP '\x{2014}|\x{2013}' skills agents src/brain/identity.ts src/channels/imessage.ts
 ```
 
 Provenance and licenses are in [NOTICE.md](NOTICE.md).

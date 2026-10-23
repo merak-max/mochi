@@ -4,7 +4,7 @@
 
 *Preparations for New Year's Day (Pounding Mochi), by Utagawa Kunisada, via Wikimedia Commons. Public domain.*
 
-mochi is a personal agent that runs all day on a machine you own. You text it on iMessage or WhatsApp, and it does the work: mail, calendar, the web, files, code, errands. Most of the time it says nothing, because most of the time nothing needs you. This README covers what it does, how it stays up, how to run it, and some numbers from running it on one person's life for a few weeks.
+mochi is a personal agent that runs all day on a machine you own. You text it on iMessage, and it does the work: mail, calendar, the web, files, code, errands. Most of the time it says nothing, because most of the time nothing needs you. This README covers what it does, how it stays up, how to run it, and some numbers from running it on one person's life for a few weeks.
 
 Housekeeping items:
 
@@ -69,7 +69,7 @@ systemctl --user daemon-reload && systemctl --user enable --now mochi
 
 `node src/main.ts --headless` starts the daemon by hand. `node src/main.ts -p "hello"` sends one message to a running daemon. `node src/main.ts chat` sends each line of stdin. `node src/main.ts help` lists the rest.
 
-iMessage goes through [Photon Spectrum](https://photon.codes), which needs a project id and secret. WhatsApp uses the Cloud API directly and needs a public webhook URL. See `.env.example`.
+iMessage goes through [Photon Spectrum](https://photon.codes), which needs a project id and secret.
 
 ## Your home
 

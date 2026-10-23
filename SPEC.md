@@ -1,6 +1,6 @@
 # Mochi spec
 
-Mochi is a personal agent that runs all day on the owner's machine. The owner texts it on iMessage or WhatsApp, or types in a terminal. It works through code mode scripts, keeps an append-only memory, forks copies of itself for parallel slices, and hands standing work to profiles. pi-durable (`@earendil-works/pi-durable`, pinned at 1.4.0) supplies crash recovery, message queueing, compaction and the task tree.
+Mochi is a personal agent that runs all day on the owner's machine. The owner texts it on iMessage, or types in a terminal. It works through code mode scripts, keeps an append-only memory, forks copies of itself for parallel slices, and hands standing work to profiles. pi-durable (`@earendil-works/pi-durable`, pinned at 1.4.0) supplies crash recovery, message queueing, compaction and the task tree.
 
 ## Thesis
 
@@ -58,7 +58,7 @@ Every inbound message is `submit({ type: "input", requestId: "<channel>:<message
 
 A Turn (`mochi.turn` task) is one thing owed to the owner or a user. It runs the submission, claims the answer, and sends it. A claim is a document keyed by answer and channel, so the first claimer sends and a duplicate Turn ends `merged`. Turns chain per channel, so messages never interleave and a restart replays the same order. `send` checkpoints after each bubble, so a crash repeats at most one bubble.
 
-Each adapter maps every platform error to one class. `ChannelDown` (unreachable, 429, auth) waits 5 s doubling to 5 min and gives up after an hour. `SendUnknown` (a timeout, a 5xx) retries once. `SendRejected` skips the bubble. `present()` turns a reply into bubbles: on iMessage each paragraph is a bubble, a line that is only a URL is a link bubble, and a reply has at most three bubbles. WhatsApp sends one bubble per reply. A blank reply sends nothing.
+Each adapter maps every platform error to one class. `ChannelDown` (unreachable, 429, auth) waits 5 s doubling to 5 min and gives up after an hour. `SendUnknown` (a timeout, a 5xx) retries once. `SendRejected` skips the bubble. `present()` turns a reply into bubbles: on iMessage each paragraph is a bubble, a line that is only a URL is a link bubble, and a reply has at most three bubbles. A blank reply sends nothing.
 
 ## Seats and tools
 
@@ -199,7 +199,7 @@ It edits only `<home>/skills` (which replaces a bundled skill of the same name) 
 
 Other config keys: `timeZone`, `appsUrl` (an MCP server with `execute` and `skills`; `MOCHI_APPS_URL` overrides it), `[web]` (`keyEnv`, `url`, `browserProfile`), `[media]` (images, video, and speech through the OpenAI audio API on a named provider), `[[users]]`, `[a2a.peers]`, and `[[triggers]]`. Boot logs one `setup` line per boundary, and names config keys mochi does not read.
 
-Keys live in `<home>/.env` under the names config gives. Channel keys: `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET`, `IMESSAGE_OWNER`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_OWNER`. Daemon keys: `MOCHI_BIND_HOST`, `MOCHI_HOOKS_PORT`, `MOCHI_PUBLIC_URL`, `MOCHI_A2A_PEER_TOKENS`, `MOCHI_A2A_PORT`.
+Keys live in `<home>/.env` under the names config gives. Channel keys: `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET`, `IMESSAGE_OWNER`, . Daemon keys: `MOCHI_BIND_HOST`, `MOCHI_HOOKS_PORT`, `MOCHI_PUBLIC_URL`, `MOCHI_A2A_PEER_TOKENS`, `MOCHI_A2A_PORT`.
 
 ## A2A
 
@@ -225,7 +225,7 @@ src/
   triggers/         cron parser, trigger task, steps, seeds, webhooks
   board/board.ts    the board, claims, the sweep
   turn/             ingest and the Turn task, commands (/new, /stop, /status), handoff
-  channels/         the channel interface, present(), iMessage, WhatsApp
+  channels/         the channel interface, present(), iMessage
   apps/, auth/      the apps server client and its OAuth login
   web/, browser/    web functions and the logged-in browser
   media/            images, video, speech, gifs, inbound attachments
@@ -250,4 +250,3 @@ src/
 | No caps on memory or context. | Sizes are reading budgets, not storage limits. Transport limits at HTTP boundaries and process timeouts stay. |
 | No vendor names in the core. | Providers, the classifier, apps and the web are config. The web client speaks Firecrawl's v2 API and the apps client speaks Executor's protocol, each as the one adapter. |
 | Verification is a live run on a copy of a store, not unit tests. | Without a daemon, `-p` and `chat` start no channels or triggers, so a copy reaches no one. |
-| WhatsApp uses mochi's own Cloud API adapter; iMessage uses Photon Spectrum. | The Cloud API keeps the token on the box. Spectrum has no self-hosted Linux option. Spectrum 12.10.1 has no `catchUp`, so messages sent while the line is down are not replayed. |

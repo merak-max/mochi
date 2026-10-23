@@ -1,7 +1,7 @@
 import { broken, off, ready, type Setup } from "../setup.ts";
 import type { EffectName } from "./directives.ts";
 
-export type ChatChannelId = "imessage" | "whatsapp";
+export type ChatChannelId = "imessage";
 /** `cli` is a view, not a line: attached terminals render replies from the transcript, and nothing is delivered to it. */
 export type ChannelId = ChatChannelId | "cli";
 
