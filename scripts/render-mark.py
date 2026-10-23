@@ -57,7 +57,7 @@ def banner(rows, width, height):
     left = width * 0.08
     draw_mark(draw, rows, font, left, (height - cell_h * len(rows)) / 2)
     text_left = left + cell_w * cols + width * 0.06
-    draw.text((text_left, height * 0.26), "magi", font=ImageFont.truetype(FONT, int(height / 4.2)), fill=PHOSPHOR)
+    draw.text((text_left, height * 0.26), "sibyl", font=ImageFont.truetype(FONT, int(height / 4.2)), fill=PHOSPHOR)
     draw.text((text_left + 6, height * 0.62), "MELCHIOR-1  BALTHASAR-2  CASPER-3", font=ImageFont.truetype(FONT, int(height / 22)), fill=DIM)
     return im
 
