@@ -350,6 +350,15 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 		}
 	}
 
+	async function markRead(message: IMessageMessage): Promise<void> {
+		try {
+			if (message.read === undefined) throw new Error("this message has no read receipt");
+			await message.read();
+		} catch (error) {
+			log("imessage.read_failed", { messageId: message.id, error: String(error) });
+		}
+	}
+
 	return {
 		profile: IMESSAGE_PROFILE,
 
@@ -366,7 +375,7 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 					spaces.set(parsed.message.person ?? owner, from);
 					remember(message);
 					if (parsed.message.person === undefined && message.read !== undefined) lastInbound = message;
-					if (parsed.message.kind === "message") message.read?.().catch(() => {});
+					void markRead(message);
 					await sink(parsed.message);
 				} catch (error) {
 					log("channel.handler_failed", { channel: "imessage", error: String(error) });
