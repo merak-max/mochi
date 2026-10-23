@@ -58,6 +58,12 @@ export type Inbound =
 			readonly at: Date;
 	  };
 
+/** A message mochi sent: the platform's id and the text it showed. */
+export interface SentBubble {
+	readonly id: string;
+	readonly text: string;
+}
+
 export type InboundSink = (inbound: Inbound) => Promise<void>;
 
 export type Bubble =
@@ -97,7 +103,8 @@ export interface Channel {
 	/** Runs until `signal` aborts, never messaging the owner about itself. */
 	run(sink: InboundSink, signal: AbortSignal): Promise<void>;
 	/** Throws only DeliveryError subclasses for platform failures. `person` absent: the owner. */
-	send(bubble: Bubble, person?: string, options?: { readonly replyTo?: string }): Promise<void>;
+	/** Resolves to each platform message it sent, where the platform returns an id. */
+	send(bubble: Bubble, person?: string, options?: { readonly replyTo?: string }): Promise<readonly SentBubble[]>;
 	typing(on: boolean, person?: string): Promise<void>;
 	react?(messageId: string, reaction: Reaction | "none"): Promise<void>;
 	/** Resolves to one line for the model. */

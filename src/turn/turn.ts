@@ -36,6 +36,7 @@ import {
 	type Inbound,
 	type ReplyTarget,
 	SendRejected,
+	type SentBubble,
 	SendUnknown,
 } from "../channels/types.ts";
 import { type ChatUser, OWNER_ID } from "../config.ts";
@@ -132,6 +133,20 @@ function nextOutage(outage: Outage | null, now: number): Outage | "give-up" {
 const taskFamily = (kind: string) => defineDocFamily<{ task: TaskId | null }, null>({ kind, version: 1, scope: "session", family: true, initial: () => ({ task: null }), checkpointWhen: () => false });
 const ClaimDoc = taskFamily("mochi.claim");
 const ChannelTailDoc = taskFamily("mochi.channel-tail");
+
+/** The text of each message mochi sent, by `<channel>:<platform message id>`, so a quoted reply reads it after a restart. */
+const OutboxDoc = defineDocFamily<{ text: string }, string>({
+	kind: "mochi.outbox",
+	version: 1,
+	scope: "session",
+	family: true,
+	initial: (text) => ({ text }),
+	checkpointWhen: () => false,
+});
+
+async function recordSent(tx: Tx, channel: ChatChannelId, delivered: readonly SentBubble[]): Promise<void> {
+	for (const message of delivered) (await tx.doc(OutboxDoc, requestKey(channel, message.id), message.text)).text = message.text;
+}
 /** The one Turn that streams a root run, by the run's task id; the other Turns in that run send nothing. */
 
 export const LastInboundDoc = defineDoc<{ last: { channel: ChatChannelId; messageId: string } | null }>({
@@ -367,6 +382,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 				for (;;) {
 					const channel = channels.get(id);
 					let bubble: Bubble | undefined;
+					let delivered: readonly SentBubble[] = [];
 					if (channel !== undefined) {
 						// Attachment bubbles are placeholders until their turn to send, so a file read never shifts `sent` indexes.
 						const bubbles: Bubble[] = [
@@ -390,8 +406,8 @@ export function defineTurn(host: TurnHost): TurnTask {
 						const chatThread = task.input.source === "chat" && outgoingBubble.kind === "text" ? task.input.threadOn : undefined;
 						const threadOn = outgoing.replyTo ?? chatThread;
 						const sendStart = Date.now();
-						if (sent === 0 && threadOn !== undefined) await channel.send(outgoingBubble, person, { replyTo: threadOn });
-						else await channel.send(outgoingBubble, person);
+						if (sent === 0 && threadOn !== undefined) delivered = await channel.send(outgoingBubble, person, { replyTo: threadOn });
+						else delivered = await channel.send(outgoingBubble, person);
 						log("turn.sent", { task: task.id, bubble: sent, ms: Date.now() - sendStart, sinceStart: Date.now() - (task.startedAt ?? Date.now()) });
 					} catch (error) {
 						if (!(error instanceof DeliveryError)) {
@@ -417,7 +433,10 @@ export function defineTurn(host: TurnHost): TurnTask {
 					sent++;
 					outage = null;
 					retried = false;
-					await runtime.commit(() => running({ ...state, sent, outage }), context);
+					await runtime.commit(async (tx) => {
+						await recordSent(tx, id, delivered);
+						return running({ ...state, sent, outage });
+					}, context);
 				}
 			},
 			record: async (task, runtime, context) => {
@@ -459,6 +478,13 @@ type CliInbound = {
 	readonly to?: ConversationId;
 	readonly whenBusy?: "steer" | "followUp";
 };
+
+/** Fills a reply target's empty text from the outbox; it stays "" when mochi never recorded that message. */
+async function quotedText(harness: Pick<Harness, "snapshot">, channel: ChatChannelId, target: ReplyTarget, context: Context): Promise<ReplyTarget> {
+	if (target.text !== "") return target;
+	const stored = await harness.snapshot(OutboxDoc, requestKey(channel, target.messageId), context);
+	return stored === undefined ? target : { ...target, text: stored.text };
+}
 
 const tagOf = (channel: ChannelId, messageId: string, at: Date, timeZone: string) => `[${channel} ${formatStamp(at, timeZone)} id=${messageId}]`;
 
@@ -506,7 +532,8 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 			const tag = tagOf(inbound.channel, inbound.messageId, inbound.at, line.timeZone);
 			const files = await saveFiles(line.workDir, inbound);
 			const preparedMedia = files.length === 0 ? undefined : await prepareInbound(files, line.workDir, line.media, context.abortSignal);
-			const thread = inbound.replyTo === undefined ? {} : { replyTo: inbound.replyTo, threadOn: inbound.messageId };
+			const replyTo = inbound.replyTo === undefined ? undefined : await quotedText(harness, inbound.channel, inbound.replyTo, context);
+			const thread = replyTo === undefined ? {} : { replyTo, threadOn: inbound.messageId };
 			const turn: ChatTurn = { source: "chat", channel: inbound.channel, key, tag, text: inbound.text, files, at: inbound.at.getTime(), ...(preparedMedia === undefined ? {} : { preparedMedia }), ...thread };
 			const opened = await harness.commit(async (tx) => {
 				const known = user === undefined ? ROOT_CONVERSATION_ID : (await tx.doc(UserDoc, user.handle, null)).conversation;
@@ -559,7 +586,8 @@ export function sendTool(channels: Channels): ToolRegistration {
 			if (last == null) throw new Error("The owner has not written on a chat channel yet, so there is nowhere to send.");
 			const channel = channels.get(last.channel);
 			if (channel === undefined) throw new Error(`Channel ${last.channel} is not running.`);
-			await channel.send({ kind: "text", text: args.text });
+			const delivered = await channel.send({ kind: "text", text: args.text });
+			await api.commit((tx) => recordSent(tx, last.channel, delivered), context);
 			return { output: [{ type: "text", text: `Sent on ${last.channel}.` }] };
 		},
 	});

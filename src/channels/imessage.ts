@@ -17,6 +17,7 @@ import {
 	type MessageRequest,
 	type ReplyTarget,
 	SendRejected,
+	type SentBubble,
 	SendUnknown,
 } from "./types.ts";
 
@@ -165,7 +166,8 @@ async function collect(content: Content, into: Collected): Promise<void> {
 
 type ParsedIMessage = { readonly kind: "message"; readonly message: Inbound } | { readonly kind: "ignored"; readonly reason: "outbound" | "not-owner" | "empty" };
 
-async function toInbound(message: IMessageMessage, owner: string, users: readonly string[]): Promise<ParsedIMessage> {
+/** `sentText`: the text of a message mochi sent, by id, where the adapter still holds it. */
+async function toInbound(message: IMessageMessage, owner: string, users: readonly string[], sentText: (id: string) => string | undefined): Promise<ParsedIMessage> {
 	if (message.direction === "outbound") return { kind: "ignored", reason: "outbound" };
 	const sender = message.sender?.id === undefined ? "" : normalizeHandle(message.sender.id);
 	if (sender === "" || (sender !== owner && !users.includes(sender))) return { kind: "ignored", reason: "not-owner" };
@@ -182,7 +184,9 @@ async function toInbound(message: IMessageMessage, owner: string, users: readonl
 	const collected: Collected = { text: [], attachments: [] };
 	await collect(content, collected);
 	if (collected.text.length === 0 && collected.attachments.length === 0) return { kind: "ignored", reason: "empty" };
-	const replyTo = collected.replyTo === undefined ? {} : { replyTo: collected.replyTo };
+	let target = collected.replyTo;
+	if (target !== undefined && target.text === "") target = { ...target, text: sentText(target.messageId) ?? "" };
+	const replyTo = target === undefined ? {} : { replyTo: target };
 	return {
 		kind: "message",
 		message: { kind: "message", channel: "imessage", messageId: message.id, text: collected.text.join("\n"), at: message.timestamp, attachments: collected.attachments, ...person, ...replyTo },
@@ -282,10 +286,11 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 		if (recent.size > REMEMBERED_MESSAGES) recent.delete(recent.keys().next().value!);
 	}
 
-	function rememberSent(result: unknown, kind: SentEntry["kind"], text: string, person: string): void {
-		if (!isSentHandle(result)) return;
+	function rememberSent(result: unknown, kind: SentEntry["kind"], text: string, person: string): SentBubble[] {
+		if (!isSentHandle(result)) return [];
 		sent.set(result.id, { handle: result, kind, text, person });
 		if (sent.size > REMEMBERED_SENDS) sent.delete(sent.keys().next().value!);
+		return [{ id: result.id, text }];
 	}
 
 	function sentTarget(messageId: string | undefined, kind?: SentEntry["kind"]): { id: string; entry: SentEntry } {
@@ -365,7 +370,7 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 		async run(sink, signal) {
 			const handle = async (from: IMessageSpace, message: IMessageMessage) => {
 				try {
-					const parsed = await toInbound(message, owner, users);
+					const parsed = await toInbound(message, owner, users, (id) => sent.get(id)?.text);
 					if (parsed.kind === "ignored") {
 						// Read receipts and typing arrive as messages with no content; only a real drop is worth a log line.
 						const quiet = parsed.reason === "outbound" || message.content.type === "read" || message.content.type === "typing";
@@ -426,6 +431,7 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 
 		async send(bubble, person, options) {
 			const to = person ?? owner;
+			const delivered: SentBubble[] = [];
 			try {
 				const target = await space(person);
 				if (bubble.kind === "text") {
@@ -438,18 +444,19 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 						if (effect !== undefined && target.sendEffect !== undefined) result = await target.sendEffect(chunk, effect, replyTo);
 						else if (replyTo === undefined) result = await target.send(chunk);
 						else result = await target.sendReply(chunk, replyTo);
-						rememberSent(result, "text", chunk, to);
+						delivered.push(...rememberSent(result, "text", chunk, to));
 					}
 				} else if (bubble.kind === "link") {
-					rememberSent(await target.sendLink(bubble.url), "link", bubble.url, to);
+					delivered.push(...rememberSent(await target.sendLink(bubble.url), "link", bubble.url, to));
 				} else if (bubble.voice === true && bubble.mimeType.startsWith("audio/") && target.sendVoice !== undefined) {
-					rememberSent(await target.sendVoice(bubble, options?.replyTo), "file", `[voice ${bubble.name}]`, to);
+					delivered.push(...rememberSent(await target.sendVoice(bubble, options?.replyTo), "file", `[voice ${bubble.name}]`, to));
 				} else {
-					rememberSent(await target.sendFile(bubble, options?.replyTo), "file", `[file ${bubble.name}]`, to);
+					delivered.push(...rememberSent(await target.sendFile(bubble, options?.replyTo), "file", `[file ${bubble.name}]`, to));
 				}
 			} catch (error) {
 				throw classifyIMessageError(error);
 			}
+			return delivered;
 		},
 
 		async message(request) {

@@ -287,10 +287,14 @@ function whatsAppChannel(config: WhatsAppConfig): Channel {
 		},
 
 		async send(bubble) {
-			if (bubble.kind === "file") return sendFile(bubble);
+			if (bubble.kind === "file") {
+				await sendFile(bubble);
+				return [];
+			}
 			for (const body of chunkText(bubble.kind === "text" ? bubble.text : bubble.url, TEXT_LIMIT)) {
 				await postMessage({ type: "text", text: { preview_url: bubble.kind === "link", body } });
 			}
+			return [];
 		},
 
 		async typing(on) {
