@@ -98,7 +98,7 @@ Sections render in this order, and each must be stable between requests so the p
 4. `skills-index`: one line per bundled skill. The model opens a skill with `read`.
 5. `codemode`: the inline library functions. `searchTools()` finds the deferred ones.
 6. `context`: the context keys and `store()` keys the conversation holds, with their sizes. It is empty until a value exists.
-7. `instructions`: for root, the `root` definition (`agents/root.md`, the owner's copy wins) followed by `<home>/instructions.md`; otherwise a definition's or schedule's instructions. Root is the one definition a job cannot name.
+7. `instructions`: for root, the owner's `<home>/agents/root.md` (required; `root.example.md` is the starting copy) followed by `<home>/instructions.md`; otherwise a definition's or schedule's instructions. Root is the one definition a job cannot name.
 
 A changed section reaches the next request as a mid-conversation system message that carries only the change, so a changed section does not break the cache.
 

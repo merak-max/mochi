@@ -302,7 +302,7 @@ function services(config: Pick<Config, "modelSetup" | "web" | "home" | "appsUrl"
 		["models", missing.length === 0 ? ready(undefined) : broken(`${missing.join("; ")}. Fix: put the key in ~/.mochi/.env`)],
 		["classifier", config.modelSetup.classifier === undefined ? off : ready(undefined)],
 		["config", unknown.length === 0 ? ready(undefined) : broken(`config.toml has keys mochi does not read: ${unknown.join(", ")}. They are ignored; remove them.`)],
-		["web", config.web.key === undefined ? broken(`${config.web.keyEnv} is not set. Fix: put it in ~/.mochi/.env`) : ready(undefined)],
+		["web", config.web === undefined ? off : config.web.key === undefined ? broken(`${config.web.keyEnv} is not set. Fix: put it in ~/.mochi/.env`) : ready(undefined)],
 		["apps", config.appsUrl === undefined ? off : existsSync(authFile(config.home.dir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
 	];
 }

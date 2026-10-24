@@ -14,7 +14,7 @@ On-demand instructions for mochi. The prompt's skills index shows each skill's `
 | `improve` | The nightly self-improvement run and its undo. |
 | `unslop`, `technical-writing`, `bro` | Writing rules, document structure, and plain restatement. |
 
-Bundled agent definitions live in `../agents/`. `root.md` is root's own definition: Matt Pocock's chief-of-staff and HumanLayer's subagent-orchestrator, copied verbatim one after the other. They name Claude Code's tools, where `Agent` or `Task` is `tools.agent` and a schedule is `schedule_add`. The `worker` definition follows an exact brief on the model its front matter names. Tiers and aliases come from `[models]` in the owner's `config.toml`.
+Bundled agent definitions live in `../agents/`. Root's own definition is the owner's `~/.mochi/agents/root.md`; `../root.example.md` is the starting copy. The `worker` definition follows an exact brief on the model its front matter names. Tiers and aliases come from `[models]` in the owner's `config.toml`.
 
 ## Where each rule lives
 

@@ -50,7 +50,8 @@ interface MochiOptions {
 	readonly fast: ModelRef;
 	readonly classify: Classify;
 	/** The web service for the web and browser functions; without a key they fail with a clear error. */
-	readonly web: WebConfig;
+	/** Absent: no web or browser tools. */
+	readonly web: WebConfig | undefined;
 	/** Image, video and speech providers; absent, the media functions say they are not configured. */
 	readonly media?: Omit<MediaDeps, "workDir">;
 	/** The apps MCP server; absent, the apps functions say it is not connected. */
@@ -111,9 +112,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		zoomTool(() => harness),
 		reactTool(options.channels),
 		sendTool(options.channels),
-		...webFns({ apiKey: options.web.key, keyEnv: options.web.keyEnv, baseUrl: options.web.url, models: options.models, fast: options.fast }),
-		...browserFns(browserDeps(options.web)),
-		...fastBrowserFns({ ...browserDeps(options.web), models: options.models, fast: options.fast, classify: options.classify }),
+		...webTools(options),
 		...mediaFns({ ...media, workDir: options.workDir }),
 		...gifFns(options.workDir),
 		messageTool(options.channels),
@@ -199,6 +198,16 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	await harness.commit(selectView, context);
 	await harness.commit(addContextReaders, context);
 	return { harness, classify: options.classify, line, schedule, catalog: options.definitions };
+}
+
+function webTools(options: MochiOptions): ToolRegistration[] {
+	const web = options.web;
+	if (web === undefined) return [];
+	return [
+		...webFns({ apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, models: options.models, fast: options.fast }),
+		...browserFns(browserDeps(web)),
+		...fastBrowserFns({ ...browserDeps(web), models: options.models, fast: options.fast, classify: options.classify }),
+	];
 }
 
 const browserDeps = (web: WebConfig) => ({ apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) });

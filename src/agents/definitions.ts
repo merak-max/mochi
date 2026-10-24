@@ -76,13 +76,12 @@ export class Definitions {
 	}
 
 	/** Bundled first; the owner's file of the same name replaces it. */
-	/** Root's own definition, `root.md`: the owner's conversation runs under it. */
+	/** Root's own definition, `<home>/agents/root.md`: the owner's conversation runs under it. Only the owner's copy counts. */
 	async root(): Promise<Definition> {
 		const found = new Map<string, Definition>();
-		await readDir(this.#bundled, found);
 		await readDir(this.#dir, found);
 		const root = found.get(ROOT);
-		if (root === undefined) throw new Error(`No ${ROOT}.md in ${this.#dir} or ${this.#bundled}: root runs under it.`);
+		if (root === undefined) throw new Error(`No ${ROOT}.md in ${this.#dir}. Copy root.example.md from the repository there as root.md: root runs under it.`);
 		return root;
 	}
 

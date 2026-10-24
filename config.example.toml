@@ -1,4 +1,4 @@
-# mochi config. Copy to ~/.mochi/config.toml. [providers], [models] brain, fast and memory, and [web] are required.
+# mochi config. Copy to ~/.mochi/config.toml. [providers] and [models] brain, fast and memory are required. A section left out turns its feature off; nothing is guessed.
 # Keys and tokens go in ~/.mochi/.env (see .env.example), never here.
 
 # Your time zone. Default: the machine's.
@@ -86,7 +86,7 @@ haiku = "anthropic/claude-haiku-5-5"
 # App tools through an MCP server with execute and skills tools. Log in with: mochi auth apps
 # appsUrl = "https://apps.example.com/mcp"
 
-# Web search, fetch and the logged-in browser. Required. The client speaks Firecrawl's v2 API.
+# Web search, fetch and the logged-in browser. Left out: no web tools. The client speaks Firecrawl's v2 API.
 [web]
 url = "https://api.firecrawl.dev/v2"
 keyEnv = "FIRECRAWL_API_KEY"

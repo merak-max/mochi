@@ -56,6 +56,7 @@ npm install
 mkdir -p ~/.mochi
 cp config.example.toml ~/.mochi/config.toml
 cp .env.example ~/.mochi/.env && chmod 600 ~/.mochi/.env
+mkdir -p ~/.mochi/agents && cp root.example.md ~/.mochi/agents/root.md
 $EDITOR ~/.mochi/.env            # at least ANTHROPIC_API_KEY
 node src/main.ts                 # a terminal UI; it becomes the daemon
 ```
@@ -80,7 +81,7 @@ Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository
 | `config.toml` | Time zone, providers and models, routines, users, apps and web. See `config.example.toml`. |
 | `.env` | Keys and tokens. See `.env.example`. |
 | `instructions.md` | Facts about you, after root's definition. |
-| `agents/root.md` | Optional. Replaces the bundled root definition, the chief of staff that root runs as. |
+| `agents/root.md` | Required. Root's definition: who root is and how it works. Start from `root.example.md`. |
 | `agents/<name>.md` | One agent definition. A definition with a bundled name replaces the bundled one. |
 | `skills/` | Your skills, next to the bundled ones. |
 | `tools/<name>.ts` | Your own tools, one `defineTool` default export each. `tools_reload` loads them without a restart. |

@@ -49,7 +49,8 @@ export interface Config {
 	readonly home: Home;
 	readonly appsUrl: string | undefined;
 	readonly modelSetup: ModelSetup;
-	readonly web: WebConfig;
+	/** Absent: no web or browser tools. */
+	readonly web: WebConfig | undefined;
 	readonly timeZone: string;
 	/** `file.users` with each handle normalized as the iMessage adapter compares senders. */
 	readonly users: readonly ChatUser[];
@@ -58,8 +59,8 @@ export interface Config {
 }
 
 /** Resolves the home, loads its `.env` into `process.env`, and reads its config. */
-function webConfig(file: FileConfig, env: NodeJS.ProcessEnv): WebConfig {
-	if (file.web === undefined) throw new Error("config.toml has no [web]. Add [web] with url and keyEnv for a service that speaks Firecrawl's v2 API.");
+function webConfig(file: FileConfig, env: NodeJS.ProcessEnv): WebConfig | undefined {
+	if (file.web === undefined) return undefined;
 	const web: WebConfig = { url: file.web.url, keyEnv: file.web.keyEnv, key: env[file.web.keyEnv]?.trim() || undefined };
 	return file.web.browserProfile === undefined ? web : { ...web, browserProfile: file.web.browserProfile };
 }
