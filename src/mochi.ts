@@ -97,7 +97,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const procDir = join(options.workDir, ".procs");
 	const board = defineBoard({ line: lineOf, definitions: options.definitions, classify: options.classify, timeZone: options.timeZone, workDir: options.workDir, log });
 	const procWatch = defineProcWatch(procDir, lineOf);
-	const forkTask = defineForkTask(options.workDir);
+	const forkTask = defineForkTask({ workDir: options.workDir, line: lineOf });
 	let seat: ReturnType<typeof seatExtensions> | undefined;
 	let live: LiveTools = { home: [], mcp: [] };
 	const home = homeTools(options.toolsDir, registry, (tools) => {

@@ -1,12 +1,13 @@
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
-import { configure, type ConversationId, defineDocFamily, defineTask, defineTool, type EntryId, LiveDoc, type ModelRef, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { configure, type ConversationId, defineDocFamily, defineTask, defineTool, type EntryId, LiveDoc, type ModelRef, ROOT_CONVERSATION_ID, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import type { ChannelId } from "../channels/types.ts";
 import { agentOf, applyAgent, type Definition, type Definitions, inheritOwner, ownerIn, residentConversation } from "../agents/definitions.ts";
 import { copyContext, holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
 import { forkPoint } from "../seats.ts";
-import { answerText, submitNote } from "../turn/turn.ts";
+import { answerText, LastInboundDoc, openTurn, submitNote, wakeChannelOf, type ChatTurn, type Line } from "../turn/turn.ts";
 
 // Every job is a `mochi.agent` task:
 //   fork      a copy of the caller, history and all, in a conversation the task owns. Its first request reads the
@@ -51,7 +52,30 @@ const DeliveredDoc = defineDocFamily<{ delivered: boolean }, null>({
 	checkpointWhen: () => false,
 });
 
-export function defineForkTask(workDir: string) {
+/**
+ * Root learns a finished background child's answer only on its next turn, which an owner message or a board fire
+ * starts. wakesRoot picks the callers whose answer may sit unsent: for them root wakes at once with the note as
+ * input, so it delivers the result on the channel the owner last used. Every other caller reads the note on its next
+ * turn, as before.
+ */
+export const wakesRoot = (back: ConversationId): boolean => back === ROOT_CONVERSATION_ID;
+
+/** The chat Turn that delivers a finished background child's answer: its input is the [name] note. */
+export function forkWakeTurn(task: string, name: string, body: string, channel: ChannelId): ChatTurn {
+	return { source: "chat", channel, key: `fork-back:${task}`, tag: `[agent ${name}]`, text: `[${name}]\n${body}`, files: [] };
+}
+
+const WakeDoc = defineDocFamily<{ opened: boolean }, null>({
+	kind: "mochi.fork-wake",
+	version: 1,
+	scope: "session",
+	family: true,
+	initial: () => ({ opened: false }),
+	checkpointWhen: () => false,
+});
+
+export function defineForkTask(deps: { readonly workDir: string; readonly line: () => Line }) {
+	const { workDir, line } = deps;
 	return defineTask<ForkInput, { readonly phase: "run" }, ForkResult>({
 		name: "mochi.agent",
 		version: 1,
@@ -81,8 +105,19 @@ export function defineForkTask(workDir: string) {
 				if (back !== undefined) {
 					const body = "answer" in result ? result.answer || "(empty answer)" : `(no answer: ${result.failure})`;
 					const key = `fork-back:${task.id}`;
-					const held = await holdText(runtime, workDir, back.id, `in:${key}`, body, context);
-					await submitNote(back, key, `[${task.input.name}]\n${held}`, context);
+					if (wakesRoot(back.id)) {
+						// The note alone would wait for root's next turn; open one at once, deduped for a replay.
+						await runtime.commit(async (tx) => {
+							const wake = await tx.doc(WakeDoc, `${task.id}`, null);
+							if (wake.opened) return;
+							wake.opened = true;
+							const channel = wakeChannelOf((await tx.doc(LastInboundDoc)).last?.channel, (id) => line().channels.has(id));
+							await openTurn(tx, line(), forkWakeTurn(`${task.id}`, task.input.name, body, channel));
+						}, context);
+					} else {
+						const held = await holdText(runtime, workDir, back.id, `in:${key}`, body, context);
+						await submitNote(back, key, `[${task.input.name}]\n${held}`, context);
+					}
 				}
 				await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result } }), context);
 			},
@@ -131,7 +166,7 @@ async function startChild(tx: Tx, task: ForkTask, caller: ConversationId, input:
 
 const briefOf = (name: string, background: boolean, brief: string, scratch: string): string =>
 	`You are ${name}, a fork of this conversation made by the script above. ` +
-	(background ? "You run in the background. Your answer reaches the conversation that forked you as a note on its next turn, not the owner. " : "Your answer goes back to that script, not to the owner. ") +
+	(background ? "You run in the background. Your answer reaches the conversation that forked you as a note; if root forked you, it wakes at once and delivers the result to the owner. " : "Your answer goes back to that script, not to the owner. ") +
 	`Keep your files in ${scratch}; for code, work in a git worktree of your own, never the shared checkout.\n\n${brief}`;
 
 const contextLine = (keys: readonly string[]): string => `Context values (read them in a script with tools.context_read({ key })): ${keys.join(", ")}`;
@@ -234,7 +269,7 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 				`Starts child agents, one per job, ${FORK_BATCH} at a time, and resolves to [{ name, answer }] in job order. ` +
 				"fork: true copies this conversation, so the child knows everything here and reuses the prompt cache; otherwise the child starts fresh with only its brief and the context keys you pass. " +
 				"definition names an agent definition: the fresh child runs with its model, thinking, tools and instructions. A resident definition keeps one standing conversation; the job goes there, and a busy one queues it and answers NOT STARTED. " +
-				"background: true returns the names at once, and each answer arrives later as a [name] note on your next turn. A foreground child outlives its script: if the script times out first, the child's answer still arrives as a [name] note. " +
+				"background: true returns the names at once, and each answer arrives later as a [name] note on your next turn; a background child of root wakes root to deliver the result at once. A foreground child outlives its script: if the script times out first, the child's answer still arrives as a [name] note. " +
 				"model: a name from [models] (brain, fast, or the owner's own); it overrides a fresh child's definition, a fork takes none, and fast suits bulk reading.",
 			parameters: Type.Object({ jobs: Type.Array(Job, { minItems: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.Array(Type.Object({ name: Type.String(), answer: Type.String() })),

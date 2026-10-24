@@ -67,7 +67,7 @@ export interface SavedFile {
 	readonly bytes: number;
 }
 
-type ChatTurn = {
+export type ChatTurn = {
 	readonly source: "chat";
 	readonly channel: ChannelId;
 	readonly key: string;
@@ -282,6 +282,10 @@ function keepTyping(channel: Channel | undefined, person: string | undefined): (
 
 // A user's replies chain apart from the owner's, so one never waits behind the other.
 const tailKey = (channel: ChannelId, person: string | undefined): string => (person === undefined ? channel : `${channel}:${person}`);
+
+/** The channel a Turn the daemon opens replies on: the owner's last inbound channel, cli when none. */
+export const wakeChannelOf = (last: ChannelId | undefined, has: (id: ChannelId) => boolean): ChannelId =>
+	last !== undefined && has(last) ? last : "cli";
 
 const running = (checkpoint: TurnState): NextTaskState<TurnState, TurnResult> => ({ status: "running", checkpoint });
 const completed = (result: TurnResult): NextTaskState<TurnState, TurnResult> => ({ status: "terminal", outcome: { status: "completed", result } });
