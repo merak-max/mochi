@@ -27,8 +27,7 @@ keyEnv = "ANTHROPIC_API_KEY"
 brain = "anthropic/claude-opus-5-5"
 fast = "anthropic/claude-haiku-5-5"
 
-# The yes/no classifier for classify and classify steps, on a provider with api = "classifier".
-# With none set, OPENROUTER_API_KEY alone turns on its default classifier.
+# The decision model for classify, on a provider with api = "classifier". With none set, classify fails.
 # classifier = "classifier/liquid/d1-ultra"
 
 [models.aliases]

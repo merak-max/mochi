@@ -62,7 +62,7 @@ const DEFAULTS = {
 	anthropic: { url: "https://api.anthropic.com", keyEnv: "ANTHROPIC_API_KEY" },
 	responses: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
 	chat: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
-	classifier: { url: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "liquid/d1-ultra" },
+	classifier: { url: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
 } as const;
 
 export function providerEndpoint(name: string, providers: Readonly<Record<string, ProviderConfig>> = {}): { baseUrl: string; keyEnv: string } {
@@ -85,17 +85,6 @@ export interface ModelSetup {
 }
 
 /** No `[providers]`: Anthropic with ANTHROPIC_API_KEY, else OpenAI with OPENAI_API_KEY. */
-function defaultProviders(env: Env): Record<string, ProviderConfig> {
-	if (!env.ANTHROPIC_API_KEY && env.OPENAI_API_KEY) return { openai: { api: "responses" } };
-	return { anthropic: { api: "anthropic" } };
-}
-
-function defaultModels(providers: Record<string, ProviderConfig>): Required<Pick<ModelsConfig, "brain" | "fast">> {
-	const [name, provider] = Object.entries(providers)[0]!;
-	if (provider.api === "anthropic") return { brain: `${name}/claude-opus-5-5`, fast: `${name}/claude-haiku-5-5` };
-	return { brain: `${name}/gpt-6-sol`, fast: `${name}/gpt-6-luna` };
-}
-
 /** A model the catalog does not know: this much context, until `[models.overrides]` says otherwise. */
 const CONTEXT_WINDOW = 200_000;
 
@@ -170,11 +159,10 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 }
 
 export function createModelSetup(input: { readonly providers?: Record<string, ProviderConfig>; readonly models?: ModelsConfig; readonly env: Env }): ModelSetup {
-	const configured = input.providers !== undefined && Object.keys(input.providers).length > 0 ? input.providers : defaultProviders(input.env);
-	// A key for the classifier protocol's default endpoint alone turns `classify` on, with that endpoint's model.
-	const implicit = input.models?.classifier === undefined && !Object.values(configured).some((each) => each.api === "classifier") && Boolean(input.env[DEFAULTS.classifier.keyEnv]?.trim());
-	const providers: Record<string, ProviderConfig> = implicit ? { ...configured, classifier: { api: "classifier" } } : configured;
-	const chosen = { ...defaultModels(configured), ...(implicit ? { classifier: `classifier/${DEFAULTS.classifier.model}` } : {}), ...input.models };
+	const providers = input.providers ?? {};
+	if (Object.keys(providers).length === 0) throw new Error("config.toml has no [providers]. Add one, for example [providers.anthropic] with api = \"anthropic\".");
+	const chosen = input.models;
+	if (chosen?.brain === undefined || chosen.fast === undefined) throw new Error("config.toml [models] needs brain and fast, each <provider>/<id>.");
 	const aliases = chosen.aliases ?? {};
 	const named: Record<string, string> = { brain: chosen.brain, default: chosen.brain, fast: chosen.fast, strongest: chosen.strongest ?? chosen.brain, ...aliases };
 	const split = (full: string): { provider: string; id: string } => {
