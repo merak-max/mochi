@@ -95,7 +95,7 @@ async function build(deps: CompactorDeps, id: ConversationId, context: Context):
 				doc.view = fresh.view;
 				doc.seen = fresh.seen;
 			}
-			const plain = structuredClone(doc) as Tree;
+			const plain = JSON.parse(JSON.stringify(doc)) as Tree;
 			const node = nodeOf(plain, chat);
 			const arrived = chat.length > plain.count;
 			plain.count = chat.length;
@@ -114,7 +114,7 @@ async function build(deps: CompactorDeps, id: ConversationId, context: Context):
 			const doc = await tx.doc(ViewDoc, key, null);
 			if (doc.start !== tree.start) return;
 			doc.nodes[String(slot(next.l, next.i))] = line;
-			const plain = structuredClone(doc) as Tree;
+			const plain = JSON.parse(JSON.stringify(doc)) as Tree;
 			const after = nodeOf(plain, chat);
 			fitBoth(plain, after, false);
 			doc.view = plain.view;
