@@ -62,7 +62,7 @@ const DEFAULTS = {
 	anthropic: { url: "https://api.anthropic.com", keyEnv: "ANTHROPIC_API_KEY" },
 	responses: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
 	chat: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
-	classifier: { url: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "typesafe/jev-1.13" },
+	classifier: { url: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "liquid/d1-ultra" },
 } as const;
 
 export function providerEndpoint(name: string, providers: Readonly<Record<string, ProviderConfig>> = {}): { baseUrl: string; keyEnv: string } {

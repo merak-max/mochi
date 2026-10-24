@@ -29,7 +29,7 @@ fast = "anthropic/claude-haiku-5-5"
 
 # The yes/no classifier for classify and classify steps, on a provider with api = "classifier".
 # With none set, OPENROUTER_API_KEY alone turns on its default classifier.
-# classifier = "classifier/typesafe/jev-1.13"
+# classifier = "classifier/liquid/d1-ultra"
 
 [models.aliases]
 haiku = "anthropic/claude-haiku-5-5"
