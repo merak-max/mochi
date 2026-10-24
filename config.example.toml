@@ -83,8 +83,16 @@ haiku = "anthropic/claude-haiku-5-5"
 # handle = "+15550100002"
 # name = "Alex"
 
-# App tools through an MCP server with execute and skills tools. Log in with: mochi auth apps
-# appsUrl = "https://apps.example.com/mcp"
+# MCP servers. Each [mcp.<name>] gives scripts its tools as tools.<name>_<tool>, found with searchTools().
+# auth = "oauth": log in once with mochi auth <name>. auth = "bearer": the token is in the variable tokenEnv.
+# [mcp.apps]
+# url = "https://apps.example.com/mcp"
+# auth = "oauth"
+#
+# [mcp.docs]
+# url = "https://docs.example.com/mcp"
+# auth = "bearer"
+# tokenEnv = "DOCS_MCP_TOKEN"
 
 # Web search, fetch and the logged-in browser. Left out: no web tools. The client speaks Firecrawl's v2 API.
 [web]

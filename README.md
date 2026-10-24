@@ -16,7 +16,7 @@ Housekeeping items:
 
 You get one long conversation across every channel. Text it "move my 4pm to Friday" from your phone, and the reply comes back in the same thread. Each friend you configure gets a thread of their own, and those threads never see your memory or your apps.
 
-The model sees three tools. One of them, `codemode`, runs JavaScript in a sandbox, and everything else is a function that script calls: the web, your apps through an MCP server, files, a shell, memory, agents, routines. This sounds like a small detail, and it is the main design choice. A model that writes a loop over 200 mails and filters them before it reads anything uses far fewer tokens than a model that calls a tool 200 times. It also keeps the first request small, which keeps the prompt cache warm.
+The model sees three tools. One of them, `codemode`, runs JavaScript in a sandbox, and everything else is a function that script calls: the web, the tools of any MCP server you configure, files, a shell, memory, agents, routines. This sounds like a small detail, and it is the main design choice. A model that writes a loop over 200 mails and filters them before it reads anything uses far fewer tokens than a model that calls a tool 200 times. It also keeps the first request small, which keeps the prompt cache warm.
 
 When a task splits, `agent` with `fork: true` copies the current conversation, context and all, once per job, six at a time. Each copy reads the parent's prompt cache, so three drafts at once cost about the price of the new tokens. Measured on Opus 5.5, each fork's first request read about 6,500 cached tokens and wrote about 225. Forks can fork.
 
@@ -78,7 +78,7 @@ Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository
 
 | Path | What |
 |---|---|
-| `config.toml` | Time zone, providers and models, routines, users, apps and web. See `config.example.toml`. |
+| `config.toml` | Time zone, providers and models, routines, users, MCP servers and web. See `config.example.toml`. |
 | `.env` | Keys and tokens. See `.env.example`. |
 | `instructions.md` | Facts about you, after root's definition. |
 | `agents/root.md` | Required. Root's definition: who root is and how it works. Start from `root.example.md`. |
@@ -117,7 +117,7 @@ An agent definition is a Markdown file at `~/.mochi/agents/<name>.md`:
 description: Mail. Triage new mail and draft replies.
 model: fast
 thinking: medium
-tools: apps_search, apps_call, schedule_list
+tools: executor_execute, executor_skills, schedule_list
 resident: true
 ---
 

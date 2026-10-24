@@ -25,7 +25,7 @@ The daemon takes the lock file `<home>/mochi.lock` at start and exits if another
 | `mochi status` | The daemon's pid, uptime, wire, build, channels and setup report. |
 | `mochi doctor` | Read-only checks of the home, config, lock, socket, wire, systemd unit and log. It exits 1 when a check fails. |
 | `mochi stop` | Stops the daemon. When systemd runs it, this runs `systemctl --user stop mochi`. Otherwise it sends SIGTERM and waits. |
-| `mochi auth apps` | The OAuth login to the apps server. |
+| `mochi auth <name>` | The OAuth login to the MCP server `[mcp.<name>]`. Tokens go to `<home>/mcp/<name>.json`. |
 | `mochi service install` | Writes `~/.config/systemd/user/mochi.service`. |
 | `mochi help [command]` | The commands, or one command's flags. |
 
@@ -78,13 +78,14 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 | Models | `llm` (the fast model unless `model` names `brain` or `strongest`, no tools), `classify` (the classifier model) |
 | Context | `context_read`, `context_put`, `context_list` |
 | Web | `web_search`, `web_fetch`, `web_map`, `web_find_tools`, `web_alexandria`, `browse`, `browse_fast` |
-| Apps | `apps_search`, `apps_call`, `apps_skills` |
 | Media | `image_gen`, `video_gen`, `speak`, `transcribe`, `gif_search`, `gif_save` |
 | Agents | `agent`, `agent_stop` |
 | Self-extension | `tools_reload` |
 | Scheduling | `schedule_add`, `schedule_list`, `schedule_remove` |
 | Processes | `proc_start`, `proc_status`, `proc_logs`, `proc_stop` |
 | Channels | `react` |
+
+Each MCP server's tools are script functions too, `<name>_<tool>` (`tools.executor_execute`), with the server's own descriptions. They are deferred, so the prompt does not grow: scripts find them with `searchTools()`. Each server is a codemode namespace, so `describeNamespace("<name>")` returns the server's own MCP instructions. They are not in `LIBRARY`; the agent, trigger and peer seats get them, and a user's thread does not. The client declares no elicitation capability: a server that needs an approval returns it as a result, and the model answers it with that server's own tool. A server reconnects every 60 s while it is down, and its tools change when it lists new ones. A server name whose `<name>_` prefix a built-in tool already uses stops boot.
 
 Tool names never are `memory`, `session_search` or a single-underscore `mcp_` prefix, because a provider billing classifier flags them (`FORBIDDEN_TOOL_NAME`).
 
@@ -208,7 +209,7 @@ It edits only `<home>/skills` (which replaces a bundled skill of the same name) 
 
 `[providers.<name>]` is an endpoint, its protocol and the variable with its key. `api` is a pi-ai api id, and mochi loads that api's client from pi-ai itself (`@earendil-works/pi-ai/api/<api>.lazy`), so every chat and decision api pi-ai ships works with no list in mochi. Every provider names its `url` and `keyEnv`; nothing defaults. A gateway is one provider per protocol it serves. `[models]` must name `brain`, `fast` and `memory`, and may name `strongest`, `classifier` and `aliases`, each `<provider>/<id>`. Without `[models] classifier`, `classify` fails. `[models.overrides]` sets a model's context window, output limit and cache life. mochi carries no prices: token counts stay, and the model provider bills.
 
-Other config keys: `timeZone`, `appsUrl` (an MCP server with `execute` and `skills`; `MOCHI_APPS_URL` overrides it), `[web]` (`keyEnv`, `url`, `browserProfile`), `[media]` (images, video, and speech through the OpenAI audio API on a named provider), `[[users]]` and `[[triggers]]`. Boot logs one `setup` line per boundary, and names config keys mochi does not read.
+Other config keys: `timeZone`, `[mcp.<name>]` (`url`, and `auth = "oauth"` or `auth = "bearer"` with `tokenEnv`), `[web]` (`keyEnv`, `url`, `browserProfile`), `[media]` (images, video, and speech through the OpenAI audio API on a named provider), `[[users]]` and `[[triggers]]`. Boot logs one `setup` line per boundary, and names config keys mochi does not read.
 
 Keys live in `<home>/.env` under the names config gives. Channel keys: `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET`, `IMESSAGE_OWNER`. Daemon keys: `MOCHI_BIND_HOST`, `MOCHI_HOOKS_PORT`, `MOCHI_PUBLIC_URL`.
 
@@ -232,7 +233,7 @@ src/
   turn/             ingest and the Turn task, commands (/new, /stop, /status), handoff
   channels/         the channel interface, present(), iMessage, the terminal channel and its socket
   tools/            the owner's own tools in <home>/tools and tools_reload
-  apps/, auth/      the apps server client and its OAuth login
+  mcp/              MCP servers as script functions, and the OAuth login
   web/, browser/    web functions and the logged-in browser
   media/            images, video, speech, gifs, inbound attachments
   procs/            background processes; their wakes are process schedules
@@ -253,5 +254,5 @@ src/
 | uniichat's view instead of compaction. | Rewriting the whole prefix on every compaction lost detail each pass, and promises died at compaction. The tree builds each line once, every message stays reachable by `zoom`, and the view changes only at its end. |
 | One scheduler: a promise is an `at` schedule. | Of 23 commitments root made from Oct 6 to 14, 10 had nothing behind them. Three schedulers (triggers, the board sweep, proc wakes) meant three places to look and three sets of rules; one task kind with a `when` is one list. |
 | No caps on memory or context. | Sizes are reading budgets, not storage limits. Transport limits at HTTP boundaries and process timeouts stay. |
-| No vendor names in the core. | Providers, the classifier, apps and the web are config. The web client speaks Firecrawl's v2 API and the apps client speaks Executor's protocol, each as the one adapter. |
+| No vendor names in the core. | Providers, the classifier, MCP servers and the web are config. The web client speaks Firecrawl's v2 API as its one adapter; MCP servers are plain MCP. |
 | Verification is a live run on a copy of a store, not unit tests. | Without a daemon, `-p` and `chat` start no channels or schedules, so a copy reaches no one. |

@@ -20,7 +20,7 @@ Collect the handles first: dates, amounts, names, reference numbers, exact wordi
 One investigator per source that could hold the evidence:
 
 1. **Past chats and memory.** What the owner said and decided, and what mochi did.
-2. **Mail and messages.** Through the `apps` skill: receipts, confirmations, notices, threads.
+2. **Mail and messages.** Through the owner's MCP tools (`searchTools()`): receipts, confirmations, notices, threads.
 3. **Calendar and accounts.** Calendar entries, statements, order histories, account settings.
 4. **The public record.** Official pages, terms, changelogs, news, status pages.
 5. **Files and code.** The work directory, or a repository with its history.
