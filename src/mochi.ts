@@ -23,6 +23,7 @@ import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineSchedule, notifyTool, RUN_DEADLINE_MS, scanSchedules, type ScheduleTask, scheduleFns } from "./schedule/schedule.ts";
 import { migrateSchedulers } from "./schedule/migrate.ts";
+import { migrateKeptLines } from "./memory/migrate.ts";
 import { defaultSelection, rootSelection, SEATS, seatExtensions } from "./seats.ts";
 import { homeTools } from "./tools/home-tools.ts";
 import { reactTool, sendTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
@@ -61,6 +62,8 @@ interface MochiOptions {
 	readonly skillDirs: readonly string[];
 	/** The owner's own tools, `<dir>/<name>.ts`; `tools_reload` loads them. */
 	readonly toolsDir: string;
+	/** Lasting facts, plain markdown files the agent reads and edits. */
+	readonly memoryDir: string;
 	readonly profiles: Profiles;
 	/** Where bash, read, edit and write run when a conversation sets no cwd. */
 	readonly workDir: string;
@@ -125,7 +128,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...profileFns(options.profiles, () => harness, reply, options.workDir),
 	];
 	for (const extension of [
-		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, options.toolsDir),
+		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, options.toolsDir, options.memoryDir),
 		memoryExtension(),
 		skillsExtension(options.skillDirs),
 		defineExtension({ name: "agents", tasks: [forkTask, reply] }),
@@ -174,7 +177,10 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		openReply: (tx, input) => openTurn(tx, lineOf(), input),
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
-	if (options.scheduling === "daemon") await migrateSchedulers(harness, schedule, options.profiles, log, context);
+	if (options.scheduling === "daemon") {
+		await migrateSchedulers(harness, schedule, options.profiles, log, context);
+		await migrateKeptLines(harness, options.memoryDir, (await options.profiles.all()).map((profile) => profile.name), log, context);
+	}
 	line = {
 		harness,
 		root,

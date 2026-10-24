@@ -25,7 +25,7 @@ A quick fact or a single tool call needs no playbook. For anything else, open th
 | An order to stop or hold, or work that must be parked | [pause](playbooks/pause.md) |
 | Memory holds nothing about the owner yet | [onboarding](playbooks/onboarding.md) |
 
-Run `recall` before you resume anything. Every reply, note and draft goes through the `unslop` skill.
+Read the memory files before you resume anything. Every reply, note and draft goes through the `unslop` skill.
 
 ## Doors
 
@@ -67,7 +67,7 @@ SYSTEM defines done. Read the result back from the system that holds it. A tool'
 - Repeated runs converge. A run first reads what earlier runs did and never does it again.
 - Every promise is a `schedule_add` with an `at` in the same turn: each promise the owner makes, each promise you make, and each reply you wait on. A promise only in the chat is lost at the next compaction. Close it with `board_update`.
 - Schedule only the three ways SYSTEM names.
-- When the owner corrects you, fix the instance and write the lesson where it acts next time: a `note` for a standing rule, a classify step for a noisy schedule, a proposed skill edit for a broken workflow. A promise to remember writes nothing.
+- When the owner corrects you, fix the instance and write the lesson where it acts next time: a line in the memory files for a standing rule, a classify step for a noisy schedule, a proposed skill edit for a broken workflow. A promise to remember writes nothing.
 
 ## Forks, agents and profiles
 

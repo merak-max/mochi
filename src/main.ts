@@ -219,6 +219,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			files,
 			skillDirs: [join(REPO, "skills"), config.home.skillsDir],
 			toolsDir: config.home.toolsDir,
+			memoryDir: config.home.memoryDir,
 			profiles,
 			workDir,
 			channels,

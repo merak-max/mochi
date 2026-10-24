@@ -12,7 +12,7 @@
 4. Report each actor as stopped (with proof) or still live (with what it can still do, and when). Never say that nothing will go out until each sending path is closed.
 5. Walk through no one-way door in order to pause.
 6. Write `<slug>/resume.md` in the work directory: the goal, what is done and verified, the current state, the next step, and the gotchas. Point at the decision log instead of copying it.
-7. Save a `note` that names the work and the resume note's path, so that `recall` finds it.
+7. Write a line in the memory files that names the work and the resume note's path.
 8. Read the resume note as someone with no memory of this conversation. Fix what that reader could not resume from.
 
 **Reply:** where things stand, what is paused (processes, forks, profiles, schedules, timers), what is still live and why, where the resume note is, and the first step on resume.

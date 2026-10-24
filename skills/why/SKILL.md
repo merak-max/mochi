@@ -13,7 +13,7 @@ Name the thing and the question about it. If it is vague, state your best readin
 
 ## 2. Anchor it
 
-Collect the handles first: dates, amounts, names, reference numbers, exact wording, and the entry id where it came up. Search `recall` first: the owner's own chats are often the answer.
+Collect the handles first: dates, amounts, names, reference numbers, exact wording. Grep the memory files and `zoom` the view first: the owner's own chats are often the answer.
 
 ## 3. Investigate in parallel
 

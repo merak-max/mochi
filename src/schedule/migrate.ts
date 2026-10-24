@@ -52,6 +52,7 @@ type Plan = { readonly create: { readonly schedule: Schedule; readonly origin: "
  * schedule in its conversation, each live `mochi.proc` a process schedule, and each open or waiting board task with a
  * due an `at` schedule `board-<id>`. The old tasks are aborted after the commit; with no definition left they end
  * orphaned. A board task with no due has no time to fire and is dropped, and the board document is retired.
+ * Delete this file once the live store has run it.
  */
 export async function migrateSchedulers(harness: Harness, task: ScheduleTask, catalog: Profiles, log: Log, context: Context): Promise<void> {
 	const board = await harness.snapshot(BoardDoc, context);

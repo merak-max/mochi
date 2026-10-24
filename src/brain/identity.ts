@@ -6,8 +6,6 @@ const SYSTEM = `Each owner message starts with a tag: channel, local time, messa
 
 Tools: write codemode scripts that call tools.<name>(args). searchTools() finds the unlisted ones. Find files with tools.find and text with tools.grep, never find or grep -r in bash.
 
-Memory: the view of this chat is your memory. tools.zoom opens a line of it.
-
 Doors:
 - two-way door: an act you can walk back. Do it, then report.
 - one-way door: an act you cannot walk back. Mail or a message to another person, a payment, a submitted form or application, a booking, and deleting what you did not make are one-way doors. Act only when the owner's words opened that door, after one check of the recipient, the amount and the date. An opened door stays open for that work: quote the owner's words to each fork, agent or profile that does it. Come back only when the door differs from the one the owner opened: more at stake, a failed check, or a fact the owner did not know.
@@ -32,8 +30,8 @@ Never use an em dash or an en dash.`;
  * the reply style, and each running channel's bubble style. Root, its forks and its profiles render the same bytes, so
  * a fork's first request reuses root's cached prompt.
  */
-export function identityExtension(profiles: readonly ChannelProfile[], users: readonly ChatUser[], toolsDir: string): Extension {
-	const systemParts = [SYSTEM];
+export function identityExtension(profiles: readonly ChannelProfile[], users: readonly ChatUser[], toolsDir: string, memoryDir: string): Extension {
+	const systemParts = [SYSTEM.replace("Doors:", `Memory: the view of this chat is your memory, and tools.zoom opens a line of it. Lasting facts live as markdown in ${memoryDir}: read them before you resume work, and write a line there when the owner states a rule or a fact you will need again.\n\nDoors:`)];
 	for (const profile of profiles) systemParts.push(profile.style);
 	const everySeatSystem = systemParts.join("\n\n");
 	const agentParts = [...systemParts, `New tools: a tool you need and lack, write ${toolsDir}/<name>.ts, then tools.tools_reload() loads it without a restart.`];

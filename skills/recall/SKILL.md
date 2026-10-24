@@ -8,10 +8,10 @@ description: Use for "catch me up", before you resume work, and before you say t
 Rebuild the recent context on a topic and hand back a short brief. Read only what the topic needs.
 
 1. **Pin the scope.** The topic, and the window. "Recent" is the last 7 days unless the owner says otherwise. Never quietly turn "everything" into "recent".
-2. **Search the record.** Run `recall` with a few phrasings: the topic, names, places, amounts. Read around the strongest chat hits with the hit's `entry`. Open a merged memory block with `zoom({ block })`. For a broad topic or a long window, give slices to forks in one `fork` call, each returning decisions, open threads and artifacts with entry ids.
+2. **Search the record.** Grep the memory files with a few phrasings: the topic, names, places, amounts. Open the view's lines on the topic with `zoom`. For a broad topic, give slices to `agent` jobs with `fork: true`, each returning decisions, open threads and artifacts.
 3. **Check live state.** `schedule_list`, `proc_status`, the work directory (todo files, decision logs, resume notes), and the owner's apps for what changed since.
-4. **Separate words from summaries.** Quote the owner's own message, with its entry id, for each decision. Label your earlier summaries as summaries.
-5. **Check before you say "never".** Search the history with at least two phrasings, then memory, then the work directory. Say what you searched.
+4. **Separate words from summaries.** Quote the owner's own message, for each decision. Label your earlier summaries as summaries.
+5. **Check before you say "never".** Search the view with `zoom` and the memory files with at least two phrasings each, then the work directory. Say what you searched.
 
 ## The brief
 

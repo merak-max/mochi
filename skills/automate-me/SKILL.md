@@ -5,17 +5,17 @@ description: Use for "learn how I write" or "automate me". Saves the owner's voi
 
 # Automate me
 
-Turn the owner's habits into one-line `note` entries: how the owner writes, and the owner's standing instructions. This skill writes memory lines, never a skill.
+Turn the owner's habits into one-line entries in the memory files: how the owner writes, and the owner's standing instructions. This skill writes memory lines, never a skill.
 
 ## 1. Check what exists
 
-Read the memory section of your prompt, and `recall` lines on how the owner writes. If such lines exist, this run is an update: mine only what came after their dates, and write a new line for each one that the new evidence contradicts.
+Read the memory files for lines on how the owner writes. If such lines exist, this run is an update: mine only what came after their dates, and write a new line for each one that the new evidence contradicts.
 
 ## 2. Mine the evidence
 
 Mine three places, one fork each, in a single `agent` call with `fork: true`. Each fork returns patterns with entry ids or message links.
 
-- **Corrections in past chats.** The owner's complaints, standing orders and rewrites of mochi's drafts, found with `recall`.
+- **Corrections in past chats.** The owner's complaints, standing orders and rewrites of mochi's drafts, found in the view with `zoom`.
 - **The owner's sent messages and mail**, through the `apps` skill: greetings, sign-offs, length, language mix, formality by recipient, emoji.
 - **Choices the owner made.** Bookings, purchases and plans the owner accepted or rejected, and why.
 

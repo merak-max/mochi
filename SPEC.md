@@ -127,6 +127,8 @@ The hook only reads. A conversation with no tree sends its context as it is.
 
 The `memory` section is uniichat's "# The view" with its turn rules on memory. `zoom({ id, n })` opens line id+n into its two halves, `zoom({ id, n: 1 })` gives message id whole, and `zoom({ name })` gives a child agent's own chat. Zoom is the only way to read the tree; there is no search.
 
+Lasting facts live outside the chat, as markdown in `<home>/memory/`. The `system` section names the folder. The agent reads it with `tools.find` and `tools.grep` and writes a line there when the owner states a rule or a fact it will need again. A reset starts a new view, and these files are what carries over.
+
 ## Context
 
 Long input is a value, not prompt text. `holdText` in `src/context.ts` is the one owner of inbound text. Text up to 8,192 chars (`INLINE_MAX`) reaches the model as it is. Longer text goes to `<work>/context/<sha256>.txt`, written to a temp name and then renamed. The conversation's `mochi.context` catalog maps a key to the file, its size and its line count. The model sees a header with the key, the first 1,500 chars and the last 500. The threshold is a reading budget; nothing is dropped.

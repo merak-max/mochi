@@ -24,7 +24,7 @@ Some work is standing work: someone has to watch the inbox, the bills, the outre
 
 ## Memory that does not forget
 
-The chat is the memory. Each message is summarized into one line, and neighboring lines merge in pairs, again and again, into a binary tree, as in uniichat. Each request sees a view of the whole chat: recent messages whole, older ones covered by fewer, broader lines. `zoom` opens any line into the two it was made from, down to the original message. A cheaper model builds the tree in the background, and the view changes only at its end, so the prompt cache stays warm. Nothing is thrown away.
+The chat is the memory. Each message is summarized into one line, and neighboring lines merge in pairs, again and again, into a binary tree, as in uniichat. Each request sees a view of the whole chat: recent messages whole, older ones covered by fewer, broader lines. `zoom` opens any line into the two it was made from, down to the original message. A cheaper model builds the tree in the background, and the view changes only at its end, so the prompt cache stays warm. Nothing is thrown away. Facts that must outlive a reset go in plain markdown files under `~/.mochi/memory`, which you can read and edit too.
 
 The reason for this is a failure the earlier design had. It rewrote the whole history on each compaction, and each pass lost a little. Promises died first. Of 23 commitments mochi made from October 6 to 14, 10 had nothing behind them by the end of the week. So now every promise is a schedule with an `at` time, and at that time a fresh run of mochi gets the task.
 

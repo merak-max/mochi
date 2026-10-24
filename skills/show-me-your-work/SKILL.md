@@ -34,7 +34,7 @@ The log is append-only. Correct a wrong row with a new row that supersedes it.
 
 ## Audit before you hand back
 
-Walk this run's rows against what happened (`recall` with an `entry`). Every row maps to a real action, and every evidence pointer resolves and shows what the row claims. Add each unlogged fork or undo that shaped the work.
+Walk this run's rows against what happened (`zoom` the view). Every row maps to a real action, and every evidence pointer resolves and shows what the row claims. Add each unlogged fork or undo that shaped the work.
 
 ## Second opinion
 

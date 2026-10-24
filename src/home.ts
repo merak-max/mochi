@@ -17,12 +17,14 @@ export interface Home {
 	readonly profilesDir: string;
 	/** The owner's own tools, one `<name>.ts` each, loaded by `tools_reload`. */
 	readonly toolsDir: string;
+	/** Lasting facts as markdown, `<home>/memory`. */
+	readonly memoryDir: string;
 	readonly logFile: string;
 }
 
-/** `MOCHI_HOME`, then the older `MOCHI_DATA_DIR`, then `~/.mochi`. */
+/** `MOCHI_HOME`, else `~/.mochi`. */
 export function resolveHome(env: Readonly<Record<string, string | undefined>>): Home {
-	const dir = resolve(env.MOCHI_HOME ?? env.MOCHI_DATA_DIR ?? join(homedir(), ".mochi"));
+	const dir = resolve(env.MOCHI_HOME ?? join(homedir(), ".mochi"));
 	return {
 		dir,
 		envFile: join(dir, ".env"),
@@ -31,6 +33,7 @@ export function resolveHome(env: Readonly<Record<string, string | undefined>>): 
 		skillsDir: join(dir, "skills"),
 		profilesDir: join(dir, "profiles"),
 		toolsDir: join(dir, "tools"),
+		memoryDir: join(dir, "memory"),
 		logFile: join(dir, "mochi.log"),
 	};
 }
