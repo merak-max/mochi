@@ -19,7 +19,7 @@ export type DaemonFacts = {
 };
 
 /** Terminal to daemon. `watch`: also send main's live status. */
-export type ClientFrame = { readonly t: "hello"; readonly wire: number; readonly watch: boolean } | { readonly t: "line"; readonly text: string };
+type ClientFrame = { readonly t: "hello"; readonly wire: number; readonly watch: boolean } | { readonly t: "line"; readonly text: string };
 
 /** Daemon to terminal. Each line gets one `done` after its Turn ends. An `error` closes the connection. */
 export type DaemonFrame =
@@ -37,7 +37,7 @@ const CLI_PROFILE: ChannelProfile = {
 	typingMaxMs: 0,
 };
 
-export interface CliChannel extends Channel {
+interface CliChannel extends Channel {
 	/** Shows `status` to every watching terminal. */
 	status(status: string): void;
 }

@@ -5,7 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 const MAX_RATE_LIMIT_RETRIES = 3;
 const MAX_RATE_LIMIT_WAIT_SECONDS = 30;
 const DEFAULT_RATE_LIMIT_WAIT_SECONDS = 5;
-export const SEARCH_TIMEOUT_MS = 20_000;
+const SEARCH_TIMEOUT_MS = 20_000;
 export const DEFAULT_TIMEOUT_MS = 60_000;
 
 export interface SearchRequest {
@@ -53,7 +53,6 @@ interface AlexandriaResult {
 	data: JsonValue;
 	/** Credits this call charged; 0 for discovery. */
 	creditsCost: number;
-	records?: number | undefined;
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -88,10 +87,6 @@ function retryAfterSeconds(payload: unknown, response: Response): number | undef
 	return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }
 
-function seconds(milliseconds: number): string {
-	return `${milliseconds / 1000}s`;
-}
-
 /** Settles with `work`, or rejects as soon as `signal` aborts, even when `work` ignores the signal. */
 export function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 	return new Promise((resolve, reject) => {
@@ -105,7 +100,6 @@ export function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<
 	});
 }
 
-
 /** Firecrawl v2 search, scrape, map and Alexandria, reading only the fields mochi uses. */
 export class FirecrawlClient {
 	readonly #apiKey: string;
@@ -116,13 +110,13 @@ export class FirecrawlClient {
 		this.#baseUrl = baseUrl.replace(/\/+$/, "");
 	}
 
-	async search(options: SearchRequest, signal?: AbortSignal, timeoutMs = SEARCH_TIMEOUT_MS): Promise<SearchHit[]> {
-		const payload = await this.#requestWithDeadline("search", options, signal, timeoutMs, `search`, `"${options.query}"`);
+	async search(options: SearchRequest, signal?: AbortSignal): Promise<SearchHit[]> {
+		const payload = await this.#requestWithDeadline("search", options, signal, SEARCH_TIMEOUT_MS, "search", `"${options.query}"`);
 		const hits = records(data(payload, "search").web);
 		return hits.flatMap((hit) => (typeof hit.url === "string" ? [{ url: hit.url, title: text(hit.title), description: text(hit.description) }] : []));
 	}
 
-	async scrape(options: ScrapeRequest, signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<ScrapedPage> {
+	async scrape(options: ScrapeRequest, signal: AbortSignal | undefined, timeoutMs: number): Promise<ScrapedPage> {
 		const payload = await this.#requestWithDeadline("scrape", options, signal, timeoutMs, "scrape", options.url);
 		const page = data(payload, "scrape");
 		const metadata = record(page.metadata) ?? {};
@@ -134,8 +128,8 @@ export class FirecrawlClient {
 		};
 	}
 
-	async map(options: { url: string; search?: string; limit: number }, signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<string[]> {
-		const payload = await this.#requestWithDeadline("map", options, signal, timeoutMs, "map", options.url);
+	async map(options: { url: string; search?: string; limit: number }, signal?: AbortSignal): Promise<string[]> {
+		const payload = await this.#requestWithDeadline("map", options, signal, DEFAULT_TIMEOUT_MS, "map", options.url);
 		const links = records(success(payload, "map").links);
 		return links.flatMap((link) => (typeof link.url === "string" ? [link.url] : []));
 	}
@@ -144,18 +138,18 @@ export class FirecrawlClient {
 	 * Runs one Alexandria tool through /scrape. Discovery (firecrawl/find-tools) is free; every other tool charges its listed credits.
 	 * One `x-request-id` covers the rate-limit retries, so Firecrawl replays a retried call instead of billing it twice.
 	 */
-	async alexandria(call: AlexandriaCall, signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<AlexandriaResult> {
+	async alexandria(call: AlexandriaCall, signal?: AbortSignal): Promise<AlexandriaResult> {
 		const tool = `${call.provider}/${call.capability}`;
 		const label = `alexandria ${tool}`;
 		const headers = { "x-request-id": crypto.randomUUID() };
-		const payload = await this.#requestWithDeadline("scrape", { alexandria: [call] }, signal, timeoutMs, "alexandria", tool, headers);
+		const payload = await this.#requestWithDeadline("scrape", { alexandria: [call] }, signal, DEFAULT_TIMEOUT_MS, "alexandria", tool, headers);
 		const response = data(payload, label);
 		const result = records(response.alexandria)[0];
 		if (result === undefined) throw new Error(`Firecrawl returned no result for ${label}.`);
 		const error = record(result.error);
 		if (error !== undefined) throw new Error(`Firecrawl ${label} failed (${text(error.code) ?? "error"}): ${text(error.message) ?? "no message"}.`);
 		const cost = number(result.creditsCost) ?? number(response.creditsCost) ?? 0;
-		return { data: (result.data ?? null) as JsonValue, creditsCost: cost, records: number(result.records) };
+		return { data: (result.data ?? null) as JsonValue, creditsCost: cost };
 	}
 
 	/**
@@ -176,7 +170,7 @@ export class FirecrawlClient {
 		try {
 			return await untilAborted(this.#request(endpoint, body, combined, headers), combined);
 		} catch (error) {
-			if (deadline.aborted && !signal?.aborted) throw new Error(`Firecrawl ${label} timed out after ${seconds(timeoutMs)} for ${target}.`);
+			if (deadline.aborted && !signal?.aborted) throw new Error(`Firecrawl ${label} timed out after ${timeoutMs / 1000}s for ${target}.`);
 			throw error;
 		}
 	}
@@ -207,7 +201,7 @@ export class FirecrawlClient {
 			if (response.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
 				const wait = retryAfterSeconds(payload, response) ?? DEFAULT_RATE_LIMIT_WAIT_SECONDS;
 				if (wait <= MAX_RATE_LIMIT_WAIT_SECONDS) {
-					await sleep(wait * 1000 + 250, undefined, signal === undefined ? {} : { signal });
+					await sleep(wait * 1000 + 250, undefined, { signal });
 					continue;
 				}
 			}

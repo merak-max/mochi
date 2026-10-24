@@ -2,7 +2,7 @@ import { loadSkillsFromDir, type Skill } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type Extension, section } from "@earendil-works/pi-durable";
 
 /**
- * The `skills-index` section, pi's pattern: name, description and file, and the model opens the file with `read`.
+ * The `skills-index` section: name, description and file, and the model opens the file with `read`.
  * `dirs` are the bundled skills first, then the owner's: an owner skill with a bundled name replaces the bundled one.
  * Read on each render, so an edited skill reaches the next request without a restart.
  */

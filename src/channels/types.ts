@@ -13,7 +13,7 @@ export interface ChannelProfile {
 }
 
 /** One emoji, as the model picks it: "👍", "😂", "🫡". */
-export type Reaction = string;
+type Reaction = string;
 
 export interface Attachment {
 	readonly kind: "image" | "audio" | "file";
@@ -101,15 +101,16 @@ export interface Channel {
 	readonly profile: ChannelProfile;
 	/** Runs until `signal` aborts, never messaging the owner about itself. */
 	run(sink: InboundSink, signal: AbortSignal): Promise<void>;
-	/** Throws only DeliveryError subclasses for platform failures. `person` absent: the owner. */
-	/** Resolves to each platform message it sent, where the platform returns an id. */
+	/**
+	 * Throws only DeliveryError subclasses for platform failures. `person` absent: the owner. Resolves to each platform
+	 * message it sent, where the platform returns an id.
+	 */
 	send(bubble: Bubble, person?: string, options?: { readonly replyTo?: string }): Promise<readonly SentBubble[]>;
 	typing(on: boolean, person?: string): Promise<void>;
 	react?(messageId: string, reaction: Reaction | "none"): Promise<void>;
 	/** Resolves to one line for the model. */
 	message?(request: MessageRequest): Promise<string>;
 }
-
 
 export type Channels = ReadonlyMap<ChannelId, Channel>;
 
