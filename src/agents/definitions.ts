@@ -26,6 +26,8 @@ export interface Definition {
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
+const ROOT = "root";
+
 function parseDefinition(name: string, text: string): Definition {
 	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
 	const fields = new Map<string, string>();
@@ -74,10 +76,22 @@ export class Definitions {
 	}
 
 	/** Bundled first; the owner's file of the same name replaces it. */
+	/** Root's own definition, `root.md`: the owner's conversation runs under it. */
+	async root(): Promise<Definition> {
+		const found = new Map<string, Definition>();
+		await readDir(this.#bundled, found);
+		await readDir(this.#dir, found);
+		const root = found.get(ROOT);
+		if (root === undefined) throw new Error(`No ${ROOT}.md in ${this.#dir} or ${this.#bundled}: root runs under it.`);
+		return root;
+	}
+
+	/** Every definition a job can name; root is the owner's conversation, never a job. */
 	async all(): Promise<Definition[]> {
 		const found = new Map<string, Definition>();
 		await readDir(this.#bundled, found);
 		await readDir(this.#dir, found);
+		found.delete(ROOT);
 		return [...found.values()];
 	}
 

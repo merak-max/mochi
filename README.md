@@ -79,7 +79,8 @@ Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository
 |---|---|
 | `config.toml` | Time zone, providers and models, routines, users, apps and web. See `config.example.toml`. |
 | `.env` | Keys and tokens. See `.env.example`. |
-| `instructions.md` | Your own instructions, after the built-in prompt. This is where its voice comes from. |
+| `instructions.md` | Facts about you, after root's definition. |
+| `agents/root.md` | Optional. Replaces the bundled root definition, the chief of staff that root runs as. |
 | `agents/<name>.md` | One agent definition. A definition with a bundled name replaces the bundled one. |
 | `skills/` | Your skills, next to the bundled ones. |
 | `tools/<name>.ts` | Your own tools, one `defineTool` default export each. `tools_reload` loads them without a restart. |

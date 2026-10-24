@@ -72,7 +72,7 @@ interface MochiOptions {
 	/** `daemon` runs schedules; `local` (a terminal with no daemon) leaves them waiting for one. Both run Turns. */
 	readonly scheduling: "daemon" | "local";
 	readonly log: Log;
-	/** Root's own instructions (`<home>/instructions.md`), rendered after every section; absent leaves root's as they are. */
+	/** The owner's facts (`<home>/instructions.md`), after root's definition in root's instructions. */
 	readonly instructions?: string;
 	readonly users: readonly ChatUser[];
 }
@@ -159,8 +159,13 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		context,
 	);
 
-	const root = await harness.root(context, { agent: { model: options.brain, thinkingLevel: "medium", extensions: rootSelection((name) => registry.snapshot().extension(name)) } });
-	await root.configure({ model: options.brain, ...(options.instructions === undefined ? {} : { instructions: options.instructions }) }, context);
+	const rootDefinition = await options.definitions.root();
+	if (rootDefinition.tools !== undefined) throw new Error("agents/root.md sets tools, but root's tools come from its seat. Remove the tools line.");
+	const rootModel = options.definitions.model(rootDefinition.model ?? "brain");
+	const rootThinking = rootDefinition.thinking === undefined ? {} : { thinkingLevel: rootDefinition.thinking };
+	const rootInstructions = [rootDefinition.instructions, options.instructions ?? ""].filter((part) => part !== "").join("\n\n");
+	const root = await harness.root(context, { agent: { model: rootModel, ...rootThinking, extensions: rootSelection((name) => registry.snapshot().extension(name)) } });
+	await root.configure({ model: rootModel, ...rootThinking, instructions: rootInstructions }, context);
 	const turn = defineTurn({ root, harness, users, channels: options.channels, workDir: options.workDir, media, log });
 	registry.install(defineExtension({ name: "delivery", tasks: [turn] }));
 	const lineId = await ensureLine(harness, context);
