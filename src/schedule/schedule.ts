@@ -279,8 +279,9 @@ async function freshRun(harness: Pick<Harness, "commit">, conversation: Pick<Con
 /**
  * `existing` is `scanSchedules`, read before the commit's first write. A process schedule lives in `here`, the
  * conversation that started the process. Every other schedule runs in `here` when given (a migrated trigger keeps its
- * conversation), else in the conversation of the schedule it replaces, else in a new trigger-seat one. A replaced live
- * schedule is for the caller to abort after the commit.
+ * conversation and agent), else in the conversation of the schedule it replaces, else in a new trigger-seat one, and
+ * gets the schedule's agent now; each run applies it again. A replaced live schedule is for the caller to abort after
+ * the commit.
  */
 export async function addSchedule(
 	tx: Tx,
@@ -295,7 +296,7 @@ export async function addSchedule(
 	if (isProcess && here === undefined) throw new Error("A process schedule needs the conversation that started the process.");
 	const reuse = previous !== undefined && !("process" in previous.input.schedule.when) ? previous.conversationId : undefined;
 	const conversationId = here ?? reuse ?? (await createSeatConversation(tx, "trigger", { kind: "ownerless" }));
-	if (!isProcess) await applyAgent(tx, conversationId, await runAgent(input.schedule, catalog));
+	if (here === undefined) await applyAgent(tx, conversationId, await runAgent(input.schedule, catalog));
 	const id = await tx.createTask(task, input, { ownership: { kind: "conversation" }, conversationId, background: true });
 	return { id, replaced: previous !== undefined && live(previous) ? previous.id : undefined };
 }

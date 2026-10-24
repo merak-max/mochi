@@ -69,7 +69,7 @@ export async function migrateSchedulers(harness: Harness, task: ScheduleTask, ca
 				if (kind === "mochi.trigger") {
 					const input = record.input as { trigger: unknown; origin: "model" | "config" };
 					const schedule = validateSchedule(scheduleOfEntry(parseWith(TriggerEntrySchema, input.trigger, `stored trigger ${record.id}`)));
-					if (!have.has(schedule.id)) plan.create.push({ schedule, origin: input.origin });
+					if (!have.has(schedule.id)) plan.create.push({ schedule, origin: input.origin, here: record.conversationId });
 				}
 				if (kind === "mochi.proc") {
 					const input = record.input as { name: string; pid: number; watch?: string };
@@ -87,11 +87,7 @@ export async function migrateSchedulers(harness: Harness, task: ScheduleTask, ca
 			const schedule = validateSchedule(boardSchedule(item));
 			if (!have.has(schedule.id)) plan.create.push({ schedule, origin: "model" });
 		}
-		for (const { schedule, origin, here } of plan.create) {
-			const scanned = await scanSchedules(tx);
-			const previous = here === undefined ? (await allPages((cursor) => tx.scanTasks({ kind: "mochi.trigger" }, 256, cursor))).findLast((record) => (record.input as { trigger: { id: string } }).trigger.id === schedule.id) : undefined;
-			await addSchedule(tx, task, { schedule, origin }, scanned, catalog, here ?? previous?.conversationId);
-		}
+		for (const { schedule, origin, here } of plan.create) await addSchedule(tx, task, { schedule, origin }, existing, catalog, here);
 		if (board !== undefined) await tx.retireDoc(BoardDoc);
 		return plan;
 	}, context);
