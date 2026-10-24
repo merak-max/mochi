@@ -10,11 +10,11 @@ const Journal = defineDoc<{ created: Record<string, TaskId> }>({
 });
 
 /** Inside one commit: the task recorded under `key` on `owner`, or a new one from `create`, recorded in that commit. */
-export async function journaled<R>(tx: Tx, owner: TaskId, key: string, create: () => Promise<TaskId<R>>): Promise<{ readonly id: TaskId<R>; readonly created: boolean }> {
+export async function journaled<R>(tx: Tx, owner: TaskId, key: string, create: () => Promise<TaskId<R>>): Promise<TaskId<R>> {
 	const journal = await tx.doc(Journal, owner);
 	const found = journal.created[key];
-	if (found !== undefined) return { id: found as TaskId<R>, created: false };
+	if (found !== undefined) return found as TaskId<R>;
 	const id = await create();
 	journal.created[key] = id;
-	return { id, created: true };
+	return id;
 }

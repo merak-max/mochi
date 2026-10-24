@@ -205,24 +205,24 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 					const busy = (await tx.doc(LiveDoc, resident)).run !== undefined;
 					const queued = busy && !background;
 					const input: ForkInput = { name: job.name, brief: residentBriefOf(sender, job.brief, keys), depth, resident, ...(background || queued ? { back: api.conversationId } : reply) };
-					const made = await journaled(tx, api.taskId, key, async () => {
+					const id = await journaled(tx, api.taskId, key, async () => {
 						await copyContext(tx, api.conversationId, resident, keys);
 						return tx.createTask(task, input, DETACHED);
 					});
-					started.push({ id: made.id, queued });
+					started.push({ id, queued });
 					continue;
 				}
 				const scratch = scratchDir(job.name);
 				const withModel = model === undefined ? {} : { model };
-				let made;
+				let id;
 				if (job.fork === true) {
 					const input: ForkInput = { name: job.name, brief: briefOf(job.name, background, job.brief, scratch), depth, ...reply, ...withModel };
-					made = await journaled(tx, api.taskId, key, () => startFork(tx, task, api.conversationId, at, input));
+					id = await journaled(tx, api.taskId, key, () => startFork(tx, task, api.conversationId, at, input));
 				} else {
 					const input: ForkInput = { name: job.name, brief: jobBriefOf(job.name, job.brief, keys, scratch), depth, ...reply, ...withModel };
-					made = await journaled(tx, api.taskId, key, () => startChild(tx, task, api.conversationId, input, keys, definition, definitions));
+					id = await journaled(tx, api.taskId, key, () => startChild(tx, task, api.conversationId, input, keys, definition, definitions));
 				}
-				started.push({ id: made.id, queued: false });
+				started.push({ id, queued: false });
 			}
 			return started;
 		}, context);
