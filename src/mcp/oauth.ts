@@ -1,5 +1,5 @@
-import { readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { McpClient, type McpTransport, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import {
@@ -14,10 +14,8 @@ import {
 import { Type } from "typebox";
 import { parseWith } from "../parse.ts";
 
-export const AUTH_COMMAND = "node src/main.ts auth apps";
-
 /**
- * Fixed so the redirect URI registered with Executor stays valid across logins; a random port would need a new
+ * Fixed so the redirect URI registered with a server stays valid across logins; a random port would need a new
  * client registration each time.
  */
 const CALLBACK_PORT = 8790;
@@ -27,12 +25,11 @@ const LOGIN_TIMEOUT_MS = 10 * 60_000;
 
 const StateSchema = Type.Object({ serverUrl: Type.String() }, { additionalProperties: true });
 
-export function authFile(dataDir: string): string {
-	// The file kept its first name so an existing login still loads.
-	return join(dataDir, "executor-auth.json");
+/** One server's client registration and tokens: `<home>/mcp/<name>.json`, mode 0600. */
+export function tokenFile(homeDir: string, server: string): string {
+	return join(homeDir, "mcp", `${server}.json`);
 }
 
-/** Mochi's own Executor client registration and tokens, in one 0600 JSON file. */
 function fileStateStore(path: string): McpOAuthStateStore {
 	return {
 		load: async () => {
@@ -46,6 +43,7 @@ function fileStateStore(path: string): McpOAuthStateStore {
 			return parseWith(StateSchema, JSON.parse(text), path) as McpOAuthState;
 		},
 		save: async (state) => {
+			await mkdir(dirname(path), { recursive: true });
 			const temporary = `${path}.${process.pid}.tmp`;
 			await writeFile(temporary, `${JSON.stringify(state, null, "\t")}\n`, { mode: 0o600 });
 			await rename(temporary, path);
@@ -64,19 +62,17 @@ function oauthProvider(serverUrl: string, path: string, redirectUrl: string, onR
 }
 
 /**
- * Daemon side: a transport that sends the stored token and refreshes it on 401, or undefined when nothing is stored.
+ * Daemon side: a transport that sends the stored token and refreshes it on 401, or undefined when no token is stored.
  * It never starts an authorization; a refresh that fails surfaces as `McpOAuthAuthorizationRequiredError`.
  */
-export function storedTokenConnector(serverUrl: string, path: string): () => Promise<McpTransport | undefined> {
-	return async () => {
-		const provider = oauthProvider(serverUrl, path, REDIRECT_URL, () => {});
-		if ((await provider.tokens()) === undefined) return undefined;
-		return new StreamableHttpTransport({ url: serverUrl, authProvider: adaptOAuthProvider(provider) });
-	};
+export async function storedTokenTransport(serverUrl: string, path: string): Promise<McpTransport | undefined> {
+	const provider = oauthProvider(serverUrl, path, REDIRECT_URL, () => {});
+	if ((await provider.tokens()) === undefined) return undefined;
+	return new StreamableHttpTransport({ url: serverUrl, authProvider: adaptOAuthProvider(provider) });
 }
 
-/** `mochi auth apps`: print the authorization URL, wait for the redirect, store the tokens, list the tools. */
-export async function loginApps(serverUrl: string, path: string, print: (line: string) => void): Promise<void> {
+/** `mochi auth <name>`: print the authorization URL, wait for the redirect, store the tokens, list the tools. */
+export async function login(server: string, serverUrl: string, path: string, print: (line: string) => void): Promise<void> {
 	let callback: OAuthCallbackServer;
 	try {
 		callback = await OAuthCallbackServer.listen({ host: CALLBACK_HOST, port: CALLBACK_PORT, timeoutMs: LOGIN_TIMEOUT_MS });
@@ -90,7 +86,7 @@ export async function loginApps(serverUrl: string, path: string, print: (line: s
 			authorizationUrl = url;
 		});
 		const started = await authorizeMcp(provider, { serverUrl, skipRefresh: true });
-		if (started !== "REDIRECT" || authorizationUrl === undefined) throw new Error("Executor did not ask for authorization.");
+		if (started !== "REDIRECT" || authorizationUrl === undefined) throw new Error(`${server} did not ask for authorization.`);
 		const state = await provider.state();
 		print(`Open this URL and approve mochi:\n\n${authorizationUrl.href}\n`);
 		print(`Waiting for the redirect on ${callback.redirectUrl} (10 minutes).`);
@@ -103,7 +99,7 @@ export async function loginApps(serverUrl: string, path: string, print: (line: s
 		await client.connect(new StreamableHttpTransport({ url: serverUrl, authProvider: adaptOAuthProvider(provider) }));
 		const tools = await client.listTools();
 		await client.close();
-		print(`Executor tools: ${tools.map((tool) => tool.name).join(", ")}`);
+		print(`${server} tools: ${tools.map((tool) => tool.name).join(", ")}`);
 	} finally {
 		paste.close();
 		await callback.close();

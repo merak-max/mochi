@@ -12,7 +12,7 @@ export const COMMANDS = [
 	{ name: "doctor", args: "", summary: "Checks home, config, lock, socket, wire, systemd unit and log. Changes nothing. Exits 1 when a check fails.", flags: [JSON_FLAG] },
 	{ name: "stop", args: "", summary: "Stops the daemon: systemctl --user stop mochi when systemd runs it, else SIGTERM and wait.", flags: [] },
 	{ name: "--headless", args: "", summary: "The daemon alone. This is the systemd mode.", flags: [] },
-	{ name: "auth", args: "apps", summary: "OAuth login to the apps server.", flags: [] },
+	{ name: "auth", args: "<name>", summary: "OAuth login to the MCP server [mcp.<name>] in config.toml.", flags: [] },
 	{ name: "service", args: "install", summary: "Writes the systemd user unit.", flags: [] },
 	{ name: "help", args: "[command]", summary: "This text, or one command's. Also -h and --help.", flags: [] },
 	{ name: "version", args: "", summary: "The build of this checkout. Also -v and --version.", flags: [] },
@@ -27,7 +27,7 @@ export type Cli =
 	| { readonly kind: "status"; readonly json: boolean }
 	| { readonly kind: "doctor"; readonly json: boolean }
 	| { readonly kind: "stop" }
-	| { readonly kind: "auth-apps" }
+	| { readonly kind: "auth"; readonly server: string }
 	| { readonly kind: "service-install" }
 	| { readonly kind: "help"; readonly command?: CommandName }
 	| { readonly kind: "version" };
@@ -76,7 +76,7 @@ export function parseCli(argv: readonly string[], interactive: boolean): Cli {
 		values.set(arg, value);
 		at++;
 	}
-	// A literal word ("apps", "install") is required too, like a <placeholder>.
+	// A literal word ("install") is required too, like a <placeholder>.
 	const required = command.args.split(" ").filter((word) => word !== "" && !word.startsWith("[")).length;
 	const optional = command.args.split(" ").filter((word) => word.startsWith("[")).length;
 	if (positional.length < required || positional.length > required + optional) {
@@ -101,8 +101,7 @@ export function parseCli(argv: readonly string[], interactive: boolean): Cli {
 		case "--headless":
 			return { kind: "daemon" };
 		case "auth":
-			if (first !== "apps") return fail(`Unknown auth target ${first}.`, name);
-			return { kind: "auth-apps" };
+			return { kind: "auth", server: first! };
 		case "service":
 			if (first !== "install") return fail(`Unknown service action ${first}.`, name);
 			return { kind: "service-install" };

@@ -18,13 +18,13 @@ import type { Log } from "./log.ts";
 import { contextFns, contextSection } from "./context.ts";
 import { defineForkTask, forkFns } from "./fork/fork.ts";
 import { addContextReaders, agentStopTool, type Definitions, definitionsSection } from "./agents/definitions.ts";
-import { type Apps, appsFns } from "./apps/apps.ts";
+import { connectServer, type McpConnection } from "./mcp/servers.ts";
 import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineSchedule, notifyTool, RUN_DEADLINE_MS, scanSchedules, type ScheduleTask, scheduleFns } from "./schedule/schedule.ts";
 import { migrateSchedulers } from "./schedule/migrate.ts";
 import { migrateKeptLines } from "./memory/migrate.ts";
-import { defaultSelection, rootSelection, SEATS, seatExtensions } from "./seats.ts";
+import { defaultSelection, type LiveTools, type McpTools, rootSelection, SEATS, seatExtensions } from "./seats.ts";
 import { homeTools } from "./tools/home-tools.ts";
 import { reactTool, sendTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
 import { webFns } from "./web/web.ts";
@@ -38,7 +38,7 @@ import { PROC_POLL_MS, procFns } from "./procs/procs.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
 import { fastCompletion, handoffTool } from "./turn/lifecycle.ts";
 import type { Classify } from "./brain/classifier.ts";
-import type { ChatUser } from "./config.ts";
+import type { ChatUser, McpServerConfig } from "./config.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
 import type { WebConfig } from "./config.ts";
@@ -54,8 +54,10 @@ interface MochiOptions {
 	readonly web: WebConfig | undefined;
 	/** Image, video and speech providers; absent, the media functions say they are not configured. */
 	readonly media?: Omit<MediaDeps, "workDir">;
-	/** The apps MCP server; absent, the apps functions say it is not connected. */
-	readonly apps?: Apps;
+	/** The owner's MCP servers; `run` each returned connection to publish its tools. */
+	readonly mcp: readonly McpServerConfig[];
+	/** Where OAuth servers keep their tokens: `<homeDir>/mcp/<name>.json`. */
+	readonly homeDir: string;
 	/** fff file indexes for find and grep, one per root. */
 	readonly files: FileIndexes;
 	/** Skill directories, `<dir>/<name>/SKILL.md`: bundled first, then the owner's, which replace bundled ones by name. */
@@ -84,6 +86,8 @@ export interface Mochi {
 	readonly line: Line;
 	readonly schedule: ScheduleTask;
 	readonly catalog: Definitions;
+	/** One connection per configured MCP server; the daemon runs each. */
+	readonly mcp: readonly McpConnection[];
 }
 
 export async function openMochi(options: MochiOptions, context: Context): Promise<Mochi> {
@@ -104,7 +108,11 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const schedule = defineSchedule({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, pollMs: PROC_POLL_MS, procDir, log, harness: () => harness, line: lineOf, catalog: options.definitions, classify: options.classify, workDir: options.workDir });
 	const forkTask = defineForkTask(options.workDir);
 	let seat: ReturnType<typeof seatExtensions> | undefined;
-	const home = homeTools(options.toolsDir, registry, (tools) => seat!("agent", tools));
+	let live: LiveTools = { home: [], mcp: [] };
+	const home = homeTools(options.toolsDir, registry, (tools) => {
+		live = { ...live, home: tools };
+		return seat!("agent", live);
+	});
 	const library: ToolRegistration[] = [
 		home.tool,
 		...(await codingTools()),
@@ -117,7 +125,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...gifFns(options.workDir),
 		messageTool(options.channels),
 		...thinkFns({ models: options.models, ref: options.definitions.model, classify: options.classify }),
-		...appsFns(options.apps ?? NO_APPS),
 		...contextFns(options.workDir),
 		...forkFns({ task: forkTask, scratchDir: (name) => join(options.workDir, "forks", name), definitions: options.definitions }),
 		...scheduleFns({ task: schedule, catalog: options.definitions, schedules: (context) => harness.commit(scanSchedules, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: Date.now, users }),
@@ -135,7 +142,20 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		registry.install(extension);
 	}
 	seat = seatExtensions(modelTools, library, [definitionsSection(options.definitions)], [contextSection()]);
-	for (const name of SEATS) registry.install(seat(name));
+	for (const name of SEATS) registry.install(seat(name, live));
+	const builtIn = [...modelTools, ...library].map((each) => each.name);
+	for (const server of options.mcp) {
+		const taken = builtIn.filter((name) => name.startsWith(`${server.name}_`));
+		if (taken.length > 0) throw new Error(`[mcp.${server.name}] would share the prefix ${server.name}_ with ${taken.join(", ")}. Rename the server.`);
+	}
+	const mcpServers = new Map<string, McpTools>();
+	const mcp = options.mcp.map((server) =>
+		connectServer(server, options.homeDir, log, (tools) => {
+			mcpServers.set(server.name, tools);
+			live = { ...live, mcp: [...mcpServers.values()] };
+			for (const name of SEATS) registry.install(seat!(name, live));
+		}),
+	);
 	const loaded = await home.reload([...modelTools, ...library].map((each) => each.name));
 	if (loaded.length > 0) log("tools.loaded", { tools: loaded });
 
@@ -197,7 +217,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	};
 	await harness.commit(selectView, context);
 	await harness.commit(addContextReaders, context);
-	return { harness, classify: options.classify, line, schedule, catalog: options.definitions };
+	return { harness, classify: options.classify, line, schedule, catalog: options.definitions, mcp };
 }
 
 function webTools(options: MochiOptions): ToolRegistration[] {
@@ -211,8 +231,3 @@ function webTools(options: MochiOptions): ToolRegistration[] {
 }
 
 const browserDeps = (web: WebConfig) => ({ apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) });
-
-const notConnected = async (): Promise<never> => {
-	throw new Error("No apps server is connected in this process.");
-};
-const NO_APPS: Apps = { search: notConnected, call: notConnected, skills: notConnected };

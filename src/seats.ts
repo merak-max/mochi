@@ -12,7 +12,7 @@ import {
 	type ToolRegistration,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
+import { type CodemodeNamespace, createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 
 /**
@@ -21,7 +21,7 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  *            parent's prompt cache, and forks can fork at any depth.
  *   trigger  a schedule run. It reads outside data (webhook bodies, mail), so it cannot write notes, fork, add
  *            schedules or start agents. It reaches the owner only with notify.
- *   peer     the line, which holds delivery tasks. It works with the owner's apps and answers; nothing else.
+ *   peer     the line, which holds delivery tasks. It works with the owner's MCP servers and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
 export const SEATS = ["agent", "trigger", "peer", "user"] as const;
@@ -30,8 +30,8 @@ export type Seat = (typeof SEATS)[number];
 const ALL = SEATS;
 const AGENT: readonly Seat[] = ["agent"];
 const AGENT_TRIGGER: readonly Seat[] = ["agent", "trigger"];
-/** A user's thread never reaches the owner's apps: the apps server's approvals are accepted without asking. */
-const NOT_USER: readonly Seat[] = ["agent", "trigger", "peer"];
+/** A user's thread never reaches the owner's MCP servers: their approvals are accepted without asking. */
+const MCP_SEATS: readonly Seat[] = ["agent", "trigger", "peer"];
 
 /** The tools the model calls directly, and the seats that get each. Their `control` (handoff, terminate) works only on a model-issued call. */
 const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
@@ -58,8 +58,6 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	context_put: { seats: ALL, inline: true },
 	context_list: { seats: ALL, inline: false },
 	agent: { seats: AGENT, inline: true },
-	apps_search: { seats: NOT_USER, inline: true },
-	apps_call: { seats: NOT_USER, inline: true },
 	schedule_add: { seats: AGENT, inline: true },
 	schedule_list: { seats: AGENT_TRIGGER, inline: true },
 	schedule_remove: { seats: AGENT_TRIGGER, inline: false },
@@ -67,7 +65,6 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	web_find_tools: { seats: ALL, inline: false },
 	web_alexandria: { seats: ALL, inline: false },
 	classify: { seats: ALL, inline: false },
-	apps_skills: { seats: NOT_USER, inline: false },
 	browse: { seats: ALL, inline: false },
 	browse_fast: { seats: ALL, inline: false },
 	image_gen: { seats: ALL, inline: false },
@@ -105,17 +102,42 @@ function withDeadline(code: string): string {
 	return `// @options: {"timeout_ms": ${SCRIPT_DEADLINE_MS}}\n${code}`;
 }
 
+/** One MCP server as scripts see it: the namespace `<name>` with the server's instructions, and its `<name>_<tool>` tools. */
+export interface McpTools {
+	readonly name: string;
+	readonly instructions: string | undefined;
+	readonly tools: readonly ToolRegistration[];
+}
+
+/** What changes while the daemon runs: the owner's home tools (agent seat only) and the MCP servers that are up. */
+export interface LiveTools {
+	readonly home: readonly ToolRegistration[];
+	readonly mcp: readonly McpTools[];
+}
+
+function codemodeFor(servers: readonly McpTools[]): Extension {
+	const namespaces: CodemodeNamespace[] = servers.map((server) => ({
+		name: server.name,
+		prefix: `${server.name}_`,
+		description: `Tools of the MCP server ${server.name}. describeNamespace("${server.name}") returns its instructions.`,
+		...(server.instructions === undefined ? {} : { instructions: server.instructions }),
+	}));
+	return createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: SCRIPT_MEMORY_BYTES }), models: false, namespaces });
+}
+
 /**
  * Builds the `seat-<seat>` extension: its model tools, `codemode` with its prompt section, the library tools its scripts
- * may call, and for the agent seat the owner's home tools. Throws when the tables and the definitions disagree.
+ * may call, the MCP tools for MCP_SEATS, and for the agent seat the owner's home tools. Throws when the tables and the
+ * definitions disagree.
  */
-export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], agentSections: readonly PromptSection[], everySeat: readonly PromptSection[]): (seat: Seat, homeTools?: readonly ToolRegistration[]) => Extension {
-	const codemode = createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: SCRIPT_MEMORY_BYTES }), models: false });
-	const tool = codemode.tools![0]!;
-	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
+export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], agentSections: readonly PromptSection[], everySeat: readonly PromptSection[]): (seat: Seat, live: LiveTools) => Extension {
 	const disagree = [...drift([...modelTools.map((each) => each.name), "codemode"], SURFACE), ...drift(library.map((each) => each.name), LIBRARY)];
 	if (disagree.length > 0) throw new Error(`SURFACE, LIBRARY and the definitions disagree on ${disagree.join(", ")}.`);
-	return (seat, homeTools = []) => {
+	return (seat, live) => {
+		const servers = MCP_SEATS.includes(seat) ? live.mcp : [];
+		const codemode = codemodeFor(servers);
+		const tool = codemode.tools![0]!;
+		const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
 		// handoff's `control` works only on a model-issued call, so scripts do not see it. notify sends from a script too;
 		// only its early end of the run is lost there, and schedule runs have alerted the owner from scripts.
 		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat)).map((each): ToolRegistration => (each.name === "handoff" ? { ...each, callers: ["model"] } : each));
@@ -126,7 +148,9 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 			scripted.push(entry.inline ? { ...each, callers: ["tools"] } : { ...each, callers: ["tools"], deferred: true });
 		}
 		const sections = seat === "agent" ? [...agentSections, ...(codemode.sections ?? []), ...everySeat] : [...(codemode.sections ?? []), ...everySeat];
-		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted, ...homeTools], sections });
+		const home = seat === "agent" ? live.home : [];
+		const mcp = servers.flatMap((server) => server.tools);
+		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted, ...mcp, ...home], sections });
 	};
 }
 

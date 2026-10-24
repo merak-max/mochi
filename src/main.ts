@@ -12,7 +12,7 @@ import { createClassify } from "./brain/classifier.ts";
 import { createIMessageChannel } from "./channels/imessage.ts";
 import type { Channel, ChannelId, Env, InboundSink } from "./channels/types.ts";
 import { createCliChannel, type DaemonFacts, WIRE, watchLive } from "./channels/cli.ts";
-import { type Config, unknownKeys, type ChatUser, loadConfig } from "./config.ts";
+import { type Config, unknownKeys, type ChatUser, loadConfig, type McpServerConfig } from "./config.ts";
 import { type Home, resolveHome } from "./home.ts";
 import { FileIndexes } from "./search/search.ts";
 import { acquireLock } from "./lock.ts";
@@ -24,8 +24,7 @@ import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
 import { Definitions } from "./agents/definitions.ts";
 import { schedulesComponent } from "./schedule/webhooks.ts";
-import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
-import { connectApps } from "./apps/apps.ts";
+import { login, tokenFile } from "./mcp/oauth.ts";
 import { ingest } from "./turn/turn.ts";
 import type { TaskId } from "@earendil-works/pi-durable";
 import { runCompactor } from "./memory/compactor.ts";
@@ -52,11 +51,12 @@ async function main(cli: Cli): Promise<number> {
 		case "service-install":
 			await installService(home);
 			return 0;
-		case "auth-apps": {
+		case "auth": {
 			const config = await loadConfig(process.env);
-			if (config.appsUrl === undefined) throw new Error("Set appsUrl in config.toml (or MOCHI_APPS_URL) first.");
-			await mkdir(config.home.dir, { recursive: true });
-			await loginApps(config.appsUrl, authFile(config.home.dir), (line) => process.stdout.write(`${line}\n`));
+			const server = config.mcp.find((each) => each.name === cli.server);
+			if (server === undefined) throw new Error(`config.toml has no [mcp.${cli.server}].`);
+			if (server.auth.kind !== "oauth") throw new Error(`[mcp.${cli.server}] has auth = "${server.auth.kind}"; only an oauth server logs in.`);
+			await login(server.name, server.url, tokenFile(config.home.dir, server.name), (line) => process.stdout.write(`${line}\n`));
 			return 0;
 		}
 		case "daemon": {
@@ -204,7 +204,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	log("setup", { ok: setup.filter((line) => line.startsWith("ok")).map((line) => line.slice(5)), other: setup.filter((line) => !line.startsWith("ok")) });
 	const { models } = config.modelSetup;
 	const definitions = new Definitions(config.home.agentsDir, join(REPO, "agents"), config.modelSetup.ref);
-	const apps = config.appsUrl === undefined ? undefined : connectApps(storedTokenConnector(config.appsUrl, authFile(config.home.dir)), log);
 
 	const mochi = await openMochi(
 		{
@@ -215,7 +214,8 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			classify: createClassify(models, config.modelSetup.classifier),
 			web: config.web,
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env, ...(config.file.providers === undefined ? {} : { providers: config.file.providers }) } }),
-			...(apps === undefined ? {} : { apps }),
+			mcp: config.mcp,
+			homeDir: config.home.dir,
 			files,
 			skillDirs: [join(REPO, "skills"), config.home.skillsDir],
 			toolsDir: config.home.toolsDir,
@@ -232,12 +232,15 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		},
 		BACKGROUND_CONTEXT,
 	);
+	const mcpRunning = mochi.mcp.map((connection) => connection.run(running));
+	// The first turn sees every server that answers at boot.
+	await Promise.all(mochi.mcp.map((connection) => connection.firstAttempt));
 	mochi.harness.resume();
 	const stopWatching = watchLive(mochi.harness, mochi.line.root.id, (status) => cli.status(status));
 
 	const background = [
 		runCompactor({ harness: mochi.harness, complete: fastCompletion(models, config.modelSetup.memory), log, notify: (text, context) => notifyOwner(mochi.harness, mochi.line, text, context), now: Date.now }, running),
-		...(apps === undefined ? [] : [apps.run(running)]),
+		...mcpRunning,
 		// A terminal-only daemon (chat, print) serves one script; schedules wait for the real daemon.
 		...(channelSet === "terminal" ? [] : [schedulesComponent(mochi, config, running)]),
 	];
@@ -295,7 +298,7 @@ function socketPath(homeDir: string): string {
 }
 
 /** The outside services mochi calls. Models and the web need a key; without a classifier, classify steps fail. */
-function services(config: Pick<Config, "modelSetup" | "web" | "home" | "appsUrl" | "file">): readonly (readonly [string, Setup<void>])[] {
+function services(config: Pick<Config, "modelSetup" | "web" | "home" | "mcp" | "file">): readonly (readonly [string, Setup<void>])[] {
 	const missing = config.modelSetup.missing;
 	const unknown = unknownKeys(config.file);
 	return [
@@ -303,8 +306,13 @@ function services(config: Pick<Config, "modelSetup" | "web" | "home" | "appsUrl"
 		["classifier", config.modelSetup.classifier === undefined ? off : ready(undefined)],
 		["config", unknown.length === 0 ? ready(undefined) : broken(`config.toml has keys mochi does not read: ${unknown.join(", ")}. They are ignored; remove them.`)],
 		["web", config.web === undefined ? off : config.web.key === undefined ? broken(`${config.web.keyEnv} is not set. Fix: put it in ~/.mochi/.env`) : ready(undefined)],
-		["apps", config.appsUrl === undefined ? off : existsSync(authFile(config.home.dir)) ? ready(undefined) : broken(`not logged in. Fix: ${AUTH_COMMAND}`)],
+		...config.mcp.map((server) => [`mcp ${server.name}`, mcpSetup(server, config.home.dir)] as const),
 	];
+}
+
+function mcpSetup(server: McpServerConfig, homeDir: string): Setup<void> {
+	if (server.auth.kind === "bearer") return server.auth.token === undefined ? broken(`${server.auth.tokenEnv} is not set. Fix: put it in ~/.mochi/.env`) : ready(undefined);
+	return existsSync(tokenFile(homeDir, server.name)) ? ready(undefined) : broken(`no token file. Fix: mochi auth ${server.name}`);
 }
 
 function configuredChannels(env: Env, users: readonly ChatUser[]): { readonly channels: ReadonlyMap<ChannelId, Channel>; readonly report: readonly string[] } {

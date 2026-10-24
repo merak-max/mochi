@@ -18,6 +18,18 @@ const ChatUserSchema = Type.Object(
 /** Someone other than the owner who may message mochi on iMessage, in a conversation of their own. */
 export type ChatUser = Static<typeof ChatUserSchema>;
 
+/** `auth = "oauth"`: `mochi auth <name>` logs in. `auth = "bearer"`: the token is in the env variable `tokenEnv`. */
+const McpServerSchema = Type.Union([
+	Type.Object({ url: Type.String({ pattern: "^https?://" }), auth: Type.Literal("oauth") }, { additionalProperties: false }),
+	Type.Object({ url: Type.String({ pattern: "^https?://" }), auth: Type.Literal("bearer"), tokenEnv: Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" }) }, { additionalProperties: false }),
+]);
+
+export type McpServerConfig = {
+	readonly name: string;
+	readonly url: string;
+	readonly auth: { readonly kind: "oauth" } | { readonly kind: "bearer"; readonly tokenEnv: string; readonly token: string | undefined };
+};
+
 /** `<home>/config.toml`. `[[triggers]]` is read as schedule seeds; the key keeps its old name so configs load unchanged. */
 const FileSchema = Type.Object(
 	{
@@ -25,8 +37,8 @@ const FileSchema = Type.Object(
 		/** How to reach models; see src/brain/providers.ts. Absent: ANTHROPIC_API_KEY or OPENAI_API_KEY decides. */
 		providers: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), ProviderSchema)),
 		models: Type.Optional(ModelsSchema),
-		/** An MCP server with `execute` and `skills` tools for the owner's apps. Absent: the apps functions say they are not connected. */
-		appsUrl: Type.Optional(Type.String({ pattern: "^https?://" })),
+		/** MCP servers by name. Each server's tools reach scripts as `tools.<name>_<tool>`. Absent: no MCP tools. */
+		mcp: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z][a-z0-9]*$" }), McpServerSchema)),
 		/** The web and browser service: its API url, the env variable with its key, and the browser profile name. */
 		web: Type.Optional(Type.Object({ url: Type.String({ pattern: "^https?://" }), keyEnv: Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" }), browserProfile: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false })),
 		/** Image, video and speech providers; see config.example.toml. */
@@ -47,7 +59,7 @@ export type WebConfig = { readonly url: string; readonly keyEnv: string; readonl
 
 export interface Config {
 	readonly home: Home;
-	readonly appsUrl: string | undefined;
+	readonly mcp: readonly McpServerConfig[];
 	readonly modelSetup: ModelSetup;
 	/** Absent: no web or browser tools. */
 	readonly web: WebConfig | undefined;
@@ -65,6 +77,15 @@ function webConfig(file: FileConfig, env: NodeJS.ProcessEnv): WebConfig | undefi
 	return file.web.browserProfile === undefined ? web : { ...web, browserProfile: file.web.browserProfile };
 }
 
+function mcpServers(file: FileConfig, env: NodeJS.ProcessEnv): McpServerConfig[] {
+	const servers: McpServerConfig[] = [];
+	for (const [name, server] of Object.entries(file.mcp ?? {})) {
+		if (server.auth === "oauth") servers.push({ name, url: server.url, auth: { kind: "oauth" } });
+		else servers.push({ name, url: server.url, auth: { kind: "bearer", tokenEnv: server.tokenEnv, token: env[server.tokenEnv]?.trim() || undefined } });
+	}
+	return servers;
+}
+
 export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
 	const home = resolveHome(env);
 	if (existsSync(home.envFile)) process.loadEnvFile(home.envFile);
@@ -73,7 +94,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
 	assertTimeZone(timeZone);
 	return {
 		home,
-		appsUrl: env.MOCHI_APPS_URL ?? file.appsUrl,
+		mcp: mcpServers(file, env),
 		modelSetup: await createModelSetup({ ...(file.providers === undefined ? {} : { providers: file.providers }), ...(file.models === undefined ? {} : { models: file.models }), env }),
 		web: webConfig(file, env),
 		timeZone,
