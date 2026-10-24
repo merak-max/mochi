@@ -48,11 +48,6 @@ class ProfileLease {
 		}
 	}
 
-	keepOpen(stop: () => Promise<unknown>): void {
-		const timer = setTimeout(() => { void this.stop(stop).catch(() => {}); }, 290_000);
-		timer.unref();
-	}
-
 	uncertain(): void {
 		const timer = setTimeout(this.#release, TTL_MS);
 		timer.unref();

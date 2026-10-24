@@ -27,7 +27,6 @@ import { homeTools } from "./tools/home-tools.ts";
 import { reactTool, sendTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
 import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
-import { fastBrowserFns } from "./browser/fast.ts";
 import type { MediaDeps } from "./media/client.ts";
 import { mediaFns } from "./media/media.ts";
 import { gifFns } from "./media/gif.ts";
@@ -210,7 +209,6 @@ function webTools(options: MochiOptions): ToolRegistration[] {
 	const browser = { apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) };
 	return [
 		...webFns({ apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, models: options.models, fast: options.fast }),
-		...browserFns(browser),
-		...fastBrowserFns({ ...browser, models: options.models, fast: options.fast, classify: options.classify }),
+		...browserFns({ ...browser, classify: options.classify }),
 	];
 }

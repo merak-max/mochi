@@ -75,7 +75,7 @@ The model sees at most two tools. `SURFACE` in `src/seats.ts` lists them:
 | Memory | `zoom` |
 | Models | `llm` (the fast model unless `model` names another from `[models]`, no tools), `classify` (the classifier model) |
 | Context | `context_read`, `context_put`, `context_list` |
-| Web | `web_search`, `web_fetch`, `web_map`, `web_find_tools`, `web_alexandria`, `browse`, `browse_fast` |
+| Web | `web_search`, `web_fetch`, `web_map`, `web_find_tools`, `web_alexandria`, `browse` |
 | Media | `image_gen`, `video_gen`, `speak`, `transcribe`, `gif_search`, `gif_save` |
 | Agents | `agent`, `agent_stop` |
 | Self-extension | `tools_reload` |

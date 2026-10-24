@@ -60,7 +60,6 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	web_alexandria: { seats: ALL, inline: false },
 	classify: { seats: ALL, inline: false },
 	browse: { seats: ALL, inline: false },
-	browse_fast: { seats: ALL, inline: false },
 	image_gen: { seats: ALL, inline: false },
 	video_gen: { seats: ALL, inline: false },
 	speak: { seats: ALL, inline: false },
