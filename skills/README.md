@@ -4,7 +4,7 @@ On-demand instructions for mochi. The prompt's skills index shows each skill's `
 
 | Skill | Use it for |
 | --- | --- |
-| `mochi-mode` | Any task beyond a one-line answer. Routes to a playbook, and holds the rules for doors, scripts, proof, forks, profiles and replies. |
+| `mochi-mode` | Any task beyond a one-line answer. Routes to a playbook, and holds the rules for doors, scripts, proof, forks, agent definitions and replies. |
 | `how`, `why`, `teach` | How something works, why it happened, and teaching it. |
 | `recall` | Catching up before resuming work. |
 | `apps` | The owner's apps and the logged-in browser, through Executor. |
@@ -14,7 +14,7 @@ On-demand instructions for mochi. The prompt's skills index shows each skill's `
 | `improve` | The nightly self-improvement run and its undo. |
 | `unslop`, `technical-writing`, `bro` | Writing rules, document structure, and plain restatement. |
 
-Bundled profiles live in `../agents/`. The `worker` profile follows an exact brief on the model its front matter names. Tiers and aliases come from `[models]` in the owner's `config.toml`.
+Bundled agent definitions live in `../agents/`. The `worker` definition follows an exact brief on the model its front matter names. Tiers and aliases come from `[models]` in the owner's `config.toml`.
 
 ## Where each rule lives
 
@@ -26,7 +26,7 @@ Each rule lives in one place. Other files name it and do not restate it.
 | Who mochi is, the reply style, ASD-STE-100, no dashes, react instead of words | `IDENTITY` in `src/brain/identity.ts` |
 | Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` |
 | How the owner's chat sounds (case, tone, jokes) | The owner's `instructions.md` |
-| The door table, scripts, proof detail, forks and profiles, the reply | `mochi-mode/SKILL.md` |
+| The door table, scripts, proof detail, forks and definitions, the reply | `mochi-mode/SKILL.md` |
 | One kind of task | Its playbook or skill |
 
 ## Adding or editing a skill

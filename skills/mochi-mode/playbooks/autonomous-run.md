@@ -5,7 +5,7 @@
 1. Before the first step, write the exit condition as a check that anyone can run and get the same answer.
 2. Set up `<slug>/` in the work directory with `todo.md` and a decision log per the `show-me-your-work` skill.
 3. Choose how you resume:
-   - A background fork or profile reports back into this conversation. Brief it to call `notify` only when the owner must see something first.
+   - A background fork or agent reports back into this conversation. Brief it to call `notify` only when the owner must see something first.
    - A single wait on the world is an `at` schedule.
    - A watch on something that changes is a cron schedule whose prompt says how to continue.
 4. Take the smallest step the evidence justifies, check it, then take the next. Log forks, pivots and checks.

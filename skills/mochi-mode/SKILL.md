@@ -1,6 +1,6 @@
 ---
 name: mochi-mode
-description: Use for any task beyond a one-line answer (research, an errand, a plan, a watch, a draft, a stop, work for a fork or profile).
+description: Use for any task beyond a one-line answer (research, an errand, a plan, a watch, a draft, a stop, work for a fork or an agent definition).
 ---
 
 # Mochi mode
@@ -21,7 +21,7 @@ A quick fact or a single tool call needs no playbook. For anything else, open th
 | Something the owner relies on is broken, mochi included | [troubleshoot](playbooks/troubleshoot.md) |
 | An order to keep going until a condition holds, or work the owner checks later | [autonomous-run](playbooks/autonomous-run.md) |
 | Weeks of work, many errands or people, or no other fit | [big-project](playbooks/big-project.md) |
-| Give work to a fork, agent or profile, change it, or report its state | [delegate](playbooks/delegate.md) |
+| Give work to a fork, an agent or a definition, change it, or report its state | [delegate](playbooks/delegate.md) |
 | An order to stop or hold, or work that must be parked | [pause](playbooks/pause.md) |
 | Memory holds nothing about the owner yet | [onboarding](playbooks/onboarding.md) |
 
@@ -69,12 +69,12 @@ SYSTEM defines done. Read the result back from the system that holds it. A tool'
 - Schedule only the three ways SYSTEM names.
 - When the owner corrects you, fix the instance and write the lesson where it acts next time: a line in the memory files for a standing rule, a classify step for a noisy schedule, a proposed skill edit for a broken workflow. A promise to remember writes nothing.
 
-## Forks, agents and profiles
+## Forks, agents and definitions
 
-- A two-step task stays with you. Fork to keep bulky reading out of this conversation, to cover independent slices, or to get a second view. Use `agent` for one slice of data with a full brief. Send to a profile only when the work is its role (`profile_list`).
-- In root, a job that waits on a browser, a page or a form, or can run past 5 minutes, goes to `agent` with `background: true`, or to `profile_send` with `background`. Keep `timeout_ms` at 10 minutes or less: while a script runs, root cannot answer the owner.
+- A two-step task stays with you. Fork to keep bulky reading out of this conversation, to cover independent slices, or to get a second view. Use `agent` for one slice of data with a full brief. Give a job a `definition` only when the work is that definition's role (your prompt lists each one).
+- In root, a job that waits on a browser, a page or a form, or can run past 5 minutes, goes to `agent` with `background: true`. Keep `timeout_ms` at 10 minutes or less: while a script runs, root cannot answer the owner.
 - Never guess a result that has not arrived. Say work started only after you saw it start.
-- `browse` and Executor's Firecrawl interact share at most 2 browser sessions across root, forks and profiles. Give many forms to one worker that does them in turn.
+- `browse` and Executor's Firecrawl interact share at most 2 browser sessions across root, forks and agents. Give many forms to one worker that does them in turn.
 - A second opinion is the same brief on a different model family.
 - You own every word the owner sees. Read each result, check the claims that matter, and write your own summary.
 
@@ -90,7 +90,7 @@ Files for one piece of work live in `<slug>/` under the work directory, which is
 
 ## Models
 
-Tiers and aliases come from `[models]` in the owner's `config.toml`. A profile's front matter sets its `model` and `thinking`.
+Tiers and aliases come from `[models]` in the owner's `config.toml`. A definition's front matter sets its `model` and `thinking`.
 
 - `fast`: cheap and quick. Try it first.
 - `brain`: judgment, and anything the owner reads.

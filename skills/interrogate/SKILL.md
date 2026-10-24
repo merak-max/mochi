@@ -17,7 +17,7 @@ Write one paragraph on what the material tries to achieve, from the owner's mess
 
 ## 3. Review
 
-Send the same brief with `profile_send` to profiles on different model families (`profile_list` shows each profile's model), in one script with `Promise.all`. Build the brief from [references/reviewer-prompt.md](references/reviewer-prompt.md), with the intent, the material and [references/rubric.md](references/rubric.md).
+Send the same brief in one `agent` call, with one job per reviewer. Give each job a `definition` that names a definition on a different model family. The definitions list in your prompt shows each one, and its file shows its model. Build the brief from [references/reviewer-prompt.md](references/reviewer-prompt.md), with the intent, the material and [references/rubric.md](references/rubric.md).
 
 ## 4. Judge
 
