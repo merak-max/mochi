@@ -81,11 +81,6 @@ haiku = "anthropic/claude-haiku-5-5"
 # handle = "+15550100002"
 # name = "Alex"
 
-# Other agents mochi may call over A2A. The token lives in .env under tokenEnv.
-# [a2a.peers.hermes]
-# url = "http://127.0.0.1:9900"
-# tokenEnv = "HERMES_A2A_TOKEN"
-
 # App tools through an MCP server with execute and skills tools. Log in with: mochi auth apps
 # appsUrl = "https://apps.example.com/mcp"
 

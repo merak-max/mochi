@@ -27,7 +27,6 @@ import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
 import { Profiles } from "./profiles/profiles.ts";
 import { schedulesComponent } from "./schedule/webhooks.ts";
-import { a2aComponent, a2aServerSetup } from "./a2a/server.ts";
 import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
 import { connectApps } from "./apps/apps.ts";
 import { ingest } from "./turn/turn.ts";
@@ -229,8 +228,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const { channels, report: channelReport } = channelSet === "terminal" ? { channels: new Map() as Channels, report: [] } : configuredChannels(config.env, config.users);
 	const workDir = join(config.home.dir, "work");
 	await mkdir(workDir, { recursive: true });
-	const a2a = a2aServerSetup(config.env);
-	const setup = [...setupReport([...services(config), ["a2a", a2a]]), ...channelReport];
+	const setup = [...setupReport(services(config)), ...channelReport];
 	log("setup", { ok: setup.filter((line) => line.startsWith("ok")).map((line) => line.slice(5)), other: setup.filter((line) => !line.startsWith("ok")) });
 	const { models } = config.modelSetup;
 	const profiles = new Profiles(config.home.profilesDir, join(REPO, "agents"), config.modelSetup.ref);
@@ -252,7 +250,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			workDir,
 			channels,
 			users: config.users,
-			a2aPeers: config.a2aPeers,
 			timeZone: config.timeZone,
 			publicUrl: config.env.MOCHI_PUBLIC_URL,
 			scheduling: channelSet === "terminal" ? "local" : "daemon",
@@ -277,7 +274,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		runCompactor({ harness: mochi.harness, fast: fastCompletion(models, config.modelSetup.fast), log, notify: (text, context) => notifyOwner(mochi.harness, mochi.line, text, context), now: Date.now }, running),
 		...(apps === undefined ? [] : [apps.run(running)]),
 		// A terminal-only daemon (chat, print) serves one script; schedules wait for the real daemon.
-		...(channelSet === "terminal" ? [] : [schedulesComponent(mochi, config, running), a2aComponent(mochi, config, a2a, running)]),
+		...(channelSet === "terminal" ? [] : [schedulesComponent(mochi, config, running)]),
 	];
 	// Channels stop after the harness, so no Turn sends on a closed channel.
 	const channelsRunning = new AbortController();

@@ -28,11 +28,11 @@ Never use an em dash or an en dash.`;
 
 /**
  * Two stable sections. `system` holds the facts and rules and names the running chat channels; for every agent-seat
- * conversation it also names the configured users by id and the A2A peers. `identity` holds the voice: who mochi is,
+ * conversation it also names the configured users by id. `identity` holds the voice: who mochi is,
  * the reply style, and each running channel's bubble style. Root, its forks and its profiles render the same bytes, so
  * a fork's first request reuses root's cached prompt.
  */
-export function identityExtension(profiles: readonly ChannelProfile[], users: readonly ChatUser[], agents: readonly string[]): Extension {
+export function identityExtension(profiles: readonly ChannelProfile[], users: readonly ChatUser[]): Extension {
 	const systemParts = [SYSTEM];
 	for (const profile of profiles) systemParts.push(profile.style);
 	const everySeatSystem = systemParts.join("\n\n");
@@ -42,7 +42,6 @@ export function identityExtension(profiles: readonly ChannelProfile[], users: re
 		for (const user of users) people.push(user.name === undefined ? `${user.id} (iMessage)` : `${user.id}: ${user.name} (iMessage)`);
 		agentParts.push(`People by id: ${people.join("; ")}.`);
 	}
-	if (agents.length > 0) agentParts.push(`The owner's other agents, reached over A2A with tools.a2a_ask, a2a_send, a2a_status and a2a_list: ${agents.join(", ")}.`);
 	const agentSystem = agentParts.join("\n\n");
 	const system = (agent: Agent): string => (agent.extensions.some((extension) => extension.name === "seat-agent") ? agentSystem : everySeatSystem);
 	return defineExtension({

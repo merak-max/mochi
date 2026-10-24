@@ -11,7 +11,7 @@ The model manages its own work and its own context. It writes scripts instead of
 One daemon process owns everything:
 
 - the Harness and its SQLite file `<home>/mochi.sqlite`
-- every channel adapter, the schedule and webhook server, and the A2A server
+- every channel adapter, and the schedule and webhook server
 - the attach socket `<home>/mochi.sock`
 
 The daemon takes the lock file `<home>/mochi.lock` at start and exits if another live process holds it. Terminals attach over the socket and never open storage.
@@ -49,7 +49,6 @@ The socket speaks protocol 2. Each connection starts with `hello`. The daemon re
 - **Schedule runs.** Each cron, at or webhook schedule owns one ownerless conversation with seat `trigger`.
 - **Profiles.** Each profile owns one standing ownerless conversation with seat `agent`.
 - **Forks.** Each fork is a task-owned copy of its parent at the parent's newest entry.
-- **A2A contexts.** Each `(peer, contextId)` pair owns one ownerless conversation with seat `peer`.
 
 Every inbound message is `submit({ type: "input", requestId: "<channel>:<message id>", whenBusy: "steer" })`. A redelivered message submits once. A burst of texts that lands while an answer is written reaches the model as one turn, because the harness runs with `steeringMode` and `followUpMode` set to `"all"`.
 
@@ -67,7 +66,7 @@ A seat is how far a conversation is trusted. It is written once, when the conver
 |---|---|---|
 | `agent` | root, forks, profiles | (every function) |
 | `trigger` | schedule runs | no `react`, forks, profiles or `schedule_add` |
-| `peer` | A2A contexts | also no `notify`, processes, A2A or schedules |
+| `peer` | the line | also no `notify`, processes or schedules |
 | `user` | user threads | files, the web, media, `zoom`, `llm` and `classify` only; no `notify` |
 
 The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
@@ -90,7 +89,6 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 | Forks and profiles | `fork`, `fork_start`, `agent`, `profile_list`, `profile_send`, `profile_stop`, `profile_update` |
 | Scheduling | `schedule_add`, `schedule_list`, `schedule_remove` |
 | Processes | `proc_start`, `proc_status`, `proc_logs`, `proc_stop` |
-| Peers | `a2a_list`, `a2a_ask`, `a2a_send`, `a2a_status` |
 | Channels | `react` |
 
 Tool names never are `memory`, `session_search` or a single-underscore `mcp_` prefix, because a provider billing classifier flags them (`FORBIDDEN_TOOL_NAME`).
@@ -99,7 +97,7 @@ Tool names never are `memory`, `session_search` or a single-underscore `mcp_` pr
 
 Sections render in this order, and each must be stable between requests so the prompt cache stays warm:
 
-1. `system`: raw facts and rules. The message tag, tools and code mode, memory tools, doors, his call, scheduling, proof, safety, and the running chat channels. An agent seat also gets the people by id and the A2A peers.
+1. `system`: raw facts and rules. The message tag, tools and code mode, memory tools, doors, his call, scheduling, proof, safety, and the running chat channels. An agent seat also gets the people by id.
 2. `identity`: voice and style. Who mochi is, the reply style, and one line per running chat channel with its bubble rule.
 3. `memory`: how to read the view and zoom it. The view itself goes in the request, not the prompt.
 4. `skills-index`: one line per bundled skill. The model opens a skill with `read`.
@@ -140,7 +138,7 @@ Long input is a value, not prompt text. `holdText` in `src/context.ts` is the on
 
 - Keys are immutable and name their source: `in:<request id>` for inbound text, `put:<task id>` for a script's `context_put`. The same key with other text throws.
 - The same key and text give the same file and the same header, so a replay submits identical content and its request id dedupes it.
-- Held inputs: chat and cli messages, schedule check output, webhook bodies, A2A text, profile messages and replies, fork answers that merge back, proc wakes and child briefs.
+- Held inputs: chat and cli messages, schedule check output, webhook bodies, profile messages and replies, fork answers that merge back, proc wakes and child briefs.
 - `context_read({ key, offset?, length? })` returns one page (64K chars by default) and the offset of the next. `context_put({ text })` keeps a script's value and returns its key and file path. `context_list` lists the catalog.
 - The catalog forks `asOf`, like the codemode store. Compaction does not touch it, and the `context` section lists its keys after compaction.
 
@@ -209,13 +207,9 @@ It edits only `<home>/skills` (which replaces a bundled skill of the same name) 
 
 `[providers.<name>]` is an endpoint, its protocol and the variable with its key. The protocols are `anthropic`, `responses`, `chat` and `classifier` (System One). A gateway is one provider per protocol it serves. `[models]` names `brain`, `fast`, `strongest`, `classifier` and `aliases`, each `<provider>/<id>`. Without `[models] classifier`, an `OPENROUTER_API_KEY` alone turns on the classifier protocol's default endpoint and model. `[models.overrides]` sets a model's context window, output limit and cache life. mochi carries no prices: token counts stay, and the model provider bills.
 
-Other config keys: `timeZone`, `appsUrl` (an MCP server with `execute` and `skills`; `MOCHI_APPS_URL` overrides it), `[web]` (`keyEnv`, `url`, `browserProfile`), `[media]` (images, video, and speech through the OpenAI audio API on a named provider), `[[users]]`, `[a2a.peers]`, and `[[triggers]]`. Boot logs one `setup` line per boundary, and names config keys mochi does not read.
+Other config keys: `timeZone`, `appsUrl` (an MCP server with `execute` and `skills`; `MOCHI_APPS_URL` overrides it), `[web]` (`keyEnv`, `url`, `browserProfile`), `[media]` (images, video, and speech through the OpenAI audio API on a named provider), `[[users]]` and `[[triggers]]`. Boot logs one `setup` line per boundary, and names config keys mochi does not read.
 
-Keys live in `<home>/.env` under the names config gives. Channel keys: `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET`, `IMESSAGE_OWNER`, . Daemon keys: `MOCHI_BIND_HOST`, `MOCHI_HOOKS_PORT`, `MOCHI_PUBLIC_URL`, `MOCHI_A2A_PEER_TOKENS`, `MOCHI_A2A_PORT`.
-
-## A2A
-
-Other agents reach mochi over A2A v1.0 (JSON-RPC): the agent card, `SendMessage` and `GetTask`, with one bearer token per peer and localhost by default. Each `(peer, contextId)` gets its own `peer` conversation, which has no A2A tools, so agents cannot loop. `a2a_ask`, `a2a_send` and `a2a_status` call the peers in `[a2a.peers]`.
+Keys live in `<home>/.env` under the names config gives. Channel keys: `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET`, `IMESSAGE_OWNER`. Daemon keys: `MOCHI_BIND_HOST`, `MOCHI_HOOKS_PORT`, `MOCHI_PUBLIC_URL`.
 
 ## Module map
 
@@ -240,7 +234,6 @@ src/
   web/, browser/    web functions and the logged-in browser
   media/            images, video, speech, gifs, inbound attachments
   procs/            background processes; their wakes are process schedules
-  a2a/              A2A protocol, server and tools
   attach/           the socket protocol, server, client, TUI and line modes
   skills/           the skills-index section
   env/              the execution environment for the file and shell tools

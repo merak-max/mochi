@@ -7,7 +7,6 @@ import { type Home, resolveHome } from "./home.ts";
 import { MediaConfigSchema } from "./media/providers.ts";
 import { parseWith } from "./parse.ts";
 import { normalizeHandle } from "./channels/imessage.ts";
-import type { A2APeer, A2APeers } from "./a2a/tools.ts";
 
 /** The owner's id. Configured users take user2, user3 and so on. */
 export const OWNER_ID = "user1";
@@ -18,16 +17,6 @@ const ChatUserSchema = Type.Object(
 );
 /** Someone other than the owner who may message mochi on iMessage, in a conversation of their own. */
 export type ChatUser = Static<typeof ChatUserSchema>;
-
-const A2APeerSchema = Type.Object(
-	{
-		url: Type.String({ pattern: "^https?://" }),
-		/** The env variable that holds the bearer token, so the secret stays in the env file. */
-		tokenEnv: Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" }),
-		timeoutSeconds: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
-	},
-	{ additionalProperties: false },
-);
 
 /** `<home>/config.toml`. `[[triggers]]` is read as schedule seeds; the key keeps its old name so configs load unchanged. */
 const FileSchema = Type.Object(
@@ -43,8 +32,6 @@ const FileSchema = Type.Object(
 		/** Image, video and speech providers; see config.example.toml. */
 		media: Type.Optional(MediaConfigSchema),
 		users: Type.Optional(Type.Array(ChatUserSchema)),
-		/** The owner's other agents that mochi may call over A2A, by name. */
-		a2a: Type.Optional(Type.Object({ peers: Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), A2APeerSchema) }, { additionalProperties: false })),
 	},
 	{ additionalProperties: true },
 );
@@ -66,7 +53,6 @@ export interface Config {
 	readonly timeZone: string;
 	/** `file.users` with each handle normalized as the iMessage adapter compares senders. */
 	readonly users: readonly ChatUser[];
-	readonly a2aPeers: A2APeers;
 	readonly file: FileConfig;
 	readonly env: Readonly<Record<string, string | undefined>>;
 }
@@ -90,7 +76,6 @@ export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
 		},
 		timeZone,
 		users: chatUsers(file.users ?? []),
-		a2aPeers: a2aPeers(file, env),
 		file,
 		env,
 	};
@@ -106,15 +91,6 @@ function chatUsers(users: readonly ChatUser[]): ChatUser[] {
 		normalized.push({ ...user, handle: normalizeHandle(user.handle) });
 	}
 	return normalized;
-}
-
-function a2aPeers(file: FileConfig, env: Readonly<Record<string, string | undefined>>): A2APeers {
-	const peers = new Map<string, A2APeer>();
-	for (const [name, peer] of Object.entries(file.a2a?.peers ?? {})) {
-		const token = env[peer.tokenEnv]?.trim() || undefined;
-		peers.set(name, { name, url: peer.url, token, tokenEnv: peer.tokenEnv, timeoutMs: (peer.timeoutSeconds ?? 600) * 1000 });
-	}
-	return peers;
 }
 
 /** `config.toml`, else nothing: every field has a default. */

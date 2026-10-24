@@ -84,7 +84,7 @@ Answer first. Then give only what the owner needs to act on it or trust it. Name
 
 ## Long work
 
-Start a command that can take more than 30 seconds with `proc_start`, a `pi -p` code edit included. Tell the owner at once what you started. Do not sleep or poll: the process wakes you through its `proc-<name>` schedule. Long work for an A2A peer goes through `a2a_send`, then `a2a_status`.
+Start a command that can take more than 30 seconds with `proc_start`, a `pi -p` code edit included. Tell the owner at once what you started. Do not sleep or poll: the process wakes you through its `proc-<name>` schedule.
 
 Files for one piece of work live in `<slug>/` under the work directory, which is the shell's working directory. Long or multi-step work keeps `<slug>/todo.md` with the playbook's steps copied in. A skipped step stays in the list as `skip: <reason>`. Add a decision log per the `show-me-your-work` skill when the owner will review the work later.
 

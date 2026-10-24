@@ -21,7 +21,7 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  *            parent's prompt cache, and forks can fork at any depth.
  *   trigger  a schedule run. It reads outside data (webhook bodies, mail), so it cannot write notes, fork, add
  *            schedules or change profiles. It reaches the owner only with notify.
- *   peer     another agent's requests over A2A. It works with the owner's apps and answers; nothing else.
+ *   peer     the line, which holds delivery tasks. It works with the owner's apps and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
 const SEATS = ["agent", "trigger", "peer", "user"] as const;
@@ -81,10 +81,6 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	proc_status: { seats: AGENT_TRIGGER, inline: false },
 	proc_logs: { seats: AGENT_TRIGGER, inline: false },
 	proc_stop: { seats: AGENT_TRIGGER, inline: false },
-	a2a_list: { seats: AGENT_TRIGGER, inline: false },
-	a2a_ask: { seats: AGENT_TRIGGER, inline: false },
-	a2a_send: { seats: AGENT_TRIGGER, inline: false },
-	a2a_status: { seats: AGENT_TRIGGER, inline: false },
 	profile_list: { seats: AGENT, inline: false },
 	profile_send: { seats: AGENT, inline: true },
 	profile_update: { seats: AGENT, inline: false },

@@ -39,7 +39,6 @@ import type { Classify } from "./brain/classifier.ts";
 import type { ChatUser } from "./config.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
-import { type A2APeers, a2aFns } from "./a2a/tools.ts";
 import { profileFns, type Profiles, rosterSection } from "./profiles/profiles.ts";
 import type { WebConfig } from "./config.ts";
 
@@ -71,7 +70,6 @@ interface MochiOptions {
 	/** Root's own instructions (`<home>/instructions.md`), rendered after every section; absent leaves root's as they are. */
 	readonly instructions?: string;
 	readonly users: readonly ChatUser[];
-	readonly a2aPeers: A2APeers;
 }
 
 export interface Mochi {
@@ -83,7 +81,7 @@ export interface Mochi {
 }
 
 export async function openMochi(options: MochiOptions, context: Context): Promise<Mochi> {
-	const { log, users, a2aPeers } = options;
+	const { log, users } = options;
 	const registry = createRegistry();
 	const fast = fastCompletion(options.models, options.fast);
 	const media: Omit<MediaDeps, "workDir"> = options.media ?? { config: { images: { default: "", providers: [] } }, env: {} };
@@ -118,11 +116,10 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...forkFns({ task: forkTask, scratchDir: (name) => join(options.workDir, "forks", name), ref: options.profiles.model }),
 		...scheduleFns({ task: schedule, catalog: options.profiles, schedules: (context) => harness.commit(scanSchedules, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: Date.now, users }),
 		...procFns({ task: schedule, catalog: options.profiles, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
-		...a2aFns(a2aPeers),
 		...profileFns(options.profiles, () => harness, reply, options.workDir),
 	];
 	for (const extension of [
-		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),
+		identityExtension([...options.channels.values()].map((channel) => channel.profile), users),
 		memoryExtension(),
 		skillsExtension(options.skillDirs),
 		defineExtension({ name: "agents", tasks: [forkTask, reply] }),
