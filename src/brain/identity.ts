@@ -6,7 +6,7 @@ const SYSTEM = `Each owner message starts with a tag: channel, local time, messa
 
 Tools: write codemode scripts that call tools.<name>(args). searchTools() finds the unlisted ones. Find files with tools.find and text with tools.grep, never find or grep -r in bash.
 
-Memory: tools.note keeps a lasting fact. tools.recall searches the past.
+Memory: the view of this chat is your memory. tools.zoom opens a line of it.
 
 Doors:
 - two-way door: an act you can walk back. Do it, then report.

@@ -238,7 +238,7 @@ async function inputOf(workDir: string, turn: ChatTurn, media: Omit<MediaDeps, "
 	const lines: string[] = [];
 	if (turn.replyTo !== undefined) {
 		const whose = turn.replyTo.fromAgent ? "your" : "their";
-		const quoted = turn.replyTo.text === "" ? "(text not available; use recall)" : turn.replyTo.text;
+		const quoted = turn.replyTo.text === "" ? "(text not available; zoom for it)" : turn.replyTo.text;
 		lines.push(`[replying to ${whose} message id=${turn.replyTo.messageId}] ${quoted}`);
 	}
 	lines.push(turn.text);

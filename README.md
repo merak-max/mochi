@@ -24,7 +24,7 @@ Some work is standing work: someone has to watch the inbox, the bills, the outre
 
 ## Memory that does not forget
 
-Memory and every conversation's turns are append-only logs. Old lines merge into summary lines, once, in the background, following the merge tree from OptMem. The prompt shows recent lines whole and older ones merged, and `zoom` opens any merged line back down to the raw text. Nothing is summarized twice and nothing is thrown away.
+The chat is the memory. Each message is summarized into one line, and neighboring lines merge in pairs, again and again, into a binary tree, as in uniichat. Each request sees a view of the whole chat: recent messages whole, older ones covered by fewer, broader lines. `zoom` opens any line into the two it was made from, down to the original message. A cheaper model builds the tree in the background, and the view changes only at its end, so the prompt cache stays warm. Nothing is thrown away.
 
 The reason for this is a failure the earlier design had. It rewrote the whole history on each compaction, and each pass lost a little. Promises died first. Of 23 commitments mochi made from October 6 to 14, 10 had nothing behind them by the end of the week. So now every promise is a schedule with an `at` time, and at that time a fresh run of mochi gets the task.
 
@@ -82,7 +82,7 @@ Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository
 | `instructions.md` | Your own instructions, after the built-in prompt. This is where its voice comes from. |
 | `profiles/<name>/instructions.md` | One profile. A profile with a bundled name replaces the bundled one. |
 | `skills/` | Your skills, next to the bundled ones. |
-| `mochi.sqlite`, `index.sqlite`, `work/` | The durable store, the search index and mochi's working directory. |
+| `mochi.sqlite`, `work/` | The durable store and mochi's working directory. |
 
 ## Models
 
@@ -113,7 +113,7 @@ A profile is a Markdown file at `~/.mochi/profiles/<name>/instructions.md`:
 description: Mail. Triage new mail and draft replies.
 model: fast
 thinking: medium
-tools: recall, note, apps_search, apps_call, schedule_list
+tools: apps_search, apps_call, schedule_list
 ---
 
 You are relay. You own the inboxes. Notify only when ignoring a mail would cost the owner something.

@@ -48,10 +48,7 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	write: { seats: ALL, inline: true },
 	find: { seats: ALL, inline: true },
 	grep: { seats: ALL, inline: true },
-	recall: { seats: ALL, inline: true },
-	history: { seats: NOT_USER, inline: false },
-	note: { seats: AGENT, inline: true },
-	zoom: { seats: NOT_USER, inline: true },
+	zoom: { seats: ALL, inline: true },
 	react: { seats: AGENT, inline: true },
 	send: { seats: AGENT, inline: true },
 	web_search: { seats: ALL, inline: true },
@@ -94,12 +91,12 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	profile_stop: { seats: AGENT, inline: false },
 };
 
-const SHARED = ["identity", "notes", "skills", "fast-compaction"];
+/** `notes` holds the view: every seat's conversation reads its own chat through it. */
+const SHARED = ["identity", "notes", "skills"];
 
-/** The extensions a seat's agent names. Owner notes describe the owner, so a user's thread leaves them out. */
+/** The extensions a seat's agent names. */
 function selection(seat: Seat): string[] {
-	const shared = seat === "user" ? SHARED.filter((name) => name !== "notes") : SHARED;
-	return [...shared, `seat-${seat}`];
+	return [...SHARED, `seat-${seat}`];
 }
 
 const drift = (names: readonly string[], table: object): string[] => [...names.filter((name) => !Object.hasOwn(table, name)), ...Object.keys(table).filter((name) => !names.includes(name))];
