@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import { type Message, type Models, Type } from "@earendil-works/pi-ai";
+import { contentText, type Message, type Models, Type } from "@earendil-works/pi-ai";
 import {
 	type Conversation,
 	defineTool,
@@ -7,7 +7,6 @@ import {
 	ResetEntry,
 	type SubmissionId,
 } from "@earendil-works/pi-durable";
-import { messageText } from "../text.ts";
 
 export type FastCompletion = (request: { readonly system: string; readonly prompt: string }, context: Context) => Promise<string>;
 
@@ -20,7 +19,7 @@ export function fastCompletion(models: Models, fast: ModelRef): FastCompletion {
 			messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
 		}, { ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }), reasoning: "low", cacheRetention: "none", maxTokens: model.maxTokens });
 		if (response.stopReason !== "stop" || response.content.some((part) => part.type === "toolCall")) throw new Error(`Fast model did not finish: ${response.stopReason}${response.errorMessage === undefined ? "" : ` (${response.errorMessage})`}.`);
-		const text = messageText(response).trim();
+		const text = contentText(response.content).trim();
 		if (text === "") throw new Error("Fast summary was empty.");
 		return text;
 	};
@@ -30,7 +29,7 @@ function serializeConversation(messages: readonly Message[]): string {
 	const parts: string[] = [];
 	for (const message of messages) {
 		if (message.role === "user") {
-			const text = messageText(message);
+			const text = contentText(message.content);
 			if (text !== "") parts.push(`[User]: ${text}`);
 		} else if (message.role === "assistant") {
 			const thinking = message.content.flatMap((part) => part.type === "thinking" ? [part.thinking] : []);
@@ -42,7 +41,7 @@ function serializeConversation(messages: readonly Message[]): string {
 			if (text.length > 0) parts.push(`[Assistant]: ${text.join("\n")}`);
 			if (calls.length > 0) parts.push(`[Assistant tool calls]: ${calls.join("; ")}`);
 		} else if (message.role === "toolResult") {
-			const text = messageText(message);
+			const text = contentText(message.content);
 			if (text !== "") parts.push(`[Tool result]: ${text}`);
 		}
 	}

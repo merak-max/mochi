@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { contentText, type Static, Type } from "@earendil-works/pi-ai";
 import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, defineTask, defineTool, type Harness, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type TaskRuntime, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import type { ChannelId } from "../channels/types.ts";
 import { holdText } from "../context.ts";
@@ -14,7 +14,7 @@ import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
 import { createSeatConversation } from "../seats.ts";
 import { type ChatUser, OWNER_ID } from "../config.ts";
-import { formatStamp, messageText } from "../text.ts";
+import { formatStamp } from "../text.ts";
 import { keyedReset } from "../turn/lifecycle.ts";
 import { answerText, LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
 import { agentOf, applyAgent, type Profiles, type RunAgent } from "../profiles/profiles.ts";
@@ -257,7 +257,7 @@ const INSTRUCTIONS =
 async function lastRunNote(tx: Tx, conversationId: ConversationId): Promise<string> {
 	const recent = (await tx.scanEntries({ conversationId, order: "descending" }, 32)).items;
 	for (const entry of recent) {
-		if (entry.kind === ResetEntry.kind) return messageText(entry.model?.[0] ?? { role: "user", content: "", timestamp: 0 }).trim();
+		if (entry.kind === ResetEntry.kind) return contentText(entry.model?.[0]?.content ?? "").trim();
 		if (entry.kind !== AssistantEntry.kind) continue;
 		const text = await answerText(tx, entry.id);
 		if (text !== "") return text;

@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import { type Message, type TextContent, Type } from "@earendil-works/pi-ai";
+import { contentText, type Message, type TextContent, Type } from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	type ConversationId,
@@ -14,7 +14,6 @@ import {
 	type Tx,
 } from "@earendil-works/pi-durable";
 import { allPages } from "../pages.ts";
-import { messageText } from "../text.ts";
 import { VIEW } from "./prompt.ts";
 import { blocks, bytes, cover, HIGH, NODE, type Node, type Part, reach, SEEN, slot, span, type View, whole, zoom } from "./view.ts";
 
@@ -62,7 +61,7 @@ export const messagesOf = (messages: readonly Message[]): Message[] => messages.
 export function show(message: Message): string {
 	if (message.role === "user") {
 		const images = typeof message.content === "string" ? 0 : message.content.filter((part) => part.type === "image").length;
-		return "user: " + messageText(message) + "\n[image]".repeat(images);
+		return "user: " + contentText(message.content) + "\n[image]".repeat(images);
 	}
 	if (message.role === "assistant") {
 		const lines: string[] = [];
@@ -72,7 +71,7 @@ export function show(message: Message): string {
 		}
 		return lines.length === 0 ? "agent: (no text)" : lines.join("\n");
 	}
-	if (message.role === "toolResult") return "echo: " + (message.isError ? "error: " : "") + messageText(message);
+	if (message.role === "toolResult") return "echo: " + (message.isError ? "error: " : "") + contentText(message.content);
 	return "";
 }
 

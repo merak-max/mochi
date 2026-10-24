@@ -1,7 +1,6 @@
 import type { JsonValue } from "@earendil-works/chord";
-import { type ClassifierQuestion, type JsonObject, type Models, Type } from "@earendil-works/pi-ai";
+import { type ClassifierQuestion, contentText, type JsonObject, type Models, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
-import { messageText } from "../text.ts";
 import type { Classify } from "./classifier.ts";
 
 /** `llm` calls in flight at once across every script; a Promise.all over hundreds of slices waits its turn. */
@@ -62,7 +61,7 @@ export function thinkFns(deps: { readonly models: Models; readonly ref: (name: s
 					),
 				);
 				if (response.stopReason === "error" || response.stopReason === "aborted") throw new Error(`llm failed: ${response.errorMessage ?? response.stopReason}`);
-				return { structuredOutput: messageText(response), usage: response.usage };
+				return { structuredOutput: contentText(response.content), usage: response.usage };
 			},
 		}),
 		defineTool({

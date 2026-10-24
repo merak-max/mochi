@@ -1,6 +1,5 @@
-import type { Models, Usage } from "@earendil-works/pi-ai";
+import { contentText, type Models, type Usage } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
-import { messageText } from "../text.ts";
 import { untilAborted } from "./client.ts";
 
 const TEXT_PROMPT =
@@ -101,7 +100,7 @@ async function extract(options: {
 	options.signal.throwIfAborted();
 	if (response.stopReason === "aborted") throw new DOMException("Extraction aborted", "AbortError");
 	if (response.stopReason === "error") throw new Error(`Extraction model ${name} failed: ${response.errorMessage ?? "unknown error"}`);
-	const text = messageText(response).trim();
+	const text = contentText(response.content).trim();
 	if (text === "") throw new Error(`Extraction model ${name} returned no text.`);
 	return { text, usage: response.usage, cut };
 }
