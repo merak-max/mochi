@@ -16,11 +16,11 @@ Housekeeping items:
 
 You get one long conversation across every channel. Text it "move my 4pm to Friday" from your phone, and the reply comes back in the same thread. Each friend you configure gets a thread of their own, and those threads never see your memory or your apps.
 
-The model sees three tools. One of them, `codemode`, runs JavaScript in a sandbox, and everything else is a function that script calls: the web, your apps through an MCP server, files, a shell, memory, forks, profiles, routines. This sounds like a small detail, and it is the main design choice. A model that writes a loop over 200 mails and filters them before it reads anything uses far fewer tokens than a model that calls a tool 200 times. It also keeps the first request small, which keeps the prompt cache warm.
+The model sees three tools. One of them, `codemode`, runs JavaScript in a sandbox, and everything else is a function that script calls: the web, your apps through an MCP server, files, a shell, memory, agents, routines. This sounds like a small detail, and it is the main design choice. A model that writes a loop over 200 mails and filters them before it reads anything uses far fewer tokens than a model that calls a tool 200 times. It also keeps the first request small, which keeps the prompt cache warm.
 
-When a task splits, `fork` copies the current conversation, context and all, once per brief, six at a time. Each copy reads the parent's prompt cache, so three drafts at once cost about the price of the new tokens. Measured on Opus 5.5, each fork's first request read about 6,500 cached tokens and wrote about 225. Forks can fork, three levels deep.
+When a task splits, `agent` with `fork: true` copies the current conversation, context and all, once per job, six at a time. Each copy reads the parent's prompt cache, so three drafts at once cost about the price of the new tokens. Measured on Opus 5.5, each fork's first request read about 6,500 cached tokens and wrote about 225. Forks can fork.
 
-Some work is standing work: someone has to watch the inbox, the bills, the outreach. That is a profile. A profile is a Markdown file with a role, a model, a tool list and its own memory, and it lives inside the same daemon. mochi hands it work, or a routine runs under it.
+Some work belongs to a role: someone has to watch the inbox, the bills, the outreach. That is an agent definition. A definition is a Markdown file with a role, a model and a tool list. mochi hands it a job with `agent`, or a routine runs under it. A resident definition also keeps one standing conversation with its own memory, inside the same daemon.
 
 ## Memory that does not forget
 
@@ -34,7 +34,7 @@ One scheduler runs everything later: a cron, a one-time `at`, a webhook, or the 
 
 ## It survives a crash
 
-Every reply, routine, fork and profile run is a durable task in one SQLite file. A crash or a restart picks up where it stopped. A reply records each bubble as it sends, so a crash repeats at most one bubble, and a message that arrives twice is answered once.
+Every reply, routine and agent job is a durable task in one SQLite file. A crash or a restart picks up where it stopped. A reply records each bubble as it sends, so a crash repeats at most one bubble, and a message that arrives twice is answered once.
 
 Delivery has three kinds of failure, and each has one response. A channel that is down waits 5 seconds, doubles up to 5 minutes, and gives up after an hour. A send whose outcome is unknown retries once. A send the platform refuses for good is skipped.
 
@@ -73,14 +73,14 @@ iMessage goes through [Photon Spectrum](https://photon.codes), which needs a pro
 
 ## Your home
 
-Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository holds only code, bundled skills and the bundled `worker` profile.
+Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository holds only code, bundled skills and the bundled agent definitions.
 
 | Path | What |
 |---|---|
 | `config.toml` | Time zone, providers and models, routines, users, apps and web. See `config.example.toml`. |
 | `.env` | Keys and tokens. See `.env.example`. |
 | `instructions.md` | Your own instructions, after the built-in prompt. This is where its voice comes from. |
-| `profiles/<name>/instructions.md` | One profile. A profile with a bundled name replaces the bundled one. |
+| `agents/<name>.md` | One agent definition. A definition with a bundled name replaces the bundled one. |
 | `skills/` | Your skills, next to the bundled ones. |
 | `tools/<name>.ts` | Your own tools, one `defineTool` default export each. `tools_reload` loads them without a restart. |
 | `mochi.sqlite`, `work/` | The durable store and mochi's working directory. |
@@ -103,11 +103,11 @@ fast = "gateway/glm-5.3-flash"
 sol = "gateway/gpt-6.1-sol"
 ```
 
-`brain` answers you. `fast` summarizes memory, runs routines and reads data for scripts. Profiles and triggers pick a tier or an alias by name.
+`brain` answers you. `fast` summarizes memory, runs routines and reads data for scripts. Definitions and routines pick a tier or an alias by name.
 
-## Profiles
+## Agents
 
-A profile is a Markdown file at `~/.mochi/profiles/<name>/instructions.md`:
+An agent definition is a Markdown file at `~/.mochi/agents/<name>.md`:
 
 ```markdown
 ---
@@ -115,12 +115,13 @@ description: Mail. Triage new mail and draft replies.
 model: fast
 thinking: medium
 tools: apps_search, apps_call, schedule_list
+resident: true
 ---
 
 You are relay. You own the inboxes. Notify only when ignoring a mail would cost the owner something.
 ```
 
-`tools` is optional. Without it the profile has every function. An edit reaches the profile's next message without a restart. Name a profile in a routine with `profile = "relay"`, or ask mochi to send it work.
+`tools` is optional. Without it the definition has every function. An edit reaches the next job without a restart. Name a definition in a routine with `agent = "relay"`, or ask mochi to give it work. Without `resident: true`, each job is a fresh child that ends with its answer. With it, every job goes to the same standing conversation, so the agent remembers earlier jobs.
 
 ## What it does not do
 
@@ -136,4 +137,4 @@ npm run typecheck
 
 There are no unit tests. Verify a change by running the real daemon on a copy of a store: `MOCHI_HOME=<copy> node src/main.ts -p "<prompt>"`. Without a running daemon, `-p` and `chat` start no channels and no triggers, so a copy reaches no one.
 
-`SPEC.md` is the design: process shape, conversations, tools, prompt, memory, triggers, profiles, and the decisions that still hold and why.
+`SPEC.md` is the design: process shape, conversations, tools, prompt, memory, routines, agents, and the decisions that still hold and why.
