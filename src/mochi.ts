@@ -124,7 +124,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, options.toolsDir, options.memoryDir),
-		memoryExtension(),
+		memoryExtension(() => harness),
 		skillsExtension(options.skillDirs),
 		defineExtension({ name: "agents", tasks: [forkTask, procWatch] }),
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "board", tasks: [board.clock, board.fire] })] : []),

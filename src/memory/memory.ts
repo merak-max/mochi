@@ -5,13 +5,16 @@ import {
 	defineDocFamily,
 	defineExtension,
 	defineTool,
+	type EntryId,
 	type Extension,
 	GenerationTask,
 	type Harness,
+	type HookApi,
 	hook,
 	section,
 } from "@earendil-works/pi-durable";
 import { allPages } from "../pages.ts";
+import { pause } from "../pause.ts";
 import { VIEW } from "./prompt.ts";
 import { blocks, bytes, cover, HIGH, NODE, type Node, type Part, reach, SEEN, slot, span, type View, WAIT, whole, zoom } from "./view.ts";
 
@@ -74,30 +77,118 @@ export function nodeOf(tree: Pick<Tree, "nodes">, chat: readonly Message[]): Nod
 	};
 }
 
+/** How long a request waits for the view's lines before its tail to be built, as uniichat's settle does. */
+const SETTLE_MS = 20_000;
+const SETTLE_POLL_MS = 500;
+/** View texts kept, one per tree and tail start. */
+const FROZEN_MAX = 64;
+
 /**
- * The request: the system messages as given, the view before the tail as one `<chat>` message, then the tail whole.
- * The tail runs from the last user message, cut to its last `high` bytes as uniichat's `whole` does. It starts on a
- * view line's first message and never on a tool result, so no line is cut and every tool call keeps its result.
+ * The first message of the tail: from the last user message among the first `limit` messages, cut to its last `high`
+ * bytes as uniichat's `whole` does. It starts on a view line's first message and never on a tool result, so no line
+ * is cut and every tool call keeps its result. A fork passes its fork point as `limit`, so its tail starts where its
+ * parent's did.
  */
-function request(messages: readonly Message[], tree: Readonly<Tree>, high: number): Message[] | undefined {
-	const system = messages.filter((message) => message.role === "system");
-	const chat = messagesOf(messages);
-	if (chat.length === 0 || chat[0]!.timestamp !== tree.start) return undefined;
-	const node = nodeOf(tree, chat);
-	const view: View = { ...tree.view, parts: [...tree.view.parts] };
-	const last = Math.max(chat.findLastIndex((message) => message.role === "user"), 0);
+export function tailStart(chat: readonly Message[], tree: Readonly<Tree>, limit: number, high: number): number {
+	const last = Math.max(chat.slice(0, limit).findLastIndex((message) => message.role === "user"), 0);
 	let from = whole(chat.map((message) => bytes(show(message))), last, high);
 	for (;;) {
 		const before = from;
-		const k = cover(view.parts, from);
-		if (k < view.parts.length) from = Math.min(from, span(view.parts[k]!)[0]);
+		const k = cover(tree.view.parts, from);
+		if (k < tree.view.parts.length) from = Math.min(from, span(tree.view.parts[k]!)[0]);
 		while (from > 0 && chat[from]!.role === "toolResult") from--;
-		if (from === before) break;
+		if (from === before) return from;
 	}
-	if (from === 0) return undefined;
+}
+
+/** The view's lines before message `from`, and whether one of them is not built yet. */
+export function viewBefore(chat: readonly Message[], tree: Readonly<Tree>, from: number): { content: TextContent[]; waiting: boolean } {
+	const node = nodeOf(tree, chat);
+	const view: View = { ...tree.view, parts: [...tree.view.parts] };
 	reach(view, node, from);
 	const content: TextContent[] = blocks(view.parts, node, from).map((text) => ({ type: "text", text }));
-	return [...system, { role: "user", content, timestamp: tree.start }, ...chat.slice(from)];
+	let waiting = false;
+	for (const part of view.parts) {
+		if (node(part) === null) waiting = true;
+	}
+	return { content, waiting };
+}
+
+/**
+ * The view text sent for each tree and tail start. A request reuses it while its tail starts at the same message, so a
+ * line built mid-turn does not change the prompt the turn already cached, and a fork sends its parent's view.
+ */
+const frozen = new Map<string, TextContent[]>();
+
+function remember(key: string, content: TextContent[]): void {
+	frozen.set(key, content);
+	if (frozen.size > FROZEN_MAX) frozen.delete(frozen.keys().next().value!);
+}
+
+/** The request: the system messages as given, the view before the tail as one `<chat>` message, then the tail whole. */
+async function request(messages: readonly Message[], source: ViewSource, api: HookApi, context: Context): Promise<Message[] | undefined> {
+	const system = messages.filter((message) => message.role === "system");
+	const chat = messagesOf(messages);
+	if (chat.length === 0) return undefined;
+	const limit = source.limit ?? chat.length;
+	const deadline = Date.now() + SETTLE_MS;
+	for (;;) {
+		const tree = await api.snapshot(ViewDoc, String(source.owner), context);
+		if (tree === undefined || chat[0]!.timestamp !== tree.start) return undefined;
+		const from = tailStart(chat, tree, limit, HIGH);
+		if (from === 0) return undefined;
+		const key = source.owner + ":" + tree.start + ":" + from;
+		let content = frozen.get(key);
+		if (content === undefined) {
+			const view = viewBefore(chat, tree, from);
+			const settled = !view.waiting || Date.now() >= deadline || context.abortSignal?.aborted === true;
+			if (!settled) {
+				await pause(SETTLE_POLL_MS, context.abortSignal);
+				continue;
+			}
+			content = view.content;
+			remember(key, content);
+		}
+		return [...system, { role: "user", content, timestamp: tree.start }, ...chat.slice(from)];
+	}
+}
+
+/** Whose tree a conversation's requests use, and for a fork, how many of its messages it shares with that tree. */
+type ViewSource = { readonly owner: ConversationId; readonly limit?: number };
+
+const forkSources = new Map<ConversationId, ViewSource | null>();
+
+/** The non-system messages a fork took from its parent: those of its entries up to the fork point. */
+async function inheritedCount(harness: Harness, id: ConversationId, at: EntryId, context: Context): Promise<number> {
+	const view = await (await harness.conversation(id, context))!.context(context);
+	let count = 0;
+	view.entries.forEach((entry, k) => {
+		if (entry.id <= at) count += messagesOf(view.contributions[k] ?? []).length;
+	});
+	return count;
+}
+
+/** A conversation's own tree, else its nearest forked-from ancestor's; null: none (a fresh child). */
+async function viewSource(harness: Harness, api: HookApi, context: Context): Promise<ViewSource | null> {
+	const id = api.conversationId;
+	if ((await api.snapshot(ViewDoc, String(id), context)) !== undefined) return { owner: id };
+	const known = forkSources.get(id);
+	if (known !== undefined) return known;
+	let found: ViewSource | null = null;
+	const first = await harness.commit((tx) => tx.conversation(id), context);
+	if (first?.parent !== undefined) {
+		let ancestor: ConversationId | undefined = first.parent.conversationId;
+		while (ancestor !== undefined) {
+			if ((await api.snapshot(ViewDoc, String(ancestor), context)) !== undefined) {
+				found = { owner: ancestor, limit: await inheritedCount(harness, id, first.parent.at, context) };
+				break;
+			}
+			const record = await harness.commit((tx) => tx.conversation(ancestor!), context);
+			ancestor = record?.parent?.conversationId;
+		}
+	}
+	forkSources.set(id, found);
+	return found;
 }
 
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
@@ -191,19 +282,19 @@ export function markView(payload: unknown): unknown {
 const VIEW_EXTENSION = "notes";
 
 /**
- * The memory section and the request hook. A conversation with no tree (a child) sends its context
- * as it is.
+ * The memory section and the request hook. A fork sends its parent's view; a fresh child, with no tree to share, sends
+ * its context as it is.
  */
-export function memoryExtension(): Extension {
+export function memoryExtension(harness: () => Harness): Extension {
 	return defineExtension({
 		name: VIEW_EXTENSION,
 		sections: [section("memory", () => VIEW)],
 		hooks: [
 			hook(GenerationTask, {
 				beforeRequest: async ({ messages }, api, context) => {
-					const tree = await api.snapshot(ViewDoc, String(api.conversationId), context);
-					if (tree === undefined) return undefined;
-					const replaced = request(messages, tree, HIGH);
+					const source = await viewSource(harness(), api, context);
+					if (source === null) return undefined;
+					const replaced = await request(messages, source, api, context);
 					return replaced === undefined ? undefined : { messages: replaced };
 				},
 			}),
