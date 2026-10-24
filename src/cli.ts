@@ -4,7 +4,7 @@ type Command = { readonly name: string; readonly args: string; readonly summary:
 const JSON_FLAG: Flag = { name: "--json", help: "Print JSON instead of text." };
 
 /** Every command. parseCli reads flags and arguments from it and helpText prints it. Order is the help order. */
-export const COMMANDS = [
+const COMMANDS = [
 	{ name: "tui", args: "", summary: "Full-screen chat with main (also: mochi with no arguments on a terminal). Without a daemon, this process becomes one until it exits.", flags: [] },
 	{ name: "chat", args: "", summary: "Each stdin line is a message to main; each answer prints. /new and /stop work here.", flags: [] },
 	{ name: "-p", args: "<prompt>", summary: "One message to main, then its answer. Also --print.", flags: [] },
@@ -18,7 +18,7 @@ export const COMMANDS = [
 	{ name: "version", args: "", summary: "The build of this checkout. Also -v and --version.", flags: [] },
 ] as const satisfies readonly Command[];
 
-export type CommandName = (typeof COMMANDS)[number]["name"];
+type CommandName = (typeof COMMANDS)[number]["name"];
 
 export type Cli =
 	| { readonly kind: "tui" }
