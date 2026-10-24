@@ -84,7 +84,7 @@ type ChatTurn = {
 	/** A board fire: it waits for root's current run to end instead of steering into it. */
 	readonly followUp?: true;
 };
-export type RunTurn = {
+type RunTurn = {
 	readonly source: "run";
 	readonly channel: ChannelId;
 	readonly text: string;

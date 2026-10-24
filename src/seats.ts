@@ -23,7 +23,7 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
 export const SEATS = ["agent", "peer", "user"] as const;
-export type Seat = (typeof SEATS)[number];
+type Seat = (typeof SEATS)[number];
 
 const ALL = SEATS;
 const AGENT: readonly Seat[] = ["agent"];

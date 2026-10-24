@@ -101,7 +101,7 @@ export class Definitions {
 	}
 }
 
-export type RunAgent = { readonly definition: string | undefined; readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly tools: readonly string[] | undefined; readonly instructions: string };
+type RunAgent = { readonly definition: string | undefined; readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly tools: readonly string[] | undefined; readonly instructions: string };
 
 /** The model, tools and instructions a conversation runs under for `definition`, after `header`. */
 export function agentOf(definition: Definition, definitions: Definitions, header: string): RunAgent {

@@ -92,7 +92,7 @@ export function defineForkTask(workDir: string) {
 		abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 	});
 }
-export type ForkTask = ReturnType<typeof defineForkTask>;
+type ForkTask = ReturnType<typeof defineForkTask>;
 
 const childOf = async (tx: Tx, task: TaskId): Promise<ConversationId> => (await tx.scanConversations({ ownerTaskId: task }, 1)).items[0]!.id;
 

@@ -16,12 +16,12 @@ import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
 //   put:<task id>     a script's context_put, keyed by its nested tool task
 
 /** A reading budget, not a storage cap: longer text goes to a file and the model sees its head and tail. */
-export const INLINE_MAX = 8_192;
+const INLINE_MAX = 8_192;
 const PREVIEW_HEAD = 1_500;
 const PREVIEW_TAIL = 500;
 const PAGE_CHARS = 65_536;
 
-export type ContextDescriptor = {
+type ContextDescriptor = {
 	/** sha256 of the text, first 32 hex chars. */
 	readonly digest: string;
 	/** Relative to the work dir. */

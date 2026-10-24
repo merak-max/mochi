@@ -12,7 +12,7 @@ import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
 import { LastInboundDoc, type Line, openTurn } from "../turn/turn.ts";
 
-export const PROC_POLL_MS = 1000;
+const PROC_POLL_MS = 1000;
 const TAIL_BYTES = 256 * 1024;
 const STOP_GRACE_MS = 3000;
 
@@ -42,7 +42,7 @@ interface ProcFiles {
 	readonly exit: string;
 }
 
-export const filesOf = (dir: string, name: string): ProcFiles => ({ log: join(dir, `${name}.log`), meta: join(dir, `${name}.json`), exit: join(dir, `${name}.exit`) });
+const filesOf = (dir: string, name: string): ProcFiles => ({ log: join(dir, `${name}.log`), meta: join(dir, `${name}.json`), exit: join(dir, `${name}.exit`) });
 
 async function exitCode(files: ProcFiles): Promise<number | undefined> {
 	const text = await readFile(files.exit, "utf8").catch(() => undefined);
@@ -59,7 +59,7 @@ function signal(pid: number, name: NodeJS.Signals | 0): boolean {
 	}
 }
 
-export async function procStatus(files: ProcFiles, pid: number): Promise<Status> {
+async function procStatus(files: ProcFiles, pid: number): Promise<Status> {
 	const code = await exitCode(files);
 	if (code !== undefined) return { state: "exited", code };
 	if (signal(pid, 0)) return { state: "running" };
@@ -74,7 +74,7 @@ async function readMeta(files: ProcFiles): Promise<Meta | undefined> {
 	return parseWith(MetaSchema, JSON.parse(text), files.meta);
 }
 
-export async function readFrom(path: string, offset: number): Promise<Buffer> {
+async function readFrom(path: string, offset: number): Promise<Buffer> {
 	const file = await open(path, "r").catch(() => undefined);
 	if (file === undefined) return Buffer.alloc(0);
 	try {
@@ -88,14 +88,14 @@ export async function readFrom(path: string, offset: number): Promise<Buffer> {
 	}
 }
 
-export async function tailLines(path: string, count: number): Promise<string[]> {
+async function tailLines(path: string, count: number): Promise<string[]> {
 	const size = (await stat(path).catch(() => undefined))?.size ?? 0;
 	const lines = (await readFrom(path, Math.max(0, size - TAIL_BYTES))).toString("utf8").split("\n");
 	if (lines.at(-1) === "") lines.pop();
 	return lines.slice(-count);
 }
 
-export async function stopGroup(pid: number, files: ProcFiles): Promise<void> {
+async function stopGroup(pid: number, files: ProcFiles): Promise<void> {
 	if (!signal(-pid, 0)) return;
 	signal(-pid, "SIGTERM");
 	const until = Date.now() + STOP_GRACE_MS;
@@ -133,7 +133,7 @@ async function startProcess(files: ProcFiles, command: string, cwd: string): Pro
 type WatchInput = { readonly name: string; readonly pid: number; readonly command: string; readonly watch?: string };
 /** `matched`: the watch regex already woke the conversation once. */
 type WatchState = { readonly phase: "watch"; readonly matched: boolean };
-export type WatchTask = ReturnType<typeof defineProcWatch>;
+type WatchTask = ReturnType<typeof defineProcWatch>;
 type WatchRecord = TaskRecord<WatchInput, WatchState, null>;
 
 /** A wake's text and destination, fixed on first run so a replay submits the same content to the same place. */

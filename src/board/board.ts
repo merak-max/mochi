@@ -19,7 +19,7 @@ import { assertTimeZone, nextCronSlot, parseCron } from "./cron.ts";
 // runs `check`, then messages the item's owner. Root gets a chat Turn, so its final text reaches the owner. A definition
 // gets the message in its conversation, and its final text goes to the owner as a run Turn, after the gate passes.
 
-export const Id = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 64 });
+const Id = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 64 });
 
 const WebhookAuthSchema = Type.Union([
 	Type.Object({ kind: Type.Literal("hmac-sha256"), header: Type.String({ minLength: 1 }), secret: Type.String({ minLength: 16 }) }),
@@ -39,7 +39,7 @@ const GateSchema = Type.Object({
 	threshold: Type.Number({ minimum: 0, maximum: 1 }),
 });
 
-export const ItemSchema = Type.Object({
+const ItemSchema = Type.Object({
 	id: Id,
 	text: Type.String({ minLength: 1 }),
 	owner: Id,
@@ -47,9 +47,9 @@ export const ItemSchema = Type.Object({
 	check: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })),
 	gate: Type.Optional(GateSchema),
 });
-export type Item = Static<typeof ItemSchema>;
+type Item = Static<typeof ItemSchema>;
 
-export const ROOT_OWNER = "root";
+const ROOT_OWNER = "root";
 
 /** The board. `clocks`: the clock task of each item with an `at` or `cron`. */
 export const BoardDoc = defineDoc<{ items: Record<string, Item>; clocks: Record<string, TaskId> }>({
@@ -75,7 +75,7 @@ const OFFSET = /[zZ]|[+-]\d\d:?\d\d$/;
 
 const iso = (at: number): string => new Date(at).toISOString();
 
-export function describeWhen(when: Item["when"]): string {
+function describeWhen(when: Item["when"]): string {
 	if (when === undefined) return "no time";
 	if ("cron" in when) return `${when.cron} ${when.tz}`;
 	if ("at" in when) return `at ${when.at}`;
@@ -92,7 +92,7 @@ function slotAfter(when: Clocked, after: number): number | undefined {
 }
 
 /** Throws when an item cannot be kept: an unknown owner, a bad cron, zone or time, or a gate on root. */
-export async function checkItem(item: Item, definitions: Definitions): Promise<void> {
+async function checkItem(item: Item, definitions: Definitions): Promise<void> {
 	const { when } = item;
 	if (item.owner !== ROOT_OWNER) await definitions.get(item.owner);
 	if (item.owner === ROOT_OWNER && item.gate !== undefined) throw new Error(`Item ${item.id}: a gate judges a definition's answer; root answers the owner directly, so give the item to a definition or drop the gate.`);
@@ -134,7 +134,7 @@ export function defineBoard(deps: BoardDeps): BoardTasks {
 }
 
 /** Starts a fire of item `id` as a background task of the line, so no conversation's abort reaches it. Call inside a commit. */
-export function startFire(tx: Tx, fire: BoardTasks["fire"], line: ConversationId, input: FireInput): Promise<TaskId<FireResult>> {
+function startFire(tx: Tx, fire: BoardTasks["fire"], line: ConversationId, input: FireInput): Promise<TaskId<FireResult>> {
 	return tx.createTask(fire, input, { ownership: { kind: "conversation" }, conversationId: line, background: true });
 }
 
@@ -298,7 +298,7 @@ function defineFire(deps: BoardDeps) {
  * Puts `item` on the board, replacing one with the same id, and starts its clock when it has an `at` or `cron`. Returns
  * the clock it replaced, for the caller to abort after the commit.
  */
-export async function putItem(tx: Tx, tasks: BoardTasks, line: ConversationId, item: Item, now: number): Promise<TaskId | undefined> {
+async function putItem(tx: Tx, tasks: BoardTasks, line: ConversationId, item: Item, now: number): Promise<TaskId | undefined> {
 	const board = await tx.doc(BoardDoc);
 	const same = JSON.stringify(board.items[item.id]) === JSON.stringify(item);
 	if (same) return undefined;
