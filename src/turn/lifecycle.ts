@@ -1,5 +1,6 @@
 import type { Context } from "@earendil-works/chord";
-import { contentText, type Message, type Models, Type } from "@earendil-works/pi-ai";
+import { contentText, type Models, Type } from "@earendil-works/pi-ai";
+import { serializeConversation } from "@earendil-works/pi-coding-agent";
 import {
 	type Conversation,
 	defineTool,
@@ -23,29 +24,6 @@ export function fastCompletion(models: Models, fast: ModelRef): FastCompletion {
 		if (text === "") throw new Error("Fast summary was empty.");
 		return text;
 	};
-}
-
-function serializeConversation(messages: readonly Message[]): string {
-	const parts: string[] = [];
-	for (const message of messages) {
-		if (message.role === "user") {
-			const text = contentText(message.content);
-			if (text !== "") parts.push(`[User]: ${text}`);
-		} else if (message.role === "assistant") {
-			const thinking = message.content.flatMap((part) => part.type === "thinking" ? [part.thinking] : []);
-			const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []);
-			const calls = message.content.flatMap((part) => part.type === "toolCall" ? [
-				`${part.name}(${Object.entries(part.arguments).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(", ")})`,
-			] : []);
-			if (thinking.length > 0) parts.push(`[Assistant thinking]: ${thinking.join("\n")}`);
-			if (text.length > 0) parts.push(`[Assistant]: ${text.join("\n")}`);
-			if (calls.length > 0) parts.push(`[Assistant tool calls]: ${calls.join("; ")}`);
-		} else if (message.role === "toolResult") {
-			const text = contentText(message.content);
-			if (text !== "") parts.push(`[Tool result]: ${text}`);
-		}
-	}
-	return parts.join("\n\n");
 }
 
 export async function threadHandoff(root: Conversation, fast: FastCompletion, context: Context): Promise<string | undefined> {
