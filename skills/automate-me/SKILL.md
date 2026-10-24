@@ -30,7 +30,7 @@ Send the owner one message with the five or so patterns you are least sure of, e
 - How the owner writes: one line per audience (close friends, family, work, strangers), each with a short real example.
 - Standing instructions: one imperative rule per line.
 
-Every line shows in every prompt, so keep the lines few and short, and skip what memory already holds. Use the owner's words where you can.
+The model reads these files before it resumes work, so keep the lines few and short, and skip what memory already holds. Use the owner's words where you can.
 
 A line names something you can check in a message: a greeting, a sign-off, a length, a case, a language. Drop a line that only praises or describes.
 

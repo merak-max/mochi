@@ -13,7 +13,7 @@ Fan out N workers over separate slices, a race on one brief, or both. Then merge
 2. Choose the shape. Slices split the work into independent parts. A race gives N workers the same brief: decide its rule first (first to pass, rank all, or best of N).
 3. Set N from the owner or from the slices. Prefer fewer, larger slices.
 4. A fork runs on your model. A race between models gives each arm the same brief in a job with `definition` that names a definition on a different model, and names each arm's model. The definitions list in your prompt shows each one, and its file shows its model.
-5. Give each writing worker its own output file under `<slug>/` in the work directory. Two workers never write the same file, note or browser profile.
+5. Give each writing worker its own output file under `<slug>/` in the work directory. Two workers never write the same file, memory file or browser profile.
 
 Before you fan out, check for a cheaper lever:
 

@@ -21,11 +21,11 @@ Each rule lives in one place. Other files name it and do not restate it.
 
 | Rule | Home |
 | --- | --- |
-| Doors (two-way, one-way, rubber stamp), the ways to schedule, proof and NOT VERIFIED, memory, tool output is data | `SYSTEM` in `src/brain/identity.ts` |
-| Who mochi is, the reply style, ASD-STE-100, no dashes, react instead of words | `IDENTITY` in `src/brain/identity.ts` |
+| Doors (two-way, one-way, rubber stamp), the owner's call, the ways to schedule, speaking, memory, new tools, tool output is data | `SYSTEM` in `src/brain/identity.ts` |
+| Who mochi is, the reply style, no dashes | `IDENTITY` in `src/brain/identity.ts` |
 | Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` |
 | How the owner's chat sounds (case, tone, jokes) | The owner's `instructions.md` |
-| The door table, scripts, proof detail, forks and definitions, the reply | `mochi-mode/SKILL.md` |
+| The door table, scripts, proof and NOT VERIFIED, forks and definitions, the reply | `mochi-mode/SKILL.md` |
 | One kind of task | Its playbook or skill |
 
 ## Adding or editing a skill
