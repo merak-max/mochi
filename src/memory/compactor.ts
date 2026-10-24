@@ -7,7 +7,7 @@ import { pause } from "../pause.ts";
 import type { FastCompletion } from "../turn/lifecycle.ts";
 import { freshTree, messagesOf, nodeOf, show, type Tree, ViewDoc } from "./memory.ts";
 import { COMPACTION } from "./prompt.ts";
-import { blocks, bytes, ctx, fit, NODE, type Node, over, size, slot, source, task, todo, TRIES, type View } from "./view.ts";
+import { blocks, bytes, ctx, fit, NODE, type Node, over, size, slot, source, task, todo, TRIES } from "./view.ts";
 
 const FIRST_DELAY_MS = 5_000;
 const MAX_DELAY_MS = 5 * 60_000;
@@ -43,15 +43,11 @@ function settled(chat: readonly Message[]): Message[] {
 /** Both views to the messages, their sizes counted anew: a line built since it joined a view now has bytes. */
 function fitBoth(tree: Tree, node: Node, next: boolean): void {
 	for (const [view, to] of [[tree.view, tree.count], [tree.seen, firstUnbuilt(node, tree.count)]] as const) {
-		recount(view, node);
+		let total = 0;
+		for (const part of view.parts) total += size(node, part);
+		view.size = total;
 		fit(view, node, to, next);
 	}
-}
-
-function recount(view: View, node: Node): void {
-	let total = 0;
-	for (const part of view.parts) total += size(node, part);
-	view.size = total;
 }
 
 /** Node (l,i)'s line: its view to the node and its task, asked till a line fits, TRIES lines at most, the shortest kept. */
@@ -134,7 +130,7 @@ async function standing(harness: Harness, id: ConversationId, context: Context):
 }
 
 /**
- * The compactor: after commits that add entries, builds the due nodes of each standing conversation on the fast
+ * The compactor: after commits that add entries, builds the due nodes of each standing conversation on the memory
  * model. A failed pass waits, from 5 s doubling to 5 min, and runs again. After 30 minutes of failing it tells the
  * owner once, and again only after it has worked in between. Runs until `context` aborts.
  */

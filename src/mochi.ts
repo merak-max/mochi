@@ -19,7 +19,7 @@ import { contextFns, contextSection } from "./context.ts";
 import { defineForkTask, forkFns } from "./fork/fork.ts";
 import { addContextReaders, agentStopTool, type Definitions, definitionsSection } from "./agents/definitions.ts";
 import { connectServer, type McpConnection } from "./mcp/servers.ts";
-import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
+import { memoryExtension, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { boardFns, type BoardTasks, defineBoard } from "./board/board.ts";
 import { defaultSelection, type LiveTools, type McpTools, rootSelection, SEATS, seatExtensions } from "./seats.ts";
@@ -208,7 +208,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		users,
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
 	};
-	await harness.commit(selectView, context);
 	await harness.commit(addContextReaders, context);
 	return { harness, classify: options.classify, line, board, catalog: options.definitions, mcp };
 }
