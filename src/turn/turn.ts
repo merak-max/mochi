@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import { contentText, Type } from "@earendil-works/pi-ai";
 import {
 	AssistantEntry,
 	type Conversation,
@@ -40,7 +40,7 @@ import {
 } from "../channels/types.ts";
 import { type ChatUser, OWNER_ID } from "../config.ts";
 import type { Log } from "../log.ts";
-import { formatStamp, messageText } from "../text.ts";
+import { formatStamp } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { MediaDeps } from "../media/client.ts";
 import { loadOutgoing } from "../media/files.ts";
@@ -266,7 +266,7 @@ async function saveFiles(workDir: string, message: Extract<Inbound, { kind: "mes
 
 export async function answerText(tx: Tx, entry: EntryId): Promise<string> {
 	const message = (await tx.entry(AssistantEntry, entry))?.model?.[0];
-	return message === undefined ? "" : messageText(message).trim();
+	return message === undefined ? "" : contentText(message.content).trim();
 }
 
 const TYPING_REFRESH_MS = 5_000;

@@ -1,9 +1,8 @@
 import type { Context } from "@earendil-works/chord";
-import { Type, type Models, type ClassifierQuestion, type ClassifierAnswer } from "@earendil-works/pi-ai";
+import { contentText, Type, type Models, type ClassifierQuestion, type ClassifierAnswer } from "@earendil-works/pi-ai";
 import { defineTool, type ModelRef, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { Classify } from "../brain/classifier.ts";
 import { parseWith } from "../parse.ts";
-import { messageText } from "../text.ts";
 import { BrowseInput, BrowseOutput } from "./browser.ts";
 import { BrowserClient, type BrowserDeps } from "./client.ts";
 import { Cdp } from "./cdp.ts";
@@ -75,7 +74,7 @@ async function browseFast(deps: FastDeps, args: { url: string; task: string }, c
 					messages: [{ role: "user", content: JSON.stringify({ goal: args.task, field: action, page: { title: page.title, text: page.text }, recent_actions: history.slice(-6) }), timestamp: Date.now() }],
 				}, { reasoning: "minimal", maxTokens: model.maxTokens, ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
 				if (response.stopReason !== "stop") throw new Error("Text model failed; nothing typed.");
-				text = parseWith(Type.Object({ text: Type.String({ minLength: 1 }) }, { additionalProperties: false }), JSON.parse(messageText(response)), "field text").text;
+				text = parseWith(Type.Object({ text: Type.String({ minLength: 1 }) }, { additionalProperties: false }), JSON.parse(contentText(response.content)), "field text").text;
 			}
 			await act(cdp, id, page, action, text);
 			const before = JSON.stringify([page.url, page.text, page.actions, page.page_key]);
