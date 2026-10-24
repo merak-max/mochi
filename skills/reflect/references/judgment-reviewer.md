@@ -8,7 +8,7 @@ Look for:
 - Facts about the owner's world worth keeping (people, accounts, places, recurring needs)
 - Tool or site quirks
 - Decisions and their reasons
-- Friction with a skill or playbook, or in delegation to forks or profiles
+- Friction with a skill or playbook, or in delegation to forks or agents
 - Repeated manual steps that a trigger, gate or script could do
 
 Route only to skills, tools or notes this conversation used: a gap in a used skill goes to its section, and a skill that should have triggered goes to `tune description: <skill>`.

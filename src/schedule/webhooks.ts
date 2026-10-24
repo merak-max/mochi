@@ -11,7 +11,7 @@ import { type Log, log } from "../log.ts";
 import type { Mochi } from "../mochi.ts";
 import { pause } from "../pause.ts";
 import type { Classify } from "../brain/classifier.ts";
-import { applyAgent, type Profiles } from "../profiles/profiles.ts";
+import { applyAgent, type Definitions } from "../agents/definitions.ts";
 import { inputPasses, liveSchedule, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds, runAgent } from "./schedule.ts";
 import type { WebhookAuth } from "./types.ts";
 
@@ -20,7 +20,7 @@ const DELIVERY_HEADERS = ["x-github-delivery", "x-request-id", "webhook-id"];
 
 interface WebhookDeps {
 	readonly harness: Pick<Harness, "commit" | "conversation">;
-	readonly catalog: Profiles;
+	readonly catalog: Definitions;
 	readonly log: Log;
 	readonly classify: Classify;
 	readonly workDir: string;

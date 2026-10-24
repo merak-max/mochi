@@ -17,7 +17,7 @@ import { type FileIndexes, searchFns } from "./search/search.ts";
 import type { Log } from "./log.ts";
 import { contextFns, contextSection } from "./context.ts";
 import { defineForkTask, forkFns } from "./fork/fork.ts";
-import { addContextReaders, defineReply } from "./profiles/profiles.ts";
+import { addContextReaders, agentStopTool, type Definitions, definitionsSection } from "./agents/definitions.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
 import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
@@ -41,7 +41,6 @@ import type { Classify } from "./brain/classifier.ts";
 import type { ChatUser } from "./config.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
-import { profileFns, type Profiles, rosterSection } from "./profiles/profiles.ts";
 import type { WebConfig } from "./config.ts";
 
 interface MochiOptions {
@@ -64,7 +63,7 @@ interface MochiOptions {
 	readonly toolsDir: string;
 	/** Lasting facts, plain markdown files the agent reads and edits. */
 	readonly memoryDir: string;
-	readonly profiles: Profiles;
+	readonly definitions: Definitions;
 	/** Where bash, read, edit and write run when a conversation sets no cwd. */
 	readonly workDir: string;
 	readonly channels: Channels;
@@ -83,7 +82,7 @@ export interface Mochi {
 	readonly classify: Classify;
 	readonly line: Line;
 	readonly schedule: ScheduleTask;
-	readonly catalog: Profiles;
+	readonly catalog: Definitions;
 }
 
 export async function openMochi(options: MochiOptions, context: Context): Promise<Mochi> {
@@ -101,8 +100,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		handoffTool(),
 	];
 	const procDir = join(options.workDir, ".procs");
-	const schedule = defineSchedule({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, pollMs: PROC_POLL_MS, procDir, log, harness: () => harness, line: lineOf, catalog: options.profiles, classify: options.classify, workDir: options.workDir });
-	const reply = defineReply(() => harness, options.workDir);
+	const schedule = defineSchedule({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, pollMs: PROC_POLL_MS, procDir, log, harness: () => harness, line: lineOf, catalog: options.definitions, classify: options.classify, workDir: options.workDir });
 	const forkTask = defineForkTask(options.workDir);
 	let seat: ReturnType<typeof seatExtensions> | undefined;
 	const home = homeTools(options.toolsDir, registry, (tools) => seat!("agent", tools));
@@ -119,25 +117,25 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...mediaFns({ ...media, workDir: options.workDir }),
 		...gifFns(options.workDir),
 		messageTool(options.channels),
-		...thinkFns({ models: options.models, ref: options.profiles.model, classify: options.classify }),
+		...thinkFns({ models: options.models, ref: options.definitions.model, classify: options.classify }),
 		...appsFns(options.apps ?? NO_APPS),
 		...contextFns(options.workDir),
-		...forkFns({ task: forkTask, scratchDir: (name) => join(options.workDir, "forks", name), ref: options.profiles.model }),
-		...scheduleFns({ task: schedule, catalog: options.profiles, schedules: (context) => harness.commit(scanSchedules, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: Date.now, users }),
-		...procFns({ task: schedule, catalog: options.profiles, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
-		...profileFns(options.profiles, () => harness, reply, options.workDir),
+		...forkFns({ task: forkTask, scratchDir: (name) => join(options.workDir, "forks", name), definitions: options.definitions }),
+		...scheduleFns({ task: schedule, catalog: options.definitions, schedules: (context) => harness.commit(scanSchedules, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: Date.now, users }),
+		...procFns({ task: schedule, catalog: options.definitions, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
+		agentStopTool(options.definitions, () => harness),
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, options.toolsDir, options.memoryDir),
 		memoryExtension(),
 		skillsExtension(options.skillDirs),
-		defineExtension({ name: "agents", tasks: [forkTask, reply] }),
+		defineExtension({ name: "agents", tasks: [forkTask] }),
 		// Daemon only, so a terminal without a daemon leaves schedules waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "schedules", tasks: [schedule] })] : []),
 	]) {
 		registry.install(extension);
 	}
-	seat = seatExtensions(modelTools, library, [rosterSection(options.profiles)], [contextSection()]);
+	seat = seatExtensions(modelTools, library, [definitionsSection(options.definitions)], [contextSection()]);
 	for (const name of SEATS) registry.install(seat(name));
 	const loaded = await home.reload([...modelTools, ...library].map((each) => each.name));
 	if (loaded.length > 0) log("tools.loaded", { tools: loaded });
@@ -178,8 +176,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
 	if (options.scheduling === "daemon") {
-		await migrateSchedulers(harness, schedule, options.profiles, log, context);
-		await migrateKeptLines(harness, options.memoryDir, (await options.profiles.all()).map((profile) => profile.name), log, context);
+		await migrateSchedulers(harness, schedule, options.definitions, log, context);
+		await migrateKeptLines(harness, options.memoryDir, (await options.definitions.all()).map((definition) => definition.name), log, context);
 	}
 	line = {
 		harness,
@@ -195,7 +193,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	};
 	await harness.commit(selectView, context);
 	await harness.commit(addContextReaders, context);
-	return { harness, classify: options.classify, line, schedule, catalog: options.profiles };
+	return { harness, classify: options.classify, line, schedule, catalog: options.definitions };
 }
 
 const browserDeps = (web: WebConfig) => ({ apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) });

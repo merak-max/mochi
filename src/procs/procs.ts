@@ -9,7 +9,7 @@ import { defineTool, type TaskId, type ToolExecutionApi, type ToolRegistration }
 import { parseWith } from "../parse.ts";
 import { addSchedule, live, scanSchedules, type ScheduleTask } from "../schedule/schedule.ts";
 import { ProcName } from "../schedule/types.ts";
-import type { Profiles } from "../profiles/profiles.ts";
+import type { Definitions } from "../agents/definitions.ts";
 
 export const PROC_POLL_MS = 1000;
 const TAIL_BYTES = 256 * 1024;
@@ -137,7 +137,7 @@ function checkPattern(watch: string): void {
 
 interface ProcFnDeps {
 	readonly task: ScheduleTask;
-	readonly catalog: Profiles;
+	readonly catalog: Definitions;
 	readonly dir: string;
 	readonly workDir: string;
 	readonly abortTask: (id: TaskId, context: Context) => Promise<unknown>;

@@ -12,7 +12,7 @@ Fan out N workers over separate slices, a race on one brief, or both. Then merge
 1. Write what done is and what the report must contain.
 2. Choose the shape. Slices split the work into independent parts. A race gives N workers the same brief: decide its rule first (first to pass, rank all, or best of N).
 3. Set N from the owner or from the slices. Prefer fewer, larger slices.
-4. A fork runs on your model. A race between models sends the same brief to profiles on different models (`profile_list`) and names each arm's model.
+4. A fork runs on your model. A race between models gives each arm the same brief in a job with `definition` that names a definition on a different model, and names each arm's model. The definitions list in your prompt shows each one, and its file shows its model.
 5. Give each writing worker its own output file under `<slug>/` in the work directory. Two workers never write the same file, note or browser profile.
 
 Before you fan out, check for a cheaper lever:
@@ -25,7 +25,7 @@ Before you fan out, check for a cheaper lever:
 
 ## 2. Fan out
 
-Start every worker in one `agent({ jobs: [...] })` call with `fork: true` on each job, or with `background: true` for slices that take minutes. Each brief names its exact slice, how to check its work, and what to return. A self-contained mechanical slice can go to the `worker` profile with `profile_send`. Each worker reports `PASS`, `ISSUES` or `BLOCKED` with evidence (links, quotes, prices with their source), and lists every problem, not only the first.
+Start every worker in one `agent({ jobs: [...] })` call with `fork: true` on each job, or with `background: true` for slices that take minutes. Each brief names its exact slice, how to check its work, and what to return. A self-contained mechanical slice can go to a job with `definition: "worker"`. Each worker reports `PASS`, `ISSUES` or `BLOCKED` with evidence (links, quotes, prices with their source), and lists every problem, not only the first.
 
 ## 3. Merge
 

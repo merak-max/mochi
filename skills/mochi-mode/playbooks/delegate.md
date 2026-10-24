@@ -1,15 +1,15 @@
 # Delegate
 
-**You own the result and every word the owner hears about it, also when a fork, an agent or a profile does the work.**
+**You own the result and every word the owner hears about it, also when a fork or an agent does the work.**
 
 1. Pick the worker.
    - Yourself: a few tool calls, or the owner waits in the chat.
    - `agent` with `fork: true`: a slice that needs this conversation.
    - `agent`: one slice of data with a full brief.
-   - A profile: only when the work is its role.
-   - Work that can take more than a few minutes goes to `agent` with `background: true`, or `profile_send` with `background`. One slow inline child loses the answers of the whole batch.
-2. Check that the work started. A `profile_send` result that starts with `NOT STARTED` waits behind the profile's current turn, which can take an hour. Send the work to a free worker, call `profile_stop` first when the current turn is the wrong work, or tell the owner it is queued.
-3. Keep one lead per workstream. Before you send a profile a stop, a scope change or a correction, read the result of your last `profile_send` to it. If that result was `NOT STARTED`, or the owner said stop, call `profile_stop` first: a stop sent as a message waits behind the queue it should cancel. Then send one complete brief that starts "This replaces my brief of <time>." Send no addenda.
+   - `agent` with `definition`: only when the work is that definition's role.
+   - Work that can take more than a few minutes goes to `agent` with `background: true`. One slow inline child loses the answers of the whole batch.
+2. Check that the work started. A job to a resident definition whose answer starts with `NOT STARTED` waits behind that agent's current turn, which can take an hour. Its real answer comes back later as a `[name]` note. Send the work to a fork or a fresh agent, call `agent_stop` first when the current turn is the wrong work, or tell the owner it is queued.
+3. Keep one lead per workstream. Before you send a resident agent a stop, a scope change or a correction, read the answer to your last job to it. If that answer was `NOT STARTED`, or the owner said stop, call `agent_stop` first: a stop sent as a message waits behind the queue it should cancel. Then send one complete brief that starts "This replaces my brief of <time>." Send no addenda.
 4. Write the brief for a reader with no memory of this chat. It holds each of these:
    - Done, as a check, and the report you want back: what it did, the proof per item, what is left, NOT VERIFIED.
    - The owner's exact words, with the time, for each one-way door (send, submit, pay, delete) and each limit. An act the brief does not name stays a draft.
@@ -26,8 +26,8 @@
 8. Merge results. Check the claims the owner will rely on, and write your own words. When an answer is a duplicate or changes nothing for the owner, end the turn with no message.
 
 Facts about this workspace (checked 2026-10-20):
-- The bundled profile `mochi` is a teammate, not root. A message tagged `[from mochi]` is its answer. Root's own tag is `[from root]`.
-- Root's `/stop` does not reach a profile's running turn. `profile_stop` does.
-- A profile merges its queued messages into one turn and sends one reply.
+- The bundled definition `mochi` is a teammate, not root. A message tagged `[from mochi]` is its answer. Root's own tag is `[from root]`, on each job that root sends to a resident definition.
+- Root's `/stop` does not reach a resident agent's running turn. `agent_stop` does.
+- A resident agent merges its queued jobs into one turn and sends one reply.
 
 **Reply:** who has the work, its state (queued or running, with proof), and when the owner hears next.

@@ -9,7 +9,7 @@ Mine a conversation for lessons that change what mochi does next time, and route
 
 ## 1. Gather the transcript
 
-Pin the conversation or run: root's recent turns, a trigger's run history, or a fork's or profile's work. Open it with `zoom`. When it is long, have a fork write a digest of turns, tool calls, corrections and outcomes,.
+Pin the conversation or run: root's recent turns, a trigger's run history, or a fork's or an agent's work. Open it with `zoom`. When it is long, have a fork write a digest of turns, tool calls, corrections and outcomes,.
 
 ## 2. Review from three angles
 

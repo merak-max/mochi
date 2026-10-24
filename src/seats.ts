@@ -17,10 +17,10 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 
 /**
  * A seat is how far a conversation is trusted, stored in its agent and written only here.
- *   agent    root, every fork of it and every profile. A fork has its parent's tools and prompt, so it reuses its
+ *   agent    root, every fork of it and every agent definition. A fork has its parent's tools and prompt, so it reuses its
  *            parent's prompt cache, and forks can fork at any depth.
  *   trigger  a schedule run. It reads outside data (webhook bodies, mail), so it cannot write notes, fork, add
- *            schedules or change profiles. It reaches the owner only with notify.
+ *            schedules or start agents. It reaches the owner only with notify.
  *   peer     the line, which holds delivery tasks. It works with the owner's apps and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
@@ -81,10 +81,7 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	proc_status: { seats: AGENT_TRIGGER, inline: false },
 	proc_logs: { seats: AGENT_TRIGGER, inline: false },
 	proc_stop: { seats: AGENT_TRIGGER, inline: false },
-	profile_list: { seats: AGENT, inline: false },
-	profile_send: { seats: AGENT, inline: true },
-	profile_update: { seats: AGENT, inline: false },
-	profile_stop: { seats: AGENT, inline: false },
+	agent_stop: { seats: AGENT, inline: false },
 	tools_reload: { seats: AGENT, inline: false },
 };
 

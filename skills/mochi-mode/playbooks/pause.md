@@ -3,7 +3,7 @@
 **You own a clean stop that a later run can resume from cold.** Pause only on an explicit stop or hold. An order to keep going is not a pause.
 
 1. Stop at a safe point. Finish or back out of the current step, and start nothing new.
-   - Call `profile_stop` for each profile on the work.
+   - Call `agent_stop({ name })` for each resident agent on the work.
    - Stop processes with `proc_stop` and confirm in `proc_status`.
    - A background fork of root cannot be stopped from here. List it in the resume note.
    - Leave the owner's standing schedules alone. Remove or list the schedules that belong to the paused work.
@@ -15,4 +15,4 @@
 7. Write a line in the memory files that names the work and the resume note's path.
 8. Read the resume note as someone with no memory of this conversation. Fix what that reader could not resume from.
 
-**Reply:** where things stand, what is paused (processes, forks, profiles, schedules, timers), what is still live and why, where the resume note is, and the first step on resume.
+**Reply:** where things stand, what is paused (processes, forks, agents, schedules, timers), what is still live and why, where the resume note is, and the first step on resume.

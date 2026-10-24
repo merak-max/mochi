@@ -45,7 +45,7 @@ export function freshTree(start: number): Tree {
 	};
 }
 
-/** One tree per standing conversation (root, profiles, user threads, peers), by conversation id. Children have none. */
+/** One tree per standing conversation (root, resident agents, user threads, peers), by conversation id. Children have none. */
 export const ViewDoc = defineDocFamily<Tree, null>({
 	kind: "mochi.view",
 	version: 1,
