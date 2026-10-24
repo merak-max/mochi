@@ -184,7 +184,7 @@ export function agentStopTool(definitions: Definitions, host: () => StopHost): T
 			const conversation = await api.commit(async (tx) => (await tx.doc(ResidentDoc, name, null)).conversation, context);
 			if (conversation === null) return { structuredOutput: `${name} has never run; nothing to stop.` };
 			const harness = host();
-			const targets = await abortTargets(harness, { id: conversation }, "stop", context);
+			const targets = await abortTargets(harness, { id: conversation }, false, context);
 			for (const id of targets.submissions) await harness.abortSubmission(id, context);
 			for (const id of targets.tasks) await harness.abortTask(id, context);
 			for (const id of targets.tasks) await harness.waitForTask(id, context);

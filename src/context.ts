@@ -48,8 +48,6 @@ export interface Committer {
 	commit(change: (tx: Tx) => Promise<undefined>, context: Context): Promise<unknown>;
 }
 
-const digestOf = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 32);
-const linesOf = (text: string): number => text.split("\n").length;
 const count = (value: number): string => value.toLocaleString("en-US");
 
 /**
@@ -57,7 +55,7 @@ const count = (value: number): string => value.toLocaleString("en-US");
  * and the directory are synced before the catalog commit names the file.
  */
 async function writeBody(workDir: string, text: string): Promise<{ digest: string; path: string }> {
-	const digest = digestOf(text);
+	const digest = createHash("sha256").update(text).digest("hex").slice(0, 32);
 	const path = join("context", `${digest}.txt`);
 	const full = join(workDir, path);
 	if (existsSync(full)) return { digest, path };
@@ -96,7 +94,7 @@ function record(values: Record<string, ContextDescriptor>, key: string, descript
 
 async function keep(host: Committer, workDir: string, conversation: ConversationId, key: string, text: string, context: Context): Promise<ContextDescriptor> {
 	const { digest, path } = await writeBody(workDir, text);
-	const fresh: ContextDescriptor = { digest, path, chars: text.length, lines: linesOf(text), at: Date.now() };
+	const fresh: ContextDescriptor = { digest, path, chars: text.length, lines: text.split("\n").length, at: Date.now() };
 	let kept = fresh;
 	await host.commit(async (tx) => {
 		kept = record((await tx.doc(ContextDoc, conversation)).values, key, fresh);

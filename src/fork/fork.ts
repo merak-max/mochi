@@ -92,7 +92,6 @@ export function defineForkTask(workDir: string) {
 }
 type ForkTask = ReturnType<typeof defineForkTask>;
 
-/** A child never belongs to the caller's task, so the caller's end never aborts it. */
 const DETACHED: TaskOptions = { ownership: { kind: "conversation" }, background: true };
 
 const childOf = async (tx: Tx, task: TaskId): Promise<ConversationId> => (await tx.scanConversations({ ownerTaskId: task }, 1)).items[0]!.id;
@@ -192,7 +191,6 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 			const depth = (await depthOf(tx, api.conversationId)) + 1;
 			const at = await forkPoint(tx, api.conversationId);
 			const sender = await ownerIn(tx, api.conversationId);
-			// A foreground child waits on this call, but owns itself: when the call ends first, the answer becomes a note.
 			const reply = background ? { back: api.conversationId } : { back: api.conversationId, waiter: api.taskId };
 			const started: Started[] = [];
 			for (const [offset, job] of jobs.entries()) {

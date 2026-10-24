@@ -29,7 +29,7 @@ export const commandOf = (text: string): Command | undefined => {
 
 export type CommandInput = { readonly key: string; readonly command: Command; readonly channel: ChannelId; readonly conversation?: ConversationId; readonly person?: string };
 export type CommandTurn = { readonly source: "command"; readonly key: string; readonly channel: ChannelId; readonly text: string; readonly person?: string };
-/** `turn`: the Turn that sends `text`; absent on commands stored before it was kept. */
+/** `turn`: the Turn that sends `text`; older stored replies lack it, and a redelivered command returns the stored reply. */
 export type CommandReply = { readonly submission: SubmissionId; readonly text: string; readonly turn?: TaskId };
 type State =
 	| { readonly phase: "prepare" }
@@ -100,8 +100,8 @@ async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "
 	].join("\n");
 }
 
-// /new keeps background work: processes and background forks.
-export async function abortTargets(harness: Pick<Harness, "taskGraph" | "inspect">, target: Pick<Conversation, "id">, command: Command, context: Context) {
+/** Every task and submission under `target`. /new passes `keepBackground`, so processes and background forks live on. */
+export async function abortTargets(harness: Pick<Harness, "taskGraph" | "inspect">, target: Pick<Conversation, "id">, keepBackground: boolean, context: Context) {
 	const graph = await harness.taskGraph(context);
 	try {
 		const owned = new Set([target.id]);
@@ -116,7 +116,7 @@ export async function abortTargets(harness: Pick<Harness, "taskGraph" | "inspect
 		const tasks = [];
 		for (const task of Object.values(graph.value.tasks)) {
 			if (!owned.has(task.conversationId)) continue;
-			if (command === "new" && task.background) continue;
+			if (keepBackground && task.background) continue;
 			tasks.push(task.id);
 		}
 		const submissions = (await harness.inspect(context)).submissions.filter((submission) => owned.has(submission.conversationId)).map((submission) => submission.id);
@@ -144,7 +144,7 @@ export function commandTask(deps: CommandDeps) {
 					const text = await statusText({ ...deps, root: target }, context);
 					return runtime.commit(() => ({ status: "running", checkpoint: { phase: "reply", text, submission: null } }), context);
 				}
-				const targets = await abortTargets(deps.harness, target, task.input.command, context);
+				const targets = await abortTargets(deps.harness, target, task.input.command === "new", context);
 				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "abort", ...targets } }), context);
 			},
 			abort: async (task, runtime, context) => {

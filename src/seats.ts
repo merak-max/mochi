@@ -132,7 +132,6 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 		const codemode = codemodeFor(servers);
 		const tool = codemode.tools![0]!;
 		const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
-		// handoff's `control` works only on a model-issued call, so scripts do not see it.
 		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat)).map((each): ToolRegistration => (each.name === "handoff" ? { ...each, callers: ["model"] } : each));
 		const scripted: ToolRegistration[] = [];
 		for (const each of library) {

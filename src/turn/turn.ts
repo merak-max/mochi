@@ -458,8 +458,6 @@ async function quotedText(harness: Pick<Harness, "snapshot">, channel: ChannelId
 	return stored === undefined ? target : { ...target, text: stored.text };
 }
 
-const tagOf = (channel: ChannelId, messageId: string, at: Date, timeZone: string) => `[${channel} ${formatStamp(at, timeZone)} id=${messageId}]`;
-
 // A chat message opens its Turn in the commit that finds no submission for its request key, then submits itself,
 // so arrival order is root's order. Resolves to the Turn that answers it; a tapback or a redelivery has none.
 export async function ingest(line: Line, inbound: Inbound, context: Context): Promise<TaskId | undefined> {
@@ -496,7 +494,7 @@ export async function ingest(line: Line, inbound: Inbound, context: Context): Pr
 				const prior = await harness.commit((tx) => tx.submissionByRequest(known, key), context);
 				if (prior !== undefined) return undefined;
 			}
-			const tag = tagOf(inbound.channel, inbound.messageId, inbound.at, line.timeZone);
+			const tag = `[${inbound.channel} ${formatStamp(inbound.at, line.timeZone)} id=${inbound.messageId}]`;
 			const files = await saveFiles(line.workDir, inbound);
 			const preparedMedia = files.length === 0 ? undefined : await prepareInbound(files, line.workDir, line.media, context.abortSignal);
 			const replyTo = inbound.replyTo === undefined ? undefined : await quotedText(harness, inbound.channel, inbound.replyTo, context);
