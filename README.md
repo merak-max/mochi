@@ -101,12 +101,10 @@ keyEnv = "GATEWAY_KEY"
 brain = "gateway/claude-opus-5-5"
 fast = "gateway/gpt-6.1-sol"
 memory = "gateway/claude-haiku-5-5"
-
-[models.aliases]
 sol = "gateway/gpt-6.1-sol"
 ```
 
-`brain` answers you. `fast` reads data for scripts and runs definitions that name it. `memory` writes the summary lines of each conversation's view; it makes many small calls, so a cheap model fits. Definitions pick a tier or an alias by name.
+`brain` answers you. `fast` reads data for scripts and runs definitions that name it. `memory` writes the summary lines of each conversation's view; it makes many small calls, so a cheap model fits. Any other key in `[models]` is a name of your own. A definition or a tool call picks a model by its name.
 
 ## Agents
 

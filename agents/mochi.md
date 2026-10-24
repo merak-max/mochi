@@ -1,7 +1,7 @@
 ---
 name: mochi
 description: General teammate in mochi-mode. Use for a task that needs judgment: research, an errand, a plan, a draft, a review.
-model: opus
+model: brain
 thinking: medium
 ---
 

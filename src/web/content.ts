@@ -93,7 +93,6 @@ async function extract(options: {
 		},
 		{
 			signal: options.signal,
-			reasoning: "low",
 			maxTokens: answerTokens,
 		},
 	);

@@ -20,7 +20,7 @@ import { answerText, submitNote } from "../turn/turn.ts";
  * `back`: the caller's conversation. A background child always merges its answer there as a new message; a foreground
  * child does so only when `waiter`, the tool call that waits for it, ended first (its script timed out or the daemon
  * restarted past it). A child never belongs to the script, so a script's end never aborts it.
- * `depth`: root and standing conversations are 0, their children 1. Absent on tasks made before depth existed.
+ * `depth`: root and standing conversations are 0, their children 1.
  * `resident`: the standing conversation a resident job's brief goes to.
  */
 type ForkInput = {
@@ -29,7 +29,7 @@ type ForkInput = {
 	readonly back?: ConversationId;
 	readonly waiter?: TaskId;
 	readonly fresh?: true;
-	readonly depth?: number;
+	readonly depth: number;
 	readonly model?: ModelRef;
 	readonly resident?: ConversationId;
 };
@@ -102,7 +102,7 @@ async function depthOf(tx: Tx, caller: ConversationId): Promise<number> {
 	if (owner === undefined) return 0;
 	const task = await tx.task(owner.taskId);
 	if (task?.kind !== "mochi.agent") return 0;
-	return (task.input as ForkInput).depth ?? 1;
+	return (task.input as ForkInput).depth;
 }
 
 /** Call inside the commit that read `forkPoint` and the caller's depth. */
@@ -165,8 +165,6 @@ interface ForkDeps {
 	readonly definitions: Definitions;
 }
 
-const MODELS = ["brain", "fast", "strongest"] as const;
-
 /** One job, checked before any child exists: its model override and its definition. */
 type Planned = { readonly model: ModelRef | undefined; readonly definition: Definition | undefined };
 
@@ -184,7 +182,7 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 		fork: Type.Optional(Type.Boolean()),
 		definition: Type.Optional(Type.String({ minLength: 1 })),
 		context: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
-		model: Type.Optional(Type.Union(MODELS.map((model) => Type.Literal(model)))),
+		model: Type.Optional(Type.String({ minLength: 1 })),
 	});
 
 	/** Starts one batch of children in one commit, journaled so a replay starts none twice. */
@@ -241,7 +239,7 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 				"fork: true copies this conversation, so the child knows everything here and reuses the prompt cache; otherwise the child starts fresh with only its brief and the context keys you pass. " +
 				"definition names an agent definition: the fresh child runs with its model, thinking, tools and instructions. A resident definition keeps one standing conversation; the job goes there, and a busy one queues it and answers NOT STARTED. " +
 				"background: true returns the names at once, and each answer arrives later as a [name] note on your next turn. A foreground child outlives its script: if the script times out first, the child's answer still arrives as a [name] note. " +
-				"model overrides the definition's; fast suits bulk reading.",
+				"model: a name from [models] (brain, fast, or the owner's own); it overrides the definition's, and fast suits bulk reading.",
 			parameters: Type.Object({ jobs: Type.Array(Job, { minItems: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.Array(Type.Object({ name: Type.String(), answer: Type.String() })),
 			replay: "safe",

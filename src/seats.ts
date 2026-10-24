@@ -173,7 +173,8 @@ export async function createSeatConversation(tx: Tx, seat: Seat, ownership: Conv
 	for (const key of Object.keys(agent) as (keyof typeof agent)[]) delete agent[key];
 	const model = change.model ?? root.model;
 	if (model !== undefined) agent.model = { ...model };
-	agent.thinkingLevel = change.thinkingLevel ?? root.thinkingLevel ?? "off";
+	const thinking = change.thinkingLevel ?? root.thinkingLevel;
+	if (thinking !== undefined) agent.thinkingLevel = thinking;
 	agent.extensions = selection(seat);
 	if (change.instructions !== undefined) agent.instructions = change.instructions;
 	return id;

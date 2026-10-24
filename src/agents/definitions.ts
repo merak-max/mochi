@@ -108,7 +108,7 @@ export type RunAgent = { readonly definition: string | undefined; readonly agent
 export function agentOf(definition: Definition, definitions: Definitions, header: string): RunAgent {
 	return {
 		definition: definition.name,
-		agent: { model: definitions.model(definition.model ?? "default"), ...(definition.thinking === undefined ? {} : { thinkingLevel: definition.thinking }) },
+		agent: { model: definitions.model(definition.model ?? "brain"), ...(definition.thinking === undefined ? {} : { thinkingLevel: definition.thinking }) },
 		tools: definition.tools === undefined ? undefined : ["codemode", "handoff", "context_read", "context_list", ...definition.tools],
 		instructions: [header, definition.instructions].filter((part) => part !== "").join("\n\n"),
 	};

@@ -6,6 +6,7 @@ import { createModelSetup, type ModelSetup, ModelsSchema, ProviderSchema } from 
 import { type Home, resolveHome } from "./home.ts";
 import { MediaConfigSchema } from "./media/providers.ts";
 import { parseWith } from "./parse.ts";
+import { assertTimeZone } from "./board/cron.ts";
 import { normalizeHandle } from "./channels/imessage.ts";
 
 /** The owner's id. Configured users take user2, user3 and so on. */
@@ -33,7 +34,7 @@ export type McpServerConfig = {
 /** `<home>/config.toml`. */
 const FileSchema = Type.Object(
 	{
-		timeZone: Type.Optional(Type.String({ minLength: 1 })),
+		timeZone: Type.String({ minLength: 1 }),
 		/** How to reach models; see src/brain/providers.ts. Absent: ANTHROPIC_API_KEY or OPENAI_API_KEY decides. */
 		providers: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), ProviderSchema)),
 		models: Type.Optional(ModelsSchema),
@@ -93,8 +94,9 @@ function mcpServers(file: FileConfig, env: NodeJS.ProcessEnv): McpServerConfig[]
 export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
 	const home = resolveHome(env);
 	if (existsSync(home.envFile)) process.loadEnvFile(home.envFile);
-	const file = parseWith(FileSchema, await readConfigFile(home), "config.toml");
-	const timeZone = file.timeZone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+	if (!existsSync(home.configFile)) throw new Error(`No config.toml in ${home.dir}. Copy config.example.toml from the repository there and fill it in.`);
+	const file = parseWith(FileSchema, parseToml(await readFile(home.configFile, "utf8")), "config.toml");
+	const timeZone = file.timeZone;
 	assertTimeZone(timeZone);
 	return {
 		home,
@@ -118,22 +120,4 @@ function chatUsers(users: readonly ChatUser[]): ChatUser[] {
 		normalized.push({ ...user, handle: normalizeHandle(user.handle) });
 	}
 	return normalized;
-}
-
-/** `config.toml`, else nothing: every field has a default. */
-async function readConfigFile(home: Home): Promise<unknown> {
-	try {
-		return parseToml(await readFile(home.configFile, "utf8"));
-	} catch (error) {
-		if (error instanceof Error && "code" in error && error.code === "ENOENT") return {};
-		throw error;
-	}
-}
-
-function assertTimeZone(timeZone: string): void {
-	try {
-		new Intl.DateTimeFormat("en", { timeZone });
-	} catch {
-		throw new Error(`Invalid timeZone in config: ${timeZone}`);
-	}
 }

@@ -31,8 +31,13 @@ memory = "anthropic/claude-haiku-5-5"
 # The decision model for classify, on a provider with a classifier api. With none set, classify fails.
 # classifier = "classifier/liquid/d1-ultra"
 
-[models.aliases]
-haiku = "anthropic/claude-haiku-5-5"
+# Any other key is a name of your own, for a definition's model or a tool call's model.
+# opus = "anthropic/claude-opus-5-5"
+
+# A model pi-ai's catalog does not know needs its limits here.
+# [models.overrides."gateway/some-model"]
+# contextWindow = 1000000
+# maxTokens = 128000
 
 # [providers.classifier]
 # api = "typesafe-system-one"

@@ -33,10 +33,8 @@ const Answer = Type.Union([
 	Type.Object({ type: Type.Literal("score"), score: Type.Number(), confidence: Type.Number() }),
 ]);
 
-const MODELS = ["brain", "fast", "strongest"] as const;
-
 /**
- * Model calls from scripts: `llm` with no tools, on the fast model unless it names brain or strongest, and `classify`
+ * Model calls from scripts: `llm` with no tools, on the fast model unless it names another from `[models]`, and `classify`
  * on the classifier model. `ref` is the same name-to-model lookup the agent tool uses; it throws on an unknown name.
  */
 export function thinkFns(deps: { readonly models: Models; readonly ref: (name: string) => ModelRef; readonly classify: Classify }): readonly ToolRegistration[] {
@@ -44,8 +42,8 @@ export function thinkFns(deps: { readonly models: Models; readonly ref: (name: s
 	return [
 		defineTool({
 			name: "llm",
-			description: "One completion with no tools on a slice of data, model fast by default. Only its answer reaches you.",
-			parameters: Type.Object({ prompt: Type.String(), system: Type.Optional(Type.String()), model: Type.Optional(Type.Union(MODELS.map((name) => Type.Literal(name)))) }),
+			description: "One completion with no tools on a slice of data. model: a name from [models], fast by default. Only its answer reaches you.",
+			parameters: Type.Object({ prompt: Type.String(), system: Type.Optional(Type.String()), model: Type.Optional(Type.String({ minLength: 1 })) }),
 			structuredOutputSchema: Type.String(),
 			replay: "safe",
 			execute: async ({ prompt, system, model: name }, _api, context) => {
@@ -57,7 +55,7 @@ export function thinkFns(deps: { readonly models: Models; readonly ref: (name: s
 					deps.models.completeSimple(
 						model,
 						{ ...(system === undefined ? {} : { systemPrompt: system }), messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
-						{ ...(signal === undefined ? {} : { signal }), reasoning: "low", maxTokens: model.maxTokens },
+						{ ...(signal === undefined ? {} : { signal }), maxTokens: model.maxTokens },
 					),
 				);
 				if (response.stopReason === "error" || response.stopReason === "aborted") throw new Error(`llm failed: ${response.errorMessage ?? response.stopReason}`);

@@ -18,7 +18,7 @@ export function fastCompletion(models: Models, fast: ModelRef): FastCompletion {
 		const response = await models.completeSimple(model, {
 			systemPrompt: system,
 			messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-		}, { ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }), reasoning: "low", cacheRetention: "none", maxTokens: model.maxTokens });
+		}, { ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }), maxTokens: model.maxTokens });
 		if (response.stopReason !== "stop" || response.content.some((part) => part.type === "toolCall")) throw new Error(`Fast model did not finish: ${response.stopReason}${response.errorMessage === undefined ? "" : ` (${response.errorMessage})`}.`);
 		const text = contentText(response.content).trim();
 		if (text === "") throw new Error("Fast summary was empty.");

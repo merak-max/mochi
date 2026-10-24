@@ -90,11 +90,10 @@ Files for one piece of work live in `<slug>/` under the work directory, which is
 
 ## Models
 
-Tiers and aliases come from `[models]` in the owner's `config.toml`. A definition's front matter sets its `model` and `thinking`.
+Model names come from `[models]` in the owner's `config.toml`. A definition's front matter sets its `model` and `thinking`.
 
 - `fast`: cheap and quick. Try it first.
-- `brain`: judgment, and anything the owner reads.
-- `strongest`: the hardest calls. It can be the same model as `brain`, so for a hard call raise `thinking` too.
-- An alias can name another model family. Use it for a second view.
+- `brain`: judgment, and anything the owner reads. For a hard call, raise `thinking`.
+- Any other name in `[models]` is the owner's own, often another model family. Use it for a second view.
 
 `thinking` is `low`, `medium`, `high`, `xhigh` or `max`. Raise it for a hard judgment. Lower it for mechanical work.

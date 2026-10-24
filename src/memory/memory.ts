@@ -24,23 +24,13 @@ import { blocks, bytes, cover, HIGH, NODE, type Node, type Part, reach, SEEN, sl
 
 export type Tree = { start: number; count: number; nodes: Record<string, string>; view: View; seen: View };
 
-/** HIGH, or MOCHI_VIEW_HIGH to merge sooner in a test. */
-export function viewHigh(): number {
-	const raw = process.env.MOCHI_VIEW_HIGH;
-	if (raw === undefined) return HIGH;
-	const high = Number(raw);
-	if (!Number.isInteger(high) || high <= 0) throw new Error(`MOCHI_VIEW_HIGH must be a positive integer, not ${raw}.`);
-	return high;
-}
-
 export function freshTree(start: number): Tree {
-	const high = viewHigh();
 	return {
 		start,
 		count: 0,
 		nodes: {},
-		view: { parts: [], size: 0, batch: false, high },
-		seen: { parts: [], size: 0, batch: false, high: Math.round((high * SEEN) / HIGH) },
+		view: { parts: [], size: 0, batch: false, high: HIGH },
+		seen: { parts: [], size: 0, batch: false, high: SEEN },
 	};
 }
 
@@ -163,7 +153,6 @@ export const VIEW_EXTENSION = "notes";
  * as it is.
  */
 export function memoryExtension(): Extension {
-	const high = viewHigh();
 	return defineExtension({
 		name: VIEW_EXTENSION,
 		sections: [section("memory", () => VIEW)],
@@ -172,7 +161,7 @@ export function memoryExtension(): Extension {
 				beforeRequest: async ({ messages }, api, context) => {
 					const tree = await api.snapshot(ViewDoc, String(api.conversationId), context);
 					if (tree === undefined) return undefined;
-					const replaced = request(messages, tree, high);
+					const replaced = request(messages, tree, HIGH);
 					return replaced === undefined ? undefined : { messages: replaced };
 				},
 			}),

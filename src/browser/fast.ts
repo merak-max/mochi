@@ -72,7 +72,7 @@ async function browseFast(deps: FastDeps, args: { url: string; task: string }, c
 				const response = await deps.models.completeSimple(model, {
 					systemPrompt: TEXT_VALUE,
 					messages: [{ role: "user", content: JSON.stringify({ goal: args.task, field: action, page: { title: page.title, text: page.text }, recent_actions: history.slice(-6) }), timestamp: Date.now() }],
-				}, { reasoning: "minimal", maxTokens: model.maxTokens, ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
+				}, { maxTokens: model.maxTokens, ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }) });
 				if (response.stopReason !== "stop") throw new Error("Text model failed; nothing typed.");
 				text = parseWith(Type.Object({ text: Type.String({ minLength: 1 }) }, { additionalProperties: false }), JSON.parse(contentText(response.content)), "field text").text;
 			}

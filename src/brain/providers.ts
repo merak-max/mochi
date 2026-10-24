@@ -41,23 +41,21 @@ const ModelOverrideSchema = Type.Object(
 );
 type ModelOverride = Static<typeof ModelOverrideSchema>;
 
-/** `[models]` in config.toml: the brain, fast and memory models, and short names for the rest. */
+/**
+ * `[models]` in config.toml: names for `<provider>/<id>`. brain (root and definitions without a model), fast (bulk
+ * reading) and memory (the view's summary lines) are required. classifier names the decision model for `classify` and
+ * gates. Every other name is the owner's own, for a definition or a tool call to use.
+ */
 export const ModelsSchema = Type.Object(
 	{
-		brain: Type.Optional(Type.String({ minLength: 3 })),
-		fast: Type.Optional(Type.String({ minLength: 3 })),
-		/** The model that writes memory: one summary line per node of each conversation's view. */
-		memory: Type.Optional(Type.String({ minLength: 3 })),
-		/** The strongest model, for a definition that asks for `strongest`. Default: the brain. */
-		strongest: Type.Optional(Type.String({ minLength: 3 })),
-		/** The yes/no classifier for `classify` and classify steps, on a provider with api "classifier". */
+		brain: Type.String({ minLength: 3 }),
+		fast: Type.String({ minLength: 3 }),
+		memory: Type.String({ minLength: 3 }),
 		classifier: Type.Optional(Type.String({ minLength: 3 })),
-		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a definition may use. */
-		aliases: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), Type.String({ minLength: 3 }))),
 		/** Limits of a model pi-ai's catalog does not know, by `<provider>/<id>`. */
 		overrides: Type.Optional(Type.Record(Type.String({ minLength: 3 }), ModelOverrideSchema)),
 	},
-	{ additionalProperties: false },
+	{ additionalProperties: Type.String({ minLength: 3 }) },
 );
 type ModelsConfig = Static<typeof ModelsSchema>;
 
@@ -75,15 +73,13 @@ export interface ModelSetup {
 	readonly memory: ModelRef;
 	/** `[models] classifier`; absent, `classify` and classify steps fail with a clear error. */
 	readonly classifier?: ModelRef;
-	/** `brain` (or `default`), `fast`, `memory`, `strongest`, an alias, or `provider/id`. */
+	/** A name from `[models]`, or `provider/id`. */
 	ref(name: string): ModelRef;
+	/** The chat model names in `[models]`, for tool schemas. */
+	readonly names: readonly string[];
 	/** One line per provider whose key is not set, for the setup report. */
 	readonly missing: readonly string[];
 }
-
-/** No `[providers]`: Anthropic with ANTHROPIC_API_KEY, else OpenAI with OPENAI_API_KEY. */
-/** A model the catalog does not know: this much context, until `[models.overrides]` says otherwise. */
-const CONTEXT_WINDOW = 200_000;
 
 /**
  * pi-ai requires a price on every model and multiplies each response's tokens by it. mochi carries no prices: the model
@@ -110,8 +106,10 @@ function catalog(wire: Api, id: string): Model<Api> | undefined {
 	return undefined;
 }
 
-function plain(id: string, api: Api): Model<Api> {
-	return { id, name: id, api, provider: "", baseUrl: "", reasoning: true, input: ["text", "image"], cost: NO_PRICE, contextWindow: CONTEXT_WINDOW, maxTokens: 64_000 };
+/** A model the catalog does not know: `[models.overrides]` must give its limits. */
+function plain(id: string, api: Api, provider: string, override: ModelOverride): Model<Api> {
+	if (override.contextWindow === undefined || override.maxTokens === undefined) throw new Error(`pi-ai's catalog does not know ${provider}/${id}. Add [models.overrides."${provider}/${id}"] with contextWindow and maxTokens.`);
+	return { id, name: id, api, provider: "", baseUrl: "", reasoning: true, input: ["text", "image"], cost: NO_PRICE, contextWindow: override.contextWindow, maxTokens: override.maxTokens };
 }
 
 /**
@@ -131,7 +129,7 @@ function withImageBytes(limits: ModelInputLimits | undefined): ModelInputLimits 
 function definition(id: string, config: ProviderConfig, provider: string, url: string, override: ModelOverride = {}): Model<Api> {
 	const wire: Api = config.api;
 	const known = catalog(wire, id);
-	const base = known ?? plain(id, wire);
+	const base = known ?? plain(id, wire, provider, override);
 	const compat =
 		wire === "anthropic-messages"
 			? // A tool_removal block is refused as an unknown tool, so tool changes go out as the whole current list.
@@ -159,9 +157,9 @@ export async function createModelSetup(input: { readonly providers?: Record<stri
 	const clients = new Map<string, Awaited<ReturnType<typeof apiClient>>>();
 	for (const [name, config] of Object.entries(providers)) clients.set(name, await apiClient(config.api));
 	const chosen = input.models;
-	if (chosen?.brain === undefined || chosen.fast === undefined || chosen.memory === undefined) throw new Error("config.toml [models] needs brain, fast and memory, each <provider>/<id>.");
-	const aliases = chosen.aliases ?? {};
-	const named: Record<string, string> = { brain: chosen.brain, default: chosen.brain, fast: chosen.fast, memory: chosen.memory, strongest: chosen.strongest ?? chosen.brain, ...aliases };
+	if (chosen === undefined) throw new Error("config.toml has no [models]. It needs brain, fast and memory, each <provider>/<id>.");
+	const named: Record<string, string> = {};
+	for (const [name, value] of Object.entries(chosen)) if (name !== "classifier" && name !== "overrides" && typeof value === "string") named[name] = value;
 	const split = (full: string): { provider: string; id: string } => {
 		const slash = full.indexOf("/");
 		if (slash <= 0) throw new Error(`Model ${full} is not <provider>/<id>.`);
@@ -218,7 +216,7 @@ export async function createModelSetup(input: { readonly providers?: Record<stri
 	}
 	const ref = (nameOrFull: string): ModelRef => {
 		const full = Object.hasOwn(named, nameOrFull) ? named[nameOrFull]! : nameOrFull;
-		if (!full.includes("/")) throw new Error(`Unknown model "${nameOrFull}". Use brain, fast, memory, strongest, ${Object.keys(aliases).join(", ") || "an alias from [models.aliases]"}, or <provider>/<id>.`);
+		if (!full.includes("/")) throw new Error(`Unknown model "${nameOrFull}". Use a name from [models] (${Object.keys(named).join(", ")}) or <provider>/<id>.`);
 		const { provider, id } = split(full);
 		if (!served.get(provider)!.has(id)) {
 			served.get(provider)!.add(id);
@@ -226,5 +224,5 @@ export async function createModelSetup(input: { readonly providers?: Record<stri
 		}
 		return { provider, modelId: id };
 	};
-	return { models, brain: ref("brain"), fast: ref("fast"), memory: ref("memory"), ...(classifier === undefined ? {} : { classifier }), ref, missing };
+	return { models, brain: ref("brain"), fast: ref("fast"), memory: ref("memory"), ...(classifier === undefined ? {} : { classifier }), ref, names: Object.keys(named), missing };
 }
