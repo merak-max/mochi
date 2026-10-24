@@ -23,14 +23,12 @@ export function createClassify(models: Models, classifier: ModelRef | undefined)
 
 export type ClassifyStep = { readonly question: string; readonly yes: string; readonly no: string; readonly threshold?: number };
 
-/**
- * P(yes) for one yes/no question over `state`. A failed classifier passes (1) and logs `classify.failed`, so an outage
- * lets an alert through instead of silencing every gated trigger.
- */
+/** P(yes) for one yes/no question over `state`. A failed classifier throws, so its outage shows. */
 export async function classifyYes(classify: Classify, step: ClassifyStep, state: JsonObject, log: Log, context: Context): Promise<number> {
 	const result = await classify(state, { gate: { type: "bool", instructions: step.question, criteria: { true: step.yes, false: step.no } } }, context);
 	const answer = result.ok ? result.answers.gate : undefined;
 	if (answer?.type === "bool") return answer.probability;
-	log("classify.failed", { question: step.question, error: result.ok ? "no yes/no answer" : result.error });
-	return 1;
+	const error = result.ok ? "no yes/no answer" : result.error;
+	log("classify.failed", { question: step.question, error });
+	throw new Error(`The classifier failed on "${step.question}": ${error}`);
 }

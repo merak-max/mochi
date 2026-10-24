@@ -14,8 +14,6 @@ type BoardTask = {
 	bots: string[];
 	status: string;
 	log: { at: string; by: string; text: string }[];
-	/** The due the old sweep last woke the task for: that promise already fired. */
-	nudged?: string;
 };
 
 /** The board as it was stored, read once to carry its open dues over as `at` schedules, then retired. */
@@ -80,7 +78,7 @@ export async function migrateSchedulers(harness: Harness, task: ScheduleTask, ca
 		}
 		for (const item of Object.values(board?.tasks ?? {})) {
 			if (item.status !== "open" && item.status !== "waiting") continue;
-			if (item.due === undefined || item.nudged === item.due) {
+			if (item.due === undefined) {
 				plan.dropped.push(item);
 				continue;
 			}
