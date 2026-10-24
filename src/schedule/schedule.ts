@@ -17,7 +17,7 @@ import { type ChatUser, OWNER_ID } from "../config.ts";
 import { formatStamp, messageText } from "../text.ts";
 import { keyedReset } from "../turn/lifecycle.ts";
 import { answerText, LastInboundDoc, type Line, openTurn, type RunTurn } from "../turn/turn.ts";
-import { agentOf, applyAgent, type Profiles, type RunAgent } from "../profiles/profiles.ts";
+import { agentOf, applyAgent, type Definitions, type RunAgent } from "../agents/definitions.ts";
 import { filesOf, procStatus, readFrom, stopGroup, tailLines } from "../procs/procs.ts";
 import { assertTimeZone, nextCronSlot, parseCron } from "./cron.ts";
 import { classifyYes, type Classify, type ClassifyStep } from "../brain/classifier.ts";
@@ -84,7 +84,7 @@ interface ScheduleDeps {
 	readonly log: Log;
 	readonly harness: () => Pick<Harness, "commit">;
 	readonly line: () => Line;
-	readonly catalog: Profiles;
+	readonly catalog: Definitions;
 	readonly classify: Classify;
 	readonly workDir: string;
 }
@@ -288,7 +288,7 @@ export async function addSchedule(
 	task: ScheduleTask,
 	input: ScheduleInput,
 	existing: readonly ScheduleRecord[],
-	catalog: Profiles,
+	catalog: Definitions,
 	here?: ConversationId,
 ): Promise<{ readonly id: TaskId; readonly replaced: TaskId | undefined }> {
 	const previous = existing.findLast((record) => record.input.schedule.id === input.schedule.id);
@@ -329,10 +329,10 @@ export async function inputPasses(
 const outputSteps = (schedule: Schedule): readonly ClassifyStep[] =>
 	stepsOf(schedule).flatMap((step: Step) => ("classify" in step && step.classify.on === "output" ? [step.classify] : []));
 
-export async function runAgent(schedule: Schedule, catalog: Profiles): Promise<RunAgent> {
+export async function runAgent(schedule: Schedule, catalog: Definitions): Promise<RunAgent> {
 	const header = `${INSTRUCTIONS}
 Schedule: ${schedule.id}.`;
-	const run: RunAgent = schedule.profile === undefined ? { profile: undefined, agent: { model: catalog.model("fast") }, tools: undefined, instructions: header } : agentOf(await catalog.get(schedule.profile), catalog, header);
+	const run: RunAgent = schedule.agent === undefined ? { definition: undefined, agent: { model: catalog.model("fast") }, tools: undefined, instructions: header } : agentOf(await catalog.get(schedule.agent), catalog, header);
 	const thinking = schedule.thinking ?? run.agent.thinkingLevel;
 	return { ...run, agent: { model: schedule.model === undefined ? run.agent.model : catalog.model(schedule.model), ...(thinking === undefined ? {} : { thinkingLevel: thinking }) } };
 }
@@ -359,6 +359,9 @@ function checkRecipients(notify: readonly string[], users: readonly ChatUser[]):
 
 /** `[[triggers]]` in config.toml: the flat entries of before, read as schedules. The key keeps its name so existing configs load. */
 export function parseSeeds(file: Readonly<Record<string, unknown>>, users: readonly ChatUser[]): Schedule[] {
+	for (const entry of Array.isArray(file.triggers) ? file.triggers : []) {
+		if (typeof entry === "object" && entry !== null && "profile" in entry) throw new Error(`triggers in config.toml: ${String((entry as { id?: unknown }).id)} has profile; the key is now agent.`);
+	}
 	const seeds = parseWith(Type.Array(TriggerEntrySchema), file.triggers ?? [], "triggers in config.toml").map((entry) => validateSchedule(scheduleOfEntry(entry)));
 	for (const seed of seeds) {
 		if (seed.notify !== undefined) checkRecipients(seed.notify, users);
@@ -366,7 +369,7 @@ export function parseSeeds(file: Readonly<Record<string, unknown>>, users: reado
 	return seeds;
 }
 
-export async function reconcileSeeds(harness: Harness, task: ScheduleTask, seeds: readonly Schedule[], catalog: Profiles, context: Context): Promise<void> {
+export async function reconcileSeeds(harness: Harness, task: ScheduleTask, seeds: readonly Schedule[], catalog: Definitions, context: Context): Promise<void> {
 	const stale = await harness.commit(async (tx) => {
 		const existing = await scanSchedules(tx);
 		const current = new Map<string, ScheduleRecord>();
@@ -399,7 +402,7 @@ const AddParams = Type.Object({
 	]),
 	notify: Type.Optional(Type.Array(Type.String())),
 	steps: Type.Optional(Type.Array(StepSchema, { minItems: 1 })),
-	profile: Type.Optional(Id),
+	agent: Type.Optional(Id),
 	model: Type.Optional(Type.String({ minLength: 1 })),
 	check: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })),
 });
@@ -437,7 +440,7 @@ function listed({ input: { schedule, origin }, state }: ScheduleRecord, now: num
 
 interface ScheduleFnDeps {
 	readonly task: ScheduleTask;
-	readonly catalog: Profiles;
+	readonly catalog: Definitions;
 	readonly schedules: (context: Context) => Promise<ScheduleRecord[]>;
 	readonly abortTask: (id: TaskId, context: Context) => Promise<unknown>;
 	readonly publicUrl: string | undefined;
@@ -457,7 +460,7 @@ export function scheduleFns(deps: ScheduleFnDeps): ToolRegistration[] {
 				"check: argv of a script run first at each slot; empty output ends the run with no model call. " +
 				"steps: an ordered chain; {model:{}} is the run of prompt, a classify step is a fast yes/no classifier that stops the chain on no, so the model never runs for junk. " +
 				"Gate example: steps [{classify:{question:'Does this payload need the owner?',yes:'a person waits or money is due',no:'newsletter, receipt, noise',threshold:0.6}},{model:{}}]; " +
-				"add on:'output' to judge the notify text instead. profile: whose instructions, model and memory the run uses; model overrides; default fast. Same id replaces.",
+				"add on:'output' to judge the notify text instead. agent: the definition whose instructions, model and memory the run uses; model overrides; default fast. Same id replaces.",
 			parameters: AddParams,
 			structuredOutputSchema: Type.Object({ id: Type.String(), next: Type.Optional(Type.String()), url: Type.Optional(Type.String()), secret: Type.Optional(Type.String()) }),
 			replay: "safe",

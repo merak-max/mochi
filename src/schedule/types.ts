@@ -36,7 +36,7 @@ export const WhenSchema = Type.Union([
 export type When = Static<typeof WhenSchema>;
 
 /**
- * A run is the ordered `steps`; the `model` step is the run of `prompt` under `profile` (its instructions, model and
+ * A run is the ordered `steps`; the `model` step is the run of `prompt` under `agent`, a definition (its instructions, model and
  * memory) or `model`. Without `steps` a schedule is the one model step. `check` runs first on a cron or at slot. A
  * process schedule fires into the conversation that started the process, with the prompt and the log tail.
  */
@@ -47,7 +47,7 @@ export const ScheduleSchema = Type.Object({
 	steps: Type.Optional(Type.Array(StepSchema, { minItems: 1 })),
 	notify: Type.Optional(Type.Array(Type.String({ pattern: "^user[0-9]+$" }), { minItems: 1 })),
 	model: Type.Optional(Type.String({ minLength: 1 })),
-	profile: Type.Optional(Id),
+	agent: Type.Optional(Id),
 	thinking: Type.Optional(Thinking),
 	check: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })),
 });
@@ -68,7 +68,7 @@ const ENTRY_FIELDS = {
 	steps: Type.Optional(Type.Array(StepSchema, { minItems: 1 })),
 	notify: Type.Optional(Type.Array(Type.String({ pattern: "^user[0-9]+$" }), { minItems: 1 })),
 	model: Type.Optional(Type.String({ minLength: 1 })),
-	profile: Type.Optional(Id),
+	agent: Type.Optional(Id),
 	thinking: Type.Optional(Thinking),
 	check: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })),
 };
@@ -89,7 +89,7 @@ export function scheduleOfEntry(entry: TriggerEntry): Schedule {
 	if (entry.steps !== undefined) schedule.steps = entry.steps;
 	if (entry.notify !== undefined) schedule.notify = entry.notify;
 	if (entry.model !== undefined) schedule.model = entry.model;
-	if (entry.profile !== undefined) schedule.profile = entry.profile;
+	if (entry.agent !== undefined) schedule.agent = entry.agent;
 	if (entry.thinking !== undefined) schedule.thinking = entry.thinking;
 	if (entry.check !== undefined) schedule.check = entry.check;
 	return schedule;

@@ -3,8 +3,8 @@ import { join, resolve } from "node:path";
 
 /**
  * Where one mochi keeps everything that is the owner's: config, keys, instructions, roles, skills, the store and
- * the work directory. `MOCHI_HOME`, else `~/.mochi`. Each profile's instructions live in `<home>/profiles/<name>`.
- * The repository holds only code, bundled skills and the bundled worker profile.
+ * the work directory. `MOCHI_HOME`, else `~/.mochi`. Each agent definition is `<home>/agents/<name>.md`.
+ * The repository holds only code, bundled skills and the bundled agent definitions.
  */
 export interface Home {
 	readonly dir: string;
@@ -14,7 +14,8 @@ export interface Home {
 	/** Root's own instructions, after every prompt section. */
 	readonly instructionsFile: string;
 	readonly skillsDir: string;
-	readonly profilesDir: string;
+	/** Agent definitions, one `<name>.md` each; a name here replaces the bundled one. */
+	readonly agentsDir: string;
 	/** The owner's own tools, one `<name>.ts` each, loaded by `tools_reload`. */
 	readonly toolsDir: string;
 	/** Lasting facts as markdown, `<home>/memory`. */
@@ -31,7 +32,7 @@ export function resolveHome(env: Readonly<Record<string, string | undefined>>): 
 		configFile: join(dir, "config.toml"),
 		instructionsFile: join(dir, "instructions.md"),
 		skillsDir: join(dir, "skills"),
-		profilesDir: join(dir, "profiles"),
+		agentsDir: join(dir, "agents"),
 		toolsDir: join(dir, "tools"),
 		memoryDir: join(dir, "memory"),
 		logFile: join(dir, "mochi.log"),

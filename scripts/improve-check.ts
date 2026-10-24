@@ -25,7 +25,7 @@ const TOTAL_CHARS = 400_000;
 const SIGNALS = {
 	owner_turns: "Owner messages on a chat channel or the cli.",
 	owner_chase: "Owner messages that chase or complain: status, still, why not, too slow, its been. Heuristic.",
-	busy_queued: "profile_send results that say the profile was busy and the message only queued.",
+	busy_queued: "agent results that say a resident agent was busy and the job only queued.",
 	notify_refused: "notify calls refused in the owner's own thread.",
 	side_scheduler: "Model scripts that schedule work outside mochi: systemd-run, crontab, at, nohup.",
 	script_failed: "codemode scripts that failed.",

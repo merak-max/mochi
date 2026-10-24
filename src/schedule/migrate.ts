@@ -3,7 +3,7 @@ import { type ConversationId, defineDoc, type Harness, type TaskId, type TaskRec
 import type { Log } from "../log.ts";
 import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
-import type { Profiles } from "../profiles/profiles.ts";
+import type { Definitions } from "../agents/definitions.ts";
 import { addSchedule, live, scanSchedules, type ScheduleTask, validateSchedule } from "./schedule.ts";
 import { type Schedule, scheduleOfEntry, TriggerEntrySchema } from "./types.ts";
 
@@ -41,7 +41,7 @@ function boardSchedule(task: BoardTask): Schedule {
 	const lead = task.bots[0] ?? "root";
 	const schedule: Schedule = { id: `board-${task.id}`, when: { at: task.due! }, prompt: boardPrompt(task) };
 	if (lead === "root") schedule.model = "brain";
-	else schedule.profile = lead;
+	else schedule.agent = lead;
 	return schedule;
 }
 
@@ -50,11 +50,11 @@ type Plan = { readonly create: { readonly schedule: Schedule; readonly origin: "
 /**
  * Carries the three old schedulers into `mochi.schedule`, once and idempotently: each live `mochi.trigger` becomes a
  * schedule in its conversation, each live `mochi.proc` a process schedule, and each open or waiting board task with a
- * due an `at` schedule `board-<id>`. The old tasks are aborted after the commit; with no definition left they end
- * orphaned. A board task with no due has no time to fire and is dropped, and the board document is retired.
+ * due an `at` schedule `board-<id>`. A stored trigger's `profile` becomes `agent`. The old tasks are aborted after the
+ * commit; with no definition left they end orphaned. A board task with no due has no time to fire and is dropped, and the board document is retired.
  * Delete this file once the live store has run it.
  */
-export async function migrateSchedulers(harness: Harness, task: ScheduleTask, catalog: Profiles, log: Log, context: Context): Promise<void> {
+export async function migrateSchedulers(harness: Harness, task: ScheduleTask, catalog: Definitions, log: Log, context: Context): Promise<void> {
 	const board = await harness.snapshot(BoardDoc, context);
 	const plan = await harness.commit(async (tx): Promise<Plan> => {
 		const existing = await scanSchedules(tx);
@@ -66,8 +66,10 @@ export async function migrateSchedulers(harness: Harness, task: ScheduleTask, ca
 				if (record.state.status === "terminal" || record.abortRequested) continue;
 				plan.abort.push(record.id);
 				if (kind === "mochi.trigger") {
-					const input = record.input as { trigger: unknown; origin: "model" | "config" };
-					const schedule = validateSchedule(scheduleOfEntry(parseWith(TriggerEntrySchema, input.trigger, `stored trigger ${record.id}`)));
+					const input = record.input as { trigger: Record<string, unknown>; origin: "model" | "config" };
+					const { profile, ...rest } = input.trigger;
+					const trigger = profile === undefined ? rest : { ...rest, agent: profile };
+					const schedule = validateSchedule(scheduleOfEntry(parseWith(TriggerEntrySchema, trigger, `stored trigger ${record.id}`)));
 					if (!have.has(schedule.id)) plan.create.push({ schedule, origin: input.origin, here: record.conversationId });
 				}
 				if (kind === "mochi.proc") {

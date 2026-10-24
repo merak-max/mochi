@@ -45,11 +45,11 @@ export const ModelsSchema = Type.Object(
 	{
 		brain: Type.Optional(Type.String({ minLength: 3 })),
 		fast: Type.Optional(Type.String({ minLength: 3 })),
-		/** The strongest model, for a profile that asks for `strongest`. Default: the brain. */
+		/** The strongest model, for a definition that asks for `strongest`. Default: the brain. */
 		strongest: Type.Optional(Type.String({ minLength: 3 })),
 		/** The yes/no classifier for `classify` and classify steps, on a provider with api "classifier". */
 		classifier: Type.Optional(Type.String({ minLength: 3 })),
-		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a profile or a trigger may use. */
+		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a definition or a schedule may use. */
 		aliases: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), Type.String({ minLength: 3 }))),
 		/** Limits of a model pi-ai's catalog does not know, by `<provider>/<id>`. */
 		overrides: Type.Optional(Type.Record(Type.String({ minLength: 3 }), ModelOverrideSchema)),

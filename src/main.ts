@@ -22,7 +22,7 @@ import { doctor, printStatus, reach, stopDaemon, table } from "./attach/daemon.t
 import { type Cli, helpText, parseCli } from "./cli.ts";
 import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
-import { Profiles } from "./profiles/profiles.ts";
+import { Definitions } from "./agents/definitions.ts";
 import { schedulesComponent } from "./schedule/webhooks.ts";
 import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
 import { connectApps } from "./apps/apps.ts";
@@ -203,7 +203,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	await mkdir(workDir, { recursive: true });
 	log("setup", { ok: setup.filter((line) => line.startsWith("ok")).map((line) => line.slice(5)), other: setup.filter((line) => !line.startsWith("ok")) });
 	const { models } = config.modelSetup;
-	const profiles = new Profiles(config.home.profilesDir, join(REPO, "agents"), config.modelSetup.ref);
+	const definitions = new Definitions(config.home.agentsDir, join(REPO, "agents"), config.modelSetup.ref);
 	const apps = config.appsUrl === undefined ? undefined : connectApps(storedTokenConnector(config.appsUrl, authFile(config.home.dir)), log);
 
 	const mochi = await openMochi(
@@ -220,7 +220,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			skillDirs: [join(REPO, "skills"), config.home.skillsDir],
 			toolsDir: config.home.toolsDir,
 			memoryDir: config.home.memoryDir,
-			profiles,
+			definitions,
 			workDir,
 			channels,
 			users: config.users,
