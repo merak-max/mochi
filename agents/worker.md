@@ -1,6 +1,6 @@
 ---
 name: worker
-description: Standing worker for a self-contained slice with an exact brief: a swarm slice, an arena candidate, a reviewer, an investigator, a bulk extraction.
+description: Worker for a self-contained slice with an exact brief: a swarm slice, an arena candidate, a reviewer, an investigator, a bulk extraction.
 model: fast
 thinking: medium
 ---
