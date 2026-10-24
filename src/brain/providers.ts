@@ -41,11 +41,13 @@ const ModelOverrideSchema = Type.Object(
 );
 type ModelOverride = Static<typeof ModelOverrideSchema>;
 
-/** `[models]` in config.toml: the brain and fast models, and short names for the rest. */
+/** `[models]` in config.toml: the brain, fast and memory models, and short names for the rest. */
 export const ModelsSchema = Type.Object(
 	{
 		brain: Type.Optional(Type.String({ minLength: 3 })),
 		fast: Type.Optional(Type.String({ minLength: 3 })),
+		/** The model that writes memory: one summary line per node of each conversation's view. */
+		memory: Type.Optional(Type.String({ minLength: 3 })),
 		/** The strongest model, for a profile that asks for `strongest`. Default: the brain. */
 		strongest: Type.Optional(Type.String({ minLength: 3 })),
 		/** The yes/no classifier for `classify` and classify steps, on a provider with api "classifier". */
@@ -70,9 +72,10 @@ export interface ModelSetup {
 	readonly models: MutableModels;
 	readonly brain: ModelRef;
 	readonly fast: ModelRef;
+	readonly memory: ModelRef;
 	/** `[models] classifier`; absent, `classify` and classify steps fail with a clear error. */
 	readonly classifier?: ModelRef;
-	/** `brain` (or `default`), `fast`, `strongest`, an alias, or `provider/id`. */
+	/** `brain` (or `default`), `fast`, `memory`, `strongest`, an alias, or `provider/id`. */
 	ref(name: string): ModelRef;
 	/** One line per provider whose key is not set, for the setup report. */
 	readonly missing: readonly string[];
@@ -155,9 +158,9 @@ export async function createModelSetup(input: { readonly providers?: Record<stri
 	const clients = new Map<string, Awaited<ReturnType<typeof apiClient>>>();
 	for (const [name, config] of Object.entries(providers)) clients.set(name, await apiClient(config.api));
 	const chosen = input.models;
-	if (chosen?.brain === undefined || chosen.fast === undefined) throw new Error("config.toml [models] needs brain and fast, each <provider>/<id>.");
+	if (chosen?.brain === undefined || chosen.fast === undefined || chosen.memory === undefined) throw new Error("config.toml [models] needs brain, fast and memory, each <provider>/<id>.");
 	const aliases = chosen.aliases ?? {};
-	const named: Record<string, string> = { brain: chosen.brain, default: chosen.brain, fast: chosen.fast, strongest: chosen.strongest ?? chosen.brain, ...aliases };
+	const named: Record<string, string> = { brain: chosen.brain, default: chosen.brain, fast: chosen.fast, memory: chosen.memory, strongest: chosen.strongest ?? chosen.brain, ...aliases };
 	const split = (full: string): { provider: string; id: string } => {
 		const slash = full.indexOf("/");
 		if (slash <= 0) throw new Error(`Model ${full} is not <provider>/<id>.`);
@@ -214,7 +217,7 @@ export async function createModelSetup(input: { readonly providers?: Record<stri
 	}
 	const ref = (nameOrFull: string): ModelRef => {
 		const full = Object.hasOwn(named, nameOrFull) ? named[nameOrFull]! : nameOrFull;
-		if (!full.includes("/")) throw new Error(`Unknown model "${nameOrFull}". Use brain, fast, strongest, ${Object.keys(aliases).join(", ") || "an alias from [models.aliases]"}, or <provider>/<id>.`);
+		if (!full.includes("/")) throw new Error(`Unknown model "${nameOrFull}". Use brain, fast, memory, strongest, ${Object.keys(aliases).join(", ") || "an alias from [models.aliases]"}, or <provider>/<id>.`);
 		const { provider, id } = split(full);
 		if (!served.get(provider)!.has(id)) {
 			served.get(provider)!.add(id);
@@ -222,5 +225,5 @@ export async function createModelSetup(input: { readonly providers?: Record<stri
 		}
 		return { provider, modelId: id };
 	};
-	return { models, brain: ref("brain"), fast: ref("fast"), ...(classifier === undefined ? {} : { classifier }), ref, missing };
+	return { models, brain: ref("brain"), fast: ref("fast"), memory: ref("memory"), ...(classifier === undefined ? {} : { classifier }), ref, missing };
 }

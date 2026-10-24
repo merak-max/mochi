@@ -1,4 +1,4 @@
-# mochi config. Copy to ~/.mochi/config.toml. [providers], [models] brain and fast, and [web] are required.
+# mochi config. Copy to ~/.mochi/config.toml. [providers], [models] brain, fast and memory, and [web] are required.
 # Keys and tokens go in ~/.mochi/.env (see .env.example), never here.
 
 # Your time zone. Default: the machine's.
@@ -21,11 +21,12 @@ keyEnv = "ANTHROPIC_API_KEY"
 # url = "https://openrouter.ai/api/v1"
 # keyEnv = "OPENROUTER_API_KEY"
 
-# A model is <provider>/<model id>. The brain answers you; the fast model summarizes,
-# runs routines and reads data for scripts.
+# A model is <provider>/<model id>. The brain answers you; the fast model runs routines and
+# reads data for scripts; the memory model writes the summary lines of each conversation's view.
 [models]
 brain = "anthropic/claude-opus-5-5"
 fast = "anthropic/claude-haiku-5-5"
+memory = "anthropic/claude-haiku-5-5"
 
 # The decision model for classify, on a provider with a classifier api. With none set, classify fails.
 # classifier = "classifier/liquid/d1-ultra"

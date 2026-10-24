@@ -15,7 +15,8 @@ const NOTIFY_AFTER_MS = 30 * 60_000;
 
 interface CompactorDeps {
 	readonly harness: Harness;
-	readonly fast: FastCompletion;
+	/** The memory model. */
+	readonly complete: FastCompletion;
 	readonly log: Log;
 	/** Tells the owner, once per outage, that memory stopped being written. */
 	readonly notify: (text: string, context: Context) => Promise<void>;
@@ -60,7 +61,7 @@ async function compact(deps: CompactorDeps, tree: Readonly<Tree>, node: Node, l:
 	const lines: string[] = [];
 	let note = "";
 	while (lines.length < TRIES) {
-		const line = (await deps.fast({ system: COMPACTION, prompt: prompt + note }, context)).trim();
+		const line = (await deps.complete({ system: COMPACTION, prompt: prompt + note }, context)).trim();
 		lines.push(line);
 		if (bytes(line) <= NODE) break;
 		note = "\n" + over(line);

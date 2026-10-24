@@ -236,7 +236,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const stopWatching = watchLive(mochi.harness, mochi.line.root.id, (status) => cli.status(status));
 
 	const background = [
-		runCompactor({ harness: mochi.harness, fast: fastCompletion(models, config.modelSetup.fast), log, notify: (text, context) => notifyOwner(mochi.harness, mochi.line, text, context), now: Date.now }, running),
+		runCompactor({ harness: mochi.harness, complete: fastCompletion(models, config.modelSetup.memory), log, notify: (text, context) => notifyOwner(mochi.harness, mochi.line, text, context), now: Date.now }, running),
 		...(apps === undefined ? [] : [apps.run(running)]),
 		// A terminal-only daemon (chat, print) serves one script; schedules wait for the real daemon.
 		...(channelSet === "terminal" ? [] : [schedulesComponent(mochi, config, running)]),

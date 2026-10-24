@@ -97,13 +97,14 @@ keyEnv = "GATEWAY_KEY"
 
 [models]
 brain = "gateway/claude-opus-5-5"
-fast = "gateway/glm-5.3-flash"
+fast = "gateway/gpt-6.1-sol"
+memory = "gateway/claude-haiku-5-5"
 
 [models.aliases]
 sol = "gateway/gpt-6.1-sol"
 ```
 
-`brain` answers you. `fast` summarizes memory, runs routines and reads data for scripts. Profiles and triggers pick a tier or an alias by name.
+`brain` answers you. `fast` runs routines and reads data for scripts. `memory` writes the summary lines of each conversation's view; it makes many small calls, so a cheap model fits. Profiles and triggers pick a tier or an alias by name.
 
 ## Profiles
 
