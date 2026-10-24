@@ -325,7 +325,6 @@ async function run(args: readonly string[]): Promise<void> {
 	try {
 		process.exitCode = await main(cli);
 	} catch (error) {
-		// Only a daemon logs a crash; a client command prints one line.
 		if (cli.kind === "daemon") log("mochi.crashed", { error: error instanceof Error ? (error.stack ?? error.message) : String(error) });
 		else process.stderr.write(`mochi: ${error instanceof Error ? error.message : String(error)}\n`);
 		process.exit(1);
