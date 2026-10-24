@@ -76,7 +76,8 @@ export function parseCli(argv: readonly string[], interactive: boolean): Cli {
 		values.set(arg, value);
 		at++;
 	}
-	const required = command.args.split(" ").filter((word) => word.startsWith("<")).length;
+	// A literal word ("apps", "install") is required too, like a <placeholder>.
+	const required = command.args.split(" ").filter((word) => word !== "" && !word.startsWith("[")).length;
 	const optional = command.args.split(" ").filter((word) => word.startsWith("[")).length;
 	if (positional.length < required || positional.length > required + optional) {
 		return fail(`Usage: mochi ${name}${command.args === "" ? "" : ` ${command.args}`}.`, name);
