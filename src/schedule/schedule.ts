@@ -435,7 +435,7 @@ function listed({ input: { schedule, origin }, state }: ScheduleRecord, now: num
 	if (checkpoint !== undefined && (checkpoint.phase === "fire" || checkpoint.phase === "run")) next = iso(checkpoint.slot);
 	if (checkpoint !== undefined && checkpoint.phase === "wait") next = nextSlot(schedule, checkpoint.last, now);
 	if (checkpoint !== undefined && checkpoint.phase !== "watch" && checkpoint.last != null) last = `${checkpoint.last.result} at ${iso(checkpoint.last.at)}`;
-	return JSON.parse(JSON.stringify({ id: schedule.id, when: describeWhen(schedule.when), origin, next, last, prompt: schedule.prompt.slice(0, 200) }));
+	return JSON.parse(JSON.stringify({ id: schedule.id, when: describeWhen(schedule.when), agent: schedule.agent, origin, next, last, prompt: schedule.prompt.slice(0, 200) }));
 }
 
 interface ScheduleFnDeps {
