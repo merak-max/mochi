@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
@@ -30,8 +31,19 @@ function markRow(row: string, theme: Theme): string {
 	return out;
 }
 
-export function splash(facts: () => SplashFacts, theme: Theme): Component {
-	const mark = MARK.map((row) => markRow(row, theme));
+/** Pre-colored rows from <home>/mark.ans, used as they are; undefined when the file is absent. */
+export function loadMark(home: string): string[] | undefined {
+	let text: string;
+	try {
+		text = readFileSync(`${home}/mark.ans`, "utf8");
+	} catch {
+		return undefined;
+	}
+	return text.replace(/\n+$/, "").split("\n");
+}
+
+export function splash(facts: () => SplashFacts, theme: Theme, custom?: readonly string[]): Component {
+	const mark = custom ?? MARK.map((row) => markRow(row, theme));
 	const markWidth = Math.max(...mark.map((row) => visibleWidth(row)));
 	return {
 		render(width) {

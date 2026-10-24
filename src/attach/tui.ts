@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { getMarkdownTheme, getSelectListTheme, initTheme, type Theme, UserMessageComponent } from "@earendil-works/pi-coding-agent";
 import { type Component, Container, Editor, Markdown, matchesKey, ProcessTerminal, ScrollView, Spacer, Text, TuiAltScreen, visibleWidth, VStack } from "@earendil-works/pi-tui";
 import type { Terminal } from "./client.ts";
-import { splash, spread } from "./chrome.ts";
+import { loadMark, splash, spread } from "./chrome.ts";
 
 const EDITOR_RULE = "\u0000rule";
 const HINT = "/new starts a fresh thread · /stop stops main · ctrl+c leaves";
@@ -80,7 +80,7 @@ export async function runTui(terminal: Terminal, home: string): Promise<void> {
 	const editor = new MochiEditor(ui, theme);
 	const content = new Container();
 	const facts = { build: terminal.facts.build, pid: terminal.facts.pid, home: home.replace(process.env.HOME ?? "\u0000", "~") };
-	content.addChild(splash(() => facts, theme));
+	content.addChild(splash(() => facts, theme, loadMark(home)));
 	content.addChild(chat);
 	content.addChild(new Spacer(1));
 	const transcript = new ScrollView(content, { follow: "end", primary: true, overscroll: "chain" });

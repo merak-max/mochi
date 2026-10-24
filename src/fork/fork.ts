@@ -2,12 +2,11 @@ import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
 import { configure, type ConversationId, defineDocFamily, defineTask, defineTool, type EntryId, LiveDoc, type ModelRef, ROOT_CONVERSATION_ID, type TaskId, type TaskOptions, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
-import type { ChannelId } from "../channels/types.ts";
 import { agentOf, applyAgent, type Definition, type Definitions, inheritOwner, ownerIn, residentConversation } from "../agents/definitions.ts";
 import { copyContext, holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
 import { forkPoint } from "../seats.ts";
-import { answerText, LastInboundDoc, openTurn, submitNote, wakeChannelOf, type ChatTurn, type Line } from "../turn/turn.ts";
+import { answerText, LastInboundDoc, openTurn, submitNote, wakeChannelOf, type Line } from "../turn/turn.ts";
 
 // Every job is a `mochi.agent` task:
 //   fork      a copy of the caller, history and all, in a conversation the task owns. Its first request reads the
@@ -52,19 +51,6 @@ const DeliveredDoc = defineDocFamily<{ delivered: boolean }, null>({
 	checkpointWhen: () => false,
 });
 
-/**
- * Root learns a finished background child's answer only on its next turn, which an owner message or a board fire
- * starts. wakesRoot picks the callers whose answer may sit unsent: for them root wakes at once with the note as
- * input, so it delivers the result on the channel the owner last used. Every other caller reads the note on its next
- * turn, as before.
- */
-export const wakesRoot = (back: ConversationId): boolean => back === ROOT_CONVERSATION_ID;
-
-/** The chat Turn that delivers a finished background child's answer: its input is the [name] note. */
-export function forkWakeTurn(task: string, name: string, body: string, channel: ChannelId): ChatTurn {
-	return { source: "chat", channel, key: `fork-back:${task}`, tag: `[agent ${name}]`, text: `[${name}]\n${body}`, files: [] };
-}
-
 const WakeDoc = defineDocFamily<{ opened: boolean }, null>({
 	kind: "mochi.fork-wake",
 	version: 1,
@@ -105,14 +91,14 @@ export function defineForkTask(deps: { readonly workDir: string; readonly line: 
 				if (back !== undefined) {
 					const body = "answer" in result ? result.answer || "(empty answer)" : `(no answer: ${result.failure})`;
 					const key = `fork-back:${task.id}`;
-					if (wakesRoot(back.id)) {
-						// The note alone would wait for root's next turn; open one at once, deduped for a replay.
+					if (back.id === ROOT_CONVERSATION_ID) {
+						// A note would wait for root's next turn, so finished work sat unsent. Wake root now, once per task.
 						await runtime.commit(async (tx) => {
 							const wake = await tx.doc(WakeDoc, `${task.id}`, null);
 							if (wake.opened) return;
 							wake.opened = true;
 							const channel = wakeChannelOf((await tx.doc(LastInboundDoc)).last?.channel, (id) => line().channels.has(id));
-							await openTurn(tx, line(), forkWakeTurn(`${task.id}`, task.input.name, body, channel));
+							await openTurn(tx, line(), { source: "chat", channel, key, tag: `[agent ${task.input.name}]`, text: body, files: [], followUp: true });
 						}, context);
 					} else {
 						const held = await holdText(runtime, workDir, back.id, `in:${key}`, body, context);

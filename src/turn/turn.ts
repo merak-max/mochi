@@ -67,7 +67,7 @@ export interface SavedFile {
 	readonly bytes: number;
 }
 
-export type ChatTurn = {
+type ChatTurn = {
 	readonly source: "chat";
 	readonly channel: ChannelId;
 	readonly key: string;
@@ -445,8 +445,7 @@ export function openTurn(tx: Tx, line: Pick<Line, "id" | "turn">, input: TurnInp
 
 /** A daemon message to the owner, verbatim, on the channel the owner last wrote on. */
 export async function notifyOwner(harness: Harness, line: Line, text: string, context: Context): Promise<void> {
-	const last = (await harness.snapshot(LastInboundDoc, context))?.last?.channel;
-	const channel: ChannelId = last !== undefined && line.channels.has(last) ? last : "cli";
+	const channel = wakeChannelOf((await harness.snapshot(LastInboundDoc, context))?.last?.channel, (id) => line.channels.has(id));
 	await harness.commit((tx) => openTurn(tx, line, { source: "run", channel, text, from: { kind: "conversation", id: ROOT_CONVERSATION_ID } }), context);
 }
 
