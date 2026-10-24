@@ -11,7 +11,6 @@ The model manages its own work and its own context. It writes scripts instead of
 One daemon process owns everything:
 
 - the Harness and its SQLite file `<home>/mochi.sqlite`
-- the search index `<home>/index.sqlite`
 - every channel adapter, the trigger and webhook server, and the A2A server
 - the attach socket `<home>/mochi.sock`
 
@@ -67,9 +66,9 @@ A seat is how far a conversation is trusted. It is written once, when the conver
 | Seat | Who | Differs from `agent` |
 |---|---|---|
 | `agent` | root, forks, profiles | (every function) |
-| `trigger` | trigger runs | no `note`, `react`, forks, profiles, board or `trigger_add` |
+| `trigger` | trigger runs | no `react`, forks, profiles, board or `trigger_add` |
 | `peer` | A2A contexts | also no `notify`, processes, A2A or triggers |
-| `user` | user threads | files, the web, media, `recall`, `llm` and `classify` only; no `notify` |
+| `user` | user threads | files, the web, media, `zoom`, `llm` and `classify` only; no `notify` |
 
 The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 
@@ -82,7 +81,7 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 | Area | Functions |
 |---|---|
 | Files and shell | `bash`, `read`, `edit`, `write` (the daemon user's full access; bash defaults to a 600 s timeout), `find` and `grep` (fff-node: one in-process index per root, frecency ranked, gitignore aware; the root defaults to the home dir) |
-| Memory | `note`, `recall`, `zoom`, `history` |
+| Memory | `zoom` |
 | Models | `llm` (the fast model unless `model` names `brain` or `strongest`, no tools), `classify` (the classifier model) |
 | Context | `context_read`, `context_put`, `context_list` |
 | Web | `web_search`, `web_fetch`, `web_map`, `web_find_tools`, `web_alexandria`, `browse`, `browse_fast` |
@@ -103,28 +102,38 @@ Sections render in this order, and each must be stable between requests so the p
 
 1. `system`: raw facts and rules. The message tag, tools and code mode, memory tools, doors, his call, scheduling, proof, safety, and the running chat channels. An agent seat also gets the people by id and the A2A peers.
 2. `identity`: voice and style. Who mochi is, the reply style, and one line per running chat channel with its bubble rule.
-3. `memory`: the wake view of the conversation owner's memory log. A user thread does not have it.
+3. `memory`: how to read the view and zoom it. The view itself goes in the request, not the prompt.
 4. `skills-index`: one line per bundled skill. The model opens a skill with `read`.
 5. `codemode`: the inline library functions. `searchTools()` finds the deferred ones.
 6. `context`: the context keys and `store()` keys the conversation holds, with their sizes. It is empty until a value exists.
 7. `instructions`: root's `<home>/instructions.md`, or a profile's or trigger's instructions.
 
-A changed section reaches the next request as a mid-conversation system message that carries only the change, so a `note` does not break the cache.
+A changed section reaches the next request as a mid-conversation system message that carries only the change, so a changed section does not break the cache.
 
 ## Memory and the context window
 
-Memory follows OptMem's merge tree (`src/memory/tree.ts`). A log is an append-only list of lines. Each complete aligned block of 2, 4, 8 and more lines gets one summary line, built once by the fast model from its two halves (or from its raw lines while the block holds 16 or fewer). `cover(total, budget)` tiles the log with at most `budget` blocks: recent lines stay whole and older ones merge. Nothing is summarized twice and nothing is lost.
+The transcript is the memory. The view follows uniichat's memory tree (github.com/VictorTaelin/uniichat, `Memory.ts` and `prompt.txt`), inside pi-durable. pi-durable stores the messages; mochi stores only the tree over them and the view of it. `settings.compaction.enabled` is false: nothing is summarized away.
 
-There are two kinds of log:
+Message i is the i-th non-system message of a conversation's model context. Over the messages grows a binary tree:
 
-- **Memory logs.** `note({ line })` appends one line. Root's log is `mochi.memory-log`; each profile's is `mochi.profile-memory` keyed by name. The `memory` section shows `cover(root's log, 96)`, so every conversation sees the owner's rules and facts. A profile's conversations also see `cover(its own log, 96)` after it, and their `note` calls write there. `zoom({ own: true })` opens a block of the profile's own log.
-- **Turn logs.** `mochi.turn-log` holds one line per turn of a conversation: the owner's text and mochi's answer, digested by the fast model when long.
+- Node (0,i) is message i, tagged `user:`, `agent:`, `tool:` or `echo:`, when it fits in 512 bytes (`NODE`). A longer message gets a one-line summary.
+- Node (l,i) merges nodes (l-1,2i) and (l-1,2i+1) into one line of at most 512 bytes.
 
-The feed (`src/memory/feed.ts`) subscribes to commits. After each commit it indexes new chat text into FTS5, folds finished turns into turn logs, and builds every block that is due, one commit per block, so a crash resumes at the next missing block. pi-durable's threshold compaction is the one context policy. Its `beforeCompact` hook returns the cover of the conversation's turn log as the summary, so compaction never waits on a model. `zoom({ block, turns? })` opens one block into its two halves, down to the raw lines.
+`src/memory/view.ts` holds the algorithm as pure functions with uniichat's names: `roots`, `halves`, `span`, `reach`, `merge`, `fit`, `todo`, `whole`, `blocks`, `zoom` and the `LEAF` and `MERGE` task text. A view lists nodes that cover the chat, oldest first. Each new message appends its node. When the view passes `HIGH` bytes (128,000; `MOCHI_VIEW_HIGH` sets it for a test), one batch merges the most-due adjacent siblings whose parent is built, down to half. A pair is due by `(T + 1) / 2^l - i`, its age from its last message in halves. So the view changes only at its end between batches, and the prompt cache stays warm.
 
-`recall` searches memory lines and past chat with FTS5 BM25, root's chat first, and leaves out entries the caller already sees. `recall({ entry })` reads the messages around one chat hit. `history` gives a script past chat as rows to filter and hand to `llm`.
+The `mochi.view` document family holds one tree per standing conversation, keyed by conversation id: `start` (message 0's timestamp), `count`, `nodes` by slot, the chat's `view`, and the compactions' `seen` view (a quarter of `HIGH`). A reset or a manual compaction starts a new context, and the compactor starts a new tree for it. Forks and fresh agents have no tree. A trigger run has none, because each run starts from a reset.
 
-The retired `mochi.memory` note document imports into root's memory log once, at open, when the log is empty.
+The compactor (`src/memory/compactor.ts`) is one loop in the daemon. After each commit that adds entries, it brings each standing conversation's tree to its messages and builds due nodes oldest first, one commit per node, so a crash resumes at the next missing node. It stops at a tool result that pi-durable synthesized for a call still running. Each call goes to the fast model with uniichat's compaction prompt verbatim (`src/memory/prompt.ts`), the `seen` view up to the node, and the `LEAF` or `MERGE` task with the node's input. A line over 512 bytes is asked again with its size and where the limit cuts it, five tries at most, and the shortest is kept. A failed pass waits 5 s, doubling to 5 min, and logs `view.failed` each time. After 30 minutes of failure it notifies the owner once, through a run Turn on the owner's last channel, and again only after it has worked in between. There is no fallback summary: a node not built shows as `(not summarized yet: zoom it)`.
+
+The `notes` extension, which every seat selects, holds the `memory` section and a `beforeRequest` hook on `GenerationTask`. The hook reads the tree and replaces the request's messages with:
+
+1. the system messages as pi-durable gave them;
+2. one user message with the view before the tail, as `id+n|text` lines inside `<chat>` tags, four lines a text block (`BLOCK`);
+3. the tail, whole: from the last user message, cut to its last `HIGH` bytes as uniichat's `whole` does, moved back to the first message of the view line that holds it and off any tool result.
+
+The hook only reads. A conversation with no tree sends its context as it is.
+
+The `memory` section is uniichat's "# The view" with its turn rules on memory. `zoom({ id, n })` opens line id+n into its two halves, `zoom({ id, n: 1 })` gives message id whole, and `zoom({ name })` gives a child agent's own chat. Zoom is the only way to read the tree; there is no search.
 
 ## Context
 
@@ -217,8 +226,7 @@ src/
   setup.ts          readiness per boundary and the boot report
   journal.ts        a task-scoped record of what a call created, for replay
   brain/            providers and models, the classifier, identity section, llm and classify
-  memory/           tree.ts (cover, pending), memory.ts (logs, tools, sections, the window hook), feed.ts
-  index/fts.ts      FTS5 over memory lines and chat text
+  memory/           view.ts (the tree and view, pure), memory.ts (the doc, the request hook, zoom), compactor.ts, prompt.ts
   context.ts        held text: files, the catalog, holdText, context_* tools and the context section
   fork/fork.ts      the child task, fork, fork_start, agent and depth
   profiles/         profiles on disk, standing conversations, profile_* tools, memory owner
@@ -245,7 +253,7 @@ src/
 | Triggers run in their own conversations and reach people only by `notify`. | Root's transcript and cache stay clean, and silence is the default for periodic checks. |
 | Forks by default; fresh agents only for a slice of data. | A fork reuses the parent's prompt cache and knows the context. Measured live on Opus 5.5: each fork's first request read about 6,500 cached tokens and wrote about 225. A fresh `agent` pays its own prompt, so it is for bulk work on a cheaper model over context it is given. |
 | Profiles live in the one daemon, not one service each. | One process, one store, one schedule; a profile still has its own role, model, tools and memory. |
-| OptMem memory and window instead of rewrite-on-compaction. | Rewriting the whole prefix on every compaction lost detail each pass, and promises died at compaction. A tree builds each summary once and keeps every raw line reachable. |
+| uniichat's view instead of compaction. | Rewriting the whole prefix on every compaction lost detail each pass, and promises died at compaction. The tree builds each line once, every message stays reachable by `zoom`, and the view changes only at its end. |
 | The board holds promises, not one-shot triggers. | Of 23 commitments root made from Oct 6 to 14, 10 had nothing behind them. |
 | No caps on memory or context. | Sizes are reading budgets, not storage limits. Transport limits at HTTP boundaries and process timeouts stay. |
 | No vendor names in the core. | Providers, the classifier, apps and the web are config. The web client speaks Firecrawl's v2 API and the apps client speaks Executor's protocol, each as the one adapter. |
