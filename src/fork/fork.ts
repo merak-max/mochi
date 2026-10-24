@@ -17,7 +17,9 @@ import { answerText, submitNote } from "../turn/turn.ts";
 //             definition's standing conversation and waits for that answer.
 
 /**
- * `back`: the conversation a background child merges its answer into, as a new message.
+ * `back`: the caller's conversation. A background child always merges its answer there as a new message; a foreground
+ * child does so only when `waiter`, the tool call that waits for it, ended first (its script timed out or the daemon
+ * restarted past it). A child never belongs to the script, so a script's end never aborts it.
  * `depth`: root and standing conversations are 0, their children 1. Absent on tasks made before depth existed.
  * `resident`: the standing conversation a resident job's brief goes to.
  */
@@ -25,6 +27,7 @@ type ForkInput = {
 	readonly name: string;
 	readonly brief: string;
 	readonly back?: ConversationId;
+	readonly waiter?: TaskId;
 	readonly fresh?: true;
 	readonly depth?: number;
 	readonly model?: ModelRef;
@@ -73,7 +76,10 @@ export function defineForkTask(workDir: string) {
 					}, context);
 				}
 				const done = { status: "terminal", outcome: { status: "completed", result } } as const;
-				const back = task.input.back === undefined || duplicate ? undefined : await runtime.conversation(task.input.back, context);
+				const waiter = task.input.waiter;
+				let waiting = false;
+				if (waiter !== undefined) await runtime.commit(async (tx) => void (waiting = (await tx.task(waiter))?.state.status !== "terminal"), context);
+				const back = task.input.back === undefined || duplicate || waiting ? undefined : await runtime.conversation(task.input.back, context);
 				if (back !== undefined) {
 					const body = "answer" in result ? result.answer || "(empty answer)" : `(no answer: ${result.failure})`;
 					const key = `fork-back:${task.id}`;
@@ -187,8 +193,9 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 			const depth = (await depthOf(tx, api.conversationId)) + 1;
 			const at = await forkPoint(tx, api.conversationId);
 			const sender = await ownerIn(tx, api.conversationId);
-			const owned: TaskOptions = { ownership: { kind: "task", taskId: api.taskId } };
 			const detached: TaskOptions = { ownership: { kind: "conversation" }, background: true };
+			// A foreground child waits on this call, but owns itself: when the call ends first, the answer becomes a note.
+			const reply = background ? { back: api.conversationId } : { back: api.conversationId, waiter: api.taskId };
 			const started: Started[] = [];
 			for (const [offset, job] of jobs.entries()) {
 				const index = first + offset;
@@ -203,16 +210,16 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 					// A busy resident may be waiting on this very caller, so a foreground wait could never end: its answer comes back as a note.
 					const busy = (await tx.doc(LiveDoc, resident)).run !== undefined;
 					const queued = busy && !background;
-					const input: ForkInput = { name: job.name, brief: residentBriefOf(sender, job.brief, keys), depth, resident, ...(background || queued ? { back: api.conversationId } : {}) };
+					const input: ForkInput = { name: job.name, brief: residentBriefOf(sender, job.brief, keys), depth, resident, ...(background || queued ? { back: api.conversationId } : reply) };
 					const made = await journaled(tx, api.taskId, key, async () => {
 						await copyContext(tx, api.conversationId, resident, keys);
-						return tx.createTask(task, input, background || queued ? detached : owned);
+						return tx.createTask(task, input, detached);
 					});
 					started.push({ id: made.id, queued });
 					continue;
 				}
-				const options = background ? detached : owned;
-				const back = background ? { back: api.conversationId } : {};
+				const options = detached;
+				const back = reply;
 				let made;
 				if (job.fork === true) {
 					const input: ForkInput = { name: job.name, brief: briefOf(job.name, background, job.brief, scratch), depth, ...back, ...withModel };
@@ -233,7 +240,7 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 				`Starts child agents, one per job, ${FORK_BATCH} at a time, and resolves to [{ name, answer }] in job order. ` +
 				"fork: true copies this conversation, so the child knows everything here and reuses the prompt cache; otherwise the child starts fresh with only its brief and the context keys you pass. " +
 				"definition names an agent definition: the fresh child runs with its model, thinking, tools and instructions. A resident definition keeps one standing conversation; the job goes there, and a busy one queues it and answers NOT STARTED. " +
-				"background: true returns the names at once, and each answer arrives later as a [name] note on your next turn. The script's timeout (10 min default) cancels unfinished foreground children, so work that takes minutes runs in the background. " +
+				"background: true returns the names at once, and each answer arrives later as a [name] note on your next turn. A foreground child outlives its script: if the script times out first, the child's answer still arrives as a [name] note. " +
 				"model overrides the definition's; fast suits bulk reading.",
 			parameters: Type.Object({ jobs: Type.Array(Job, { minItems: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.Array(Type.Object({ name: Type.String(), answer: Type.String() })),
