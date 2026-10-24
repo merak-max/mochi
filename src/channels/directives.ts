@@ -1,7 +1,7 @@
 import type { Bubble } from "./types.ts";
 
-/** The iMessage send effects spectrum-ts 12.10.1 knows, by its own names. */
-export const EFFECTS = ["balloons", "celebration", "confetti", "echo", "fireworks", "gentle", "heart", "invisible", "lasers", "loud", "slam", "sparkles", "spotlight"] as const;
+/** The iMessage send effects the SDK knows, by its own names. */
+const EFFECTS = ["balloons", "celebration", "confetti", "echo", "fireworks", "gentle", "heart", "invisible", "lasers", "loud", "slam", "sparkles", "spotlight"] as const;
 export type EffectName = (typeof EFFECTS)[number];
 
 const EFFECT_ALIASES: Readonly<Record<string, EffectName>> = {
@@ -13,18 +13,18 @@ const EFFECT_ALIASES: Readonly<Record<string, EffectName>> = {
 	birthday: "celebration",
 };
 
-export function effectName(raw: string): EffectName | undefined {
+function effectName(raw: string): EffectName | undefined {
 	const name = raw.trim().toLowerCase().replace(/\s+/g, " ");
 	const known = EFFECTS.find((effect) => effect === name);
 	return known ?? EFFECT_ALIASES[name];
 }
 
-export interface OutgoingFile {
+interface OutgoingFile {
 	readonly path: string;
 	readonly voice: boolean;
 }
 
-export interface Directives {
+interface Directives {
 	readonly text: string;
 	readonly files: readonly OutgoingFile[];
 	readonly effect?: EffectName;

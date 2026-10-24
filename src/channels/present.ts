@@ -51,15 +51,10 @@ function groups(tokens: readonly Token[]): string[] {
 	return out;
 }
 
-/** The bubbles of `text`, as marked parses CommonMark and GFM. */
-export function blocks(text: string): string[] {
-	return groups(Lexer.lex(text));
-}
-
 export function present(text: string, profile: ChannelProfile): readonly Bubble[] {
 	const body = text.replace(TRUE_BLANKS, "").trim();
 	if (body === "") return [];
-	const pieces = profile.paragraphsAreBubbles ? blocks(body) : [body];
+	const pieces = profile.paragraphsAreBubbles ? groups(Lexer.lex(body)) : [body];
 	const kept = pieces.length > profile.maxBubbles ? [...pieces.slice(0, profile.maxBubbles - 1), pieces.slice(profile.maxBubbles - 1).join("\n\n")] : pieces;
 	return kept.map((piece): Bubble => (URL_ONLY.test(piece) ? { kind: "link", url: piece } : { kind: "text", text: piece }));
 }

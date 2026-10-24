@@ -35,15 +35,15 @@ export async function saveOutput(workDir: string, extension: string, bytes: Uint
 	return { path: out.path };
 }
 
-export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 
 /**
  * Copies a regular file under `home`, at most MAX_ATTACHMENT_BYTES, to work/out/<uuid>/<its name>, so the sent bytes
  * stay in the work directory and keep their name. Returns the copy's work-relative path.
  */
-export async function copyIntoWork(path: string, workDir: string, home = homedir()): Promise<string> {
+async function copyIntoWork(path: string, workDir: string): Promise<string> {
 	const actual = await realpath(path);
-	if (!within(await realpath(home), actual)) throw new Error("The file must be inside the owner's home directory.");
+	if (!within(await realpath(homedir()), actual)) throw new Error("The file must be inside the owner's home directory.");
 	const info = await stat(actual);
 	if (!info.isFile()) throw new Error("The path is not a regular file.");
 	if (info.size > MAX_ATTACHMENT_BYTES) throw new Error("The file is larger than 100 MB.");
@@ -53,33 +53,15 @@ export async function copyIntoWork(path: string, workDir: string, home = homedir
 	return `${dir}/${basename(path)}`;
 }
 
-/** A file to send, as a checked work-relative path. An absolute path outside the work directory is copied in first. */
-export async function outgoingPath(path: string, workDir: string, home = homedir()): Promise<string> {
-	const root = resolve(workDir);
-	const local = isAbsolute(path) && within(root, resolve(path)) ? relative(root, resolve(path)) : path;
-	if (isAbsolute(local)) return copyIntoWork(local, workDir, home);
-	await workPath(local, workDir);
-	return local;
-}
-
 export async function loadAttachment(path: string, workDir: string): Promise<Extract<Bubble, { kind: "file" }>> {
 	const absolute = await workPath(path, workDir);
 	return { kind: "file", name: basename(path), mimeType: mimeOf(path), bytes: await readFile(absolute) };
 }
 
-export async function loadOutgoing(path: string, workDir: string, home = homedir()): Promise<Extract<Bubble, { kind: "file" }>> {
-	return loadAttachment(await outgoingPath(path, workDir, home), workDir);
-}
-
-/** Checks each file now, copies one from outside the work directory in, and appends an attach: line per file to `text`. */
-export async function withAttachments(text: string, paths: readonly string[], workDir: string, home = homedir()): Promise<string> {
-	const lines = [text];
-	for (const path of paths) {
-		try {
-			lines.push(`attach: ${await outgoingPath(path, workDir, home)}`);
-		} catch (error) {
-			throw new Error(`Attachment ${path} cannot be sent: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-	return lines.join("\n");
+/** A file to send, from a work-relative path. An absolute path outside the work directory is copied in first. */
+export async function loadOutgoing(path: string, workDir: string): Promise<Extract<Bubble, { kind: "file" }>> {
+	const root = resolve(workDir);
+	const local = isAbsolute(path) && within(root, resolve(path)) ? relative(root, resolve(path)) : path;
+	if (isAbsolute(local)) return loadAttachment(await copyIntoWork(local, workDir), workDir);
+	return loadAttachment(local, workDir);
 }
