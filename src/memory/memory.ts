@@ -159,7 +159,7 @@ export function zoomTool(harness: () => Harness) {
 export const VIEW_EXTENSION = "notes";
 
 /**
- * The memory section and the request hook. A conversation with no tree (a child, a trigger run) sends its context
+ * The memory section and the request hook. A conversation with no tree (a child) sends its context
  * as it is.
  */
 export function memoryExtension(): Extension {

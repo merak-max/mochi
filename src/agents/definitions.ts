@@ -196,7 +196,7 @@ export function agentStopTool(definitions: Definitions, host: () => StopHost): T
 		name: "agent_stop",
 		description:
 			"Stop a resident agent now: abort its running turn, its queued jobs, and the forks and agents it started. Use it when the owner says stop or a brief is wrong. " +
-			"It does not stop shell processes or schedules the agent made: check proc_status, board_list and `systemctl --user list-timers` after it. Resolves to what it stopped.",
+			"It does not stop shell processes or board items the agent made: check proc_status, board_list and `systemctl --user list-timers` after it. Resolves to what it stopped.",
 		parameters: Type.Object({ name: Type.String() }),
 		structuredOutputSchema: Type.String(),
 		replay: "safe",

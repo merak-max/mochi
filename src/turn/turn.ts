@@ -249,7 +249,7 @@ function blockedByPolicy(settled: { readonly status: string; readonly detail?: u
 	return settled.status === "unanswered" && typeof settled.detail === "string" && settled.detail.includes("Usage Policy");
 }
 
-const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and schedules are kept.";
+const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and the board are kept.";
 
 
 async function saveFiles(workDir: string, message: Extract<Inbound, { kind: "message" }>): Promise<SavedFile[]> {

@@ -125,7 +125,7 @@ async function build(deps: CompactorDeps, id: ConversationId, context: Context):
 	}
 }
 
-/** Root and the standing conversations keep a tree. A child or a trigger run (reset before each run) does not. */
+/** Root and the standing conversations keep a tree. A child does not, nor an old trigger-run conversation, which the store still holds. */
 async function standing(harness: Harness, id: ConversationId, context: Context): Promise<boolean> {
 	const record = await harness.commit((tx) => tx.conversation(id), context);
 	if (record === undefined || record.owner !== undefined) return false;

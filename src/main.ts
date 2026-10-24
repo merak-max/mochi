@@ -178,7 +178,7 @@ function buildOf(): string {
 	}
 }
 
-/** Open storage, the Harness, the channels and the components. `terminal` runs no outside channel and no schedules. */
+/** Open storage, the Harness, the channels and the components. `terminal` runs no outside channel and no board tasks. */
 async function startDaemon(config: Config, channelSet: "configured" | "terminal"): Promise<{ stop(reason: string): Promise<void> }> {
 	const releaseLock = acquireLock(join(config.home.dir, "mochi.lock"));
 	const controller = new AbortController();

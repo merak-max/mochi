@@ -52,7 +52,7 @@ export const ModelsSchema = Type.Object(
 		strongest: Type.Optional(Type.String({ minLength: 3 })),
 		/** The yes/no classifier for `classify` and classify steps, on a provider with api "classifier". */
 		classifier: Type.Optional(Type.String({ minLength: 3 })),
-		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a definition or a schedule may use. */
+		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a definition may use. */
 		aliases: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), Type.String({ minLength: 3 }))),
 		/** Limits of a model pi-ai's catalog does not know, by `<provider>/<id>`. */
 		overrides: Type.Optional(Type.Record(Type.String({ minLength: 3 }), ModelOverrideSchema)),
