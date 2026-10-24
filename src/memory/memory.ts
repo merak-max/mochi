@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { allPages } from "../pages.ts";
 import { VIEW } from "./prompt.ts";
-import { blocks, bytes, cover, HIGH, NODE, type Node, type Part, reach, SEEN, slot, span, type View, whole, zoom } from "./view.ts";
+import { blocks, bytes, cover, HIGH, NODE, type Node, type Part, reach, SEEN, slot, span, type View, WAIT, whole, zoom } from "./view.ts";
 
 // The transcript is the memory. pi-durable stores a conversation's messages; this doc holds the tree built over them
 // and the view of it. Message i is the i-th non-system message of the conversation's model context, so the compactor,
@@ -141,6 +141,50 @@ export function zoomTool(harness: () => Harness) {
 			return text(zoom(node, (i) => show(chat[i]!), chat.length, args.id, args.n));
 		},
 	});
+}
+
+const MAX_BREAKPOINTS = 4;
+
+type WireBlock = { type: string; text?: string; cache_control?: unknown };
+type WireMessage = { role: string; content: unknown };
+type WirePayload = { system?: WireBlock[]; tools?: WireBlock[]; messages?: WireMessage[] };
+
+function countBreakpoints(payload: WirePayload): number {
+	let count = 0;
+	const lists: unknown[] = [payload.system, payload.tools];
+	for (const message of payload.messages ?? []) lists.push(message.content);
+	for (const list of lists) {
+		if (!Array.isArray(list)) continue;
+		for (const block of list as WireBlock[]) {
+			if (block.cache_control !== undefined) count++;
+		}
+	}
+	return count;
+}
+
+/**
+ * An Anthropic Messages payload with a cache breakpoint on the view's last whole block before its first line not built
+ * (uniichat's mark). The view changes only at its end between batches, so the lines before the mark stay cached
+ * when the tail moves. Any other payload comes back unchanged.
+ */
+export function markView(payload: unknown): unknown {
+	const wire = payload as WirePayload;
+	const view = wire.messages?.find((message) => {
+		const first = Array.isArray(message.content) ? (message.content as WireBlock[])[0] : undefined;
+		return message.role === "user" && first?.type === "text" && first.text === "<chat>\n";
+	});
+	if (view === undefined) return undefined;
+	const content = view.content as WireBlock[];
+	let marked = -1;
+	for (let k = 1; k < content.length - 1; k++) {
+		if (content[k]!.text?.includes(WAIT)) break;
+		marked = k;
+	}
+	if (marked === -1) return undefined;
+	if (content[marked]!.cache_control !== undefined) return undefined;
+	if (countBreakpoints(wire) >= MAX_BREAKPOINTS) return undefined;
+	content[marked]!.cache_control = { type: "ephemeral" };
+	return payload;
 }
 
 /** The extension that holds the view. It keeps the name the stored conversations already select. */

@@ -4,6 +4,7 @@ import { getBuiltinClassifierModels, getBuiltinModels, getBuiltinProviders } fro
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { type Static, Type } from "typebox";
 import type { Env } from "../channels/types.ts";
+import { markView } from "../memory/memory.ts";
 
 /**
  * `[providers.<name>]` in config.toml: an endpoint, the pi-ai api it speaks (`anthropic-messages`, `openai-responses`,
@@ -122,6 +123,24 @@ function withImageBytes(limits: ModelInputLimits | undefined): ModelInputLimits 
 	return { ...limits, images: { ...limits?.images, resize: { ...resize, maxBytes } } };
 }
 
+/** Anthropic streams whose payloads get the view's cache breakpoint, after any caller's own payload hook. */
+function withViewMark(streams: ProviderStreams): ProviderStreams {
+	const options = <T extends { onPayload?: (payload: unknown, model: Model<Api>) => unknown }>(given: T | undefined): T => {
+		const caller = given?.onPayload;
+		const onPayload = async (payload: unknown, model: Model<Api>): Promise<unknown> => {
+			const replaced = caller === undefined ? undefined : await caller(payload, model);
+			const current = replaced ?? payload;
+			return markView(current) ?? replaced;
+		};
+		return { ...given, onPayload } as T;
+	};
+	return {
+		...streams,
+		stream: (model, context, given) => streams.stream(model, context, options(given)),
+		streamSimple: (model, context, given) => streams.streamSimple(model, context, options(given)),
+	};
+}
+
 /** A model definition for `id` on a provider: the catalog's limits and quirks where it knows the model. */
 function definition(id: string, config: ProviderConfig, provider: string, url: string, override: ModelOverride = {}): Model<Api> {
 	const wire: Api = config.api;
@@ -180,7 +199,7 @@ export async function createModelSetup(input: { readonly providers: Record<strin
 				name,
 				auth: { apiKey: { name: keyEnv, resolve: async () => ({ auth: { apiKey, ...(config.headers === undefined ? {} : { headers: config.headers }) }, source: keyEnv }) } },
 				models: [...served.get(name)!].map((id) => definition(id, config, name, url, chosen.overrides?.[`${name}/${id}`])),
-				api: (clients.get(name)!.client as ProviderStreams),
+				api: config.api === "anthropic-messages" ? withViewMark(clients.get(name)!.client as ProviderStreams) : (clients.get(name)!.client as ProviderStreams),
 			}),
 		);
 	};
