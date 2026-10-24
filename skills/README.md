@@ -13,6 +13,7 @@ On-demand instructions for mochi. The prompt's skills index shows each skill's `
 | `reflect`, `automate-me` | Learning from a run, and learning the owner's style into memory. |
 | `improve` | The nightly self-improvement run and its undo. |
 | `unslop`, `technical-writing`, `bro` | Writing rules, document structure, and plain restatement. |
+| `chief-of-staff`, `handoff`, `subagent-orchestrator` | A long-running goal with a dated wiki, a handoff note for a fresh agent, and delegating long work. Copied verbatim from Matt Pocock and HumanLayer, so they name Claude Code's tools: the Skill tool is the skills index, `Agent` or `Task` is `tools.agent`, and schedules are `schedule_add`. |
 
 Bundled agent definitions live in `../agents/`. The `worker` definition follows an exact brief on the model its front matter names. Tiers and aliases come from `[models]` in the owner's `config.toml`.
 
