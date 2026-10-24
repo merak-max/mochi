@@ -1,8 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-// The MAGI: three hexagonal cores, MELCHIOR above, BALTHASAR and CASPER below. "~" before a cell draws it in the
-// accent, so each core's "()" lamp is lit.
+/** "~" before a cell draws it in the accent. */
 const MARK = [
 	"",
 	"          ______",

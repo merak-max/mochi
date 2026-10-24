@@ -10,7 +10,6 @@ const Interaction = Type.Object({
 	output: Text,
 	result: Text,
 	error: Text,
-	liveViewUrl: Text,
 	interactiveLiveViewUrl: Text,
 	killed: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
 	exitCode: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),

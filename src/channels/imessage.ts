@@ -71,11 +71,11 @@ interface IMessageSpace {
 	sendReply(text: string, targetMessageId: string): Promise<unknown>;
 	sendLink(url: string): Promise<unknown>;
 	sendFile(file: FileToSend, replyTo?: string): Promise<unknown>;
-	sendVoice?(file: FileToSend, replyTo?: string): Promise<unknown>;
-	sendEffect?(text: string, effect: EffectName, replyTo?: string): Promise<unknown>;
-	sendPoll?(title: string, options: readonly string[]): Promise<unknown>;
+	sendVoice(file: FileToSend, replyTo?: string): Promise<unknown>;
+	sendEffect(text: string, effect: EffectName, replyTo?: string): Promise<unknown>;
+	sendPoll(title: string, options: readonly string[]): Promise<unknown>;
 	/** No card: share mochi's own contact card. */
-	sendContact?(card: ContactCard | undefined): Promise<unknown>;
+	sendContact(card: ContactCard | undefined): Promise<unknown>;
 	startTyping(): Promise<void>;
 	stopTyping(): Promise<void>;
 	getMessage(id: string): Promise<IMessageMessage | undefined>;
@@ -96,7 +96,6 @@ function judge(health: { readonly lastSignalAt: number; readonly failedProbes: n
 }
 
 type Credentials = { readonly projectId: string; readonly projectSecret: string };
-
 
 export function normalizeHandle(handle: string): string {
 	const trimmed = handle.trim().toLowerCase();
@@ -194,7 +193,7 @@ async function toInbound(message: IMessageMessage, owner: string, users: readonl
 }
 
 /**
- * The advanced-imessage SDK sets a numeric gRPC `grpcCode` on every error it surfaces: UNAVAILABLE, RESOURCE_EXHAUSTED
+ * The SDK sets a numeric gRPC `grpcCode` on every error it surfaces: UNAVAILABLE, RESOURCE_EXHAUSTED
  * and the auth codes never left; DEADLINE_EXCEEDED may have; INVALID_ARGUMENT, NOT_FOUND and FAILED_PRECONDITION are
  * refusals. Anything else from the platform call has an unknown outcome.
  */
@@ -219,7 +218,7 @@ function classifyIMessageError(error: unknown): DeliveryError {
 async function connectPhoton(credentials: Credentials): Promise<IMessageApp> {
 	const { Spectrum, attachment, contact, markdown, poll, reply, richlink, voice } = await import("spectrum-ts");
 	const { effect, imessage, nativeContactCard } = await import("spectrum-ts/providers/imessage");
-	// @ts-expect-error spectrum-ts 12.10.1 provider types do not resolve under exactOptionalPropertyTypes; runtime accepts an empty config.
+	// @ts-expect-error the provider types do not resolve under exactOptionalPropertyTypes; runtime accepts an empty config.
 	const app = await Spectrum({ ...credentials, providers: [imessage.config()], options: { logLevel: "error" } });
 	const platform = imessage(app);
 	const wrap = (space: Awaited<ReturnType<typeof platform.space.create>>): IMessageSpace => {
@@ -335,13 +334,11 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 			}
 			case "poll": {
 				const to = await space();
-				if (to.sendPoll === undefined) throw new Error("This iMessage connection cannot send polls.");
 				rememberSent(await to.sendPoll(request.title, request.options), "poll", `[poll ${request.title}]`, owner);
 				return `Sent the poll "${request.title}". Votes arrive as owner messages.`;
 			}
 			case "contact": {
 				const to = await space();
-				if (to.sendContact === undefined) throw new Error("This iMessage connection cannot send contact cards.");
 				const { action: _action, ...card } = request;
 				const mine = card.name === undefined && card.phone === undefined && card.email === undefined;
 				await to.sendContact(mine ? undefined : card);
@@ -402,7 +399,7 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 					const action = signal.aborted ? "none" : judge(health, Date.now());
 					if (action === "rebuild") return health.ended ? "stream ended" : "probes failed";
 					if (action === "probe") {
-						// Photon refuses the made-up id with a gRPC refusal (INVALID_ARGUMENT); any answer from the server proves the link.
+						// The server refuses the made-up id with a gRPC refusal (INVALID_ARGUMENT); any answer from the server proves the link.
 						const alive = await space()
 							.then((target) => target.getMessage("mochi-probe"))
 							.then(
@@ -441,14 +438,14 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 						const replyTo = index === 0 ? options?.replyTo : undefined;
 						const effect = index === 0 ? bubble.effect : undefined;
 						let result: unknown;
-						if (effect !== undefined && target.sendEffect !== undefined) result = await target.sendEffect(chunk, effect, replyTo);
+						if (effect !== undefined) result = await target.sendEffect(chunk, effect, replyTo);
 						else if (replyTo === undefined) result = await target.send(chunk);
 						else result = await target.sendReply(chunk, replyTo);
 						delivered.push(...rememberSent(result, "text", chunk, to));
 					}
 				} else if (bubble.kind === "link") {
 					delivered.push(...rememberSent(await target.sendLink(bubble.url), "link", bubble.url, to));
-				} else if (bubble.voice === true && bubble.mimeType.startsWith("audio/") && target.sendVoice !== undefined) {
+				} else if (bubble.voice === true && bubble.mimeType.startsWith("audio/")) {
 					delivered.push(...rememberSent(await target.sendVoice(bubble, options?.replyTo), "file", `[voice ${bubble.name}]`, to));
 				} else {
 					delivered.push(...rememberSent(await target.sendFile(bubble, options?.replyTo), "file", `[file ${bubble.name}]`, to));
@@ -459,9 +456,7 @@ function iMessageChannel(credentials: Credentials, owner: string, users: readonl
 			return delivered;
 		},
 
-		async message(request) {
-			return runMessage(request);
-		},
+		message: runMessage,
 
 		async typing(on, person) {
 			const target = await space(person);

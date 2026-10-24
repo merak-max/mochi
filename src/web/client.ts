@@ -53,7 +53,6 @@ interface AlexandriaResult {
 	data: JsonValue;
 	/** Credits this call charged; 0 for discovery. */
 	creditsCost: number;
-	records?: number | undefined;
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -86,10 +85,6 @@ function retryAfterSeconds(payload: unknown, response: Response): number | undef
 	if (header === null) return undefined;
 	const seconds = Number(header);
 	return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
-}
-
-function seconds(milliseconds: number): string {
-	return `${milliseconds / 1000}s`;
 }
 
 /** Settles with `work`, or rejects as soon as `signal` aborts, even when `work` ignores the signal. */
@@ -154,7 +149,7 @@ export class FirecrawlClient {
 		const error = record(result.error);
 		if (error !== undefined) throw new Error(`Firecrawl ${label} failed (${text(error.code) ?? "error"}): ${text(error.message) ?? "no message"}.`);
 		const cost = number(result.creditsCost) ?? number(response.creditsCost) ?? 0;
-		return { data: (result.data ?? null) as JsonValue, creditsCost: cost, records: number(result.records) };
+		return { data: (result.data ?? null) as JsonValue, creditsCost: cost };
 	}
 
 	/**
@@ -175,7 +170,7 @@ export class FirecrawlClient {
 		try {
 			return await untilAborted(this.#request(endpoint, body, combined, headers), combined);
 		} catch (error) {
-			if (deadline.aborted && !signal?.aborted) throw new Error(`Firecrawl ${label} timed out after ${seconds(timeoutMs)} for ${target}.`);
+			if (deadline.aborted && !signal?.aborted) throw new Error(`Firecrawl ${label} timed out after ${timeoutMs / 1000}s for ${target}.`);
 			throw error;
 		}
 	}

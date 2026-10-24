@@ -113,7 +113,7 @@ export class MediaClient {
 		return this.downloadVideo(video.id, signal);
 	}
 
-	async downloadVideo(id: string, signal?: AbortSignal): Promise<{ path: string }> {
+	private async downloadVideo(id: string, signal?: AbortSignal): Promise<{ path: string }> {
 		const provider = this.deps.config.video;
 		if (!provider) throw new Error("No video provider configured.");
 		const route = this.route(provider);

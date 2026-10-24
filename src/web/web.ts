@@ -5,7 +5,6 @@ import { type AlexandriaCall, DEFAULT_TIMEOUT_MS, FirecrawlClient, type SearchHi
 import { cleanFirecrawlHtml, extractFirecrawlContent } from "./content.ts";
 
 const RECENCY = ["hour", "day", "week", "month", "year"] as const;
-const literals = <T extends string>(values: readonly T[]) => Type.Union(values.map((value) => Type.Literal(value)));
 const SearchHit = Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() });
 type SearchHit = Static<typeof SearchHit>;
 
@@ -48,7 +47,7 @@ export function webFns(deps: WebDeps): readonly ToolRegistration[] {
 				limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 				includeDomains: Type.Optional(Type.Array(Type.String())),
 				excludeDomains: Type.Optional(Type.Array(Type.String())),
-				recency: Type.Optional(literals(RECENCY)),
+				recency: Type.Optional(Type.Union(RECENCY.map((value) => Type.Literal(value)))),
 			}),
 			structuredOutputSchema: Type.Array(SearchHit),
 			replay: "safe",
