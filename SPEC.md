@@ -188,8 +188,6 @@ Webhooks arrive at `POST /hooks/<id>` on `[webhooks] host` and `port`. Authentic
 
 `proc_start` starts a `mochi.proc-watch` task in the calling conversation. When the process exits, the log tail enters that conversation (root through a chat Turn on the owner's last channel). A `watch` regex also wakes it once on the first matching line. `proc_stop` stops the process.
 
-At daemon start, `board/migrate.ts` carries the old schedulers onto the board, once: each live trigger and each open or waiting old board task becomes an item, and the old tasks are aborted.
-
 ## Own tools
 
 Each `<home>/tools/<name>.ts` default-exports one tool made with pi-durable's `defineTool`. A bare import in such a file resolves from mochi's own `node_modules`. The daemon loads every file at start, and `tools_reload` (agent seat) loads them again: a changed file is imported again with its mtime in the URL, a removed file drops its tool, and a file that fails to load, or takes a built-in name, keeps no tool. The result lists each file with the tool name now live, or its error. Home tools join the `seat-agent` extension as deferred script functions, so the prompt does not change; a reload shows from the next script, through `searchTools()`.

@@ -22,8 +22,6 @@ import { connectServer, type McpConnection } from "./mcp/servers.ts";
 import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { boardFns, type BoardTasks, defineBoard } from "./board/board.ts";
-import { migrateBoard } from "./board/migrate.ts";
-import { migrateKeptLines } from "./memory/migrate.ts";
 import { defaultSelection, type LiveTools, type McpTools, rootSelection, SEATS, seatExtensions } from "./seats.ts";
 import { homeTools } from "./tools/home-tools.ts";
 import { reactTool, sendTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
@@ -198,10 +196,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		openReply: (tx, input) => openTurn(tx, lineOf(), input),
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
-	if (options.scheduling === "daemon") {
-		await migrateBoard(harness, board, lineId, options.definitions, log, context);
-		await migrateKeptLines(harness, options.memoryDir, (await options.definitions.all()).map((definition) => definition.name), log, context);
-	}
 	line = {
 		harness,
 		root,
