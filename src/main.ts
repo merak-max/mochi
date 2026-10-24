@@ -208,7 +208,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		{
 			storage: await openNodeSqliteStorage(join(config.home.dir, "mochi.sqlite")),
 			models,
-			brain: config.modelSetup.brain,
 			fast: config.modelSetup.fast,
 			classify: createClassify(models, config.modelSetup.classifier),
 			web: config.web,

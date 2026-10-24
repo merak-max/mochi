@@ -36,19 +36,16 @@ import { defineProcWatch, procFns } from "./procs/procs.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
 import { fastCompletion, handoffTool } from "./turn/lifecycle.ts";
 import type { Classify } from "./brain/classifier.ts";
-import type { ChatUser, McpServerConfig } from "./config.ts";
+import type { ChatUser, McpServerConfig, WebConfig } from "./config.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
-import type { WebConfig } from "./config.ts";
 
 interface MochiOptions {
 	readonly storage: Storage;
 	readonly models: Models;
-	readonly brain: ModelRef;
 	readonly fast: ModelRef;
 	readonly classify: Classify;
-	/** The web service for the web and browser functions; without a key they fail with a clear error. */
-	/** Absent: no web or browser tools. */
+	/** Absent: no web or browser tools. A web config without a key makes them fail with a clear error. */
 	readonly web: WebConfig | undefined;
 	/** Image, video and speech providers; absent, the media functions say they are not configured. */
 	readonly media?: Omit<MediaDeps, "workDir">;
@@ -81,10 +78,8 @@ interface MochiOptions {
 
 export interface Mochi {
 	readonly harness: Harness;
-	readonly classify: Classify;
 	readonly line: Line;
 	readonly board: BoardTasks;
-	readonly catalog: Definitions;
 	/** One connection per configured MCP server; the daemon runs each. */
 	readonly mcp: readonly McpConnection[];
 }
@@ -133,7 +128,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		memoryExtension(),
 		skillsExtension(options.skillDirs),
 		defineExtension({ name: "agents", tasks: [forkTask, procWatch] }),
-		// Daemon only, so a terminal without a daemon leaves the board's tasks waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "board", tasks: [board.clock, board.fire] })] : []),
 	]) {
 		registry.install(extension);
@@ -156,7 +150,6 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const loaded = await home.reload([...modelTools, ...library].map((each) => each.name));
 	if (loaded.length > 0) log("tools.loaded", { tools: loaded });
 
-	// One environment per directory, shared by every conversation working there.
 	const environments = new Map<string, ExecutionEnv>();
 	const environment = (cwd: string): ExecutionEnv => {
 		const env = environments.get(cwd) ?? workEnv(options.workDir, cwd);
@@ -209,17 +202,16 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
 	};
 	await harness.commit(addContextReaders, context);
-	return { harness, classify: options.classify, line, board, catalog: options.definitions, mcp };
+	return { harness, line, board, mcp };
 }
 
 function webTools(options: MochiOptions): ToolRegistration[] {
 	const web = options.web;
 	if (web === undefined) return [];
+	const browser = { apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) };
 	return [
 		...webFns({ apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, models: options.models, fast: options.fast }),
-		...browserFns(browserDeps(web)),
-		...fastBrowserFns({ ...browserDeps(web), models: options.models, fast: options.fast, classify: options.classify }),
+		...browserFns(browser),
+		...fastBrowserFns({ ...browser, models: options.models, fast: options.fast, classify: options.classify }),
 	];
 }
-
-const browserDeps = (web: WebConfig) => ({ apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) });

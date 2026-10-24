@@ -3,8 +3,7 @@ import type { ClassifierAnswer, ClassifierQuestion, JsonObject, Models } from "@
 import type { ModelRef } from "@earendil-works/pi-durable";
 import type { Log } from "../log.ts";
 
-
-export type Classified = { readonly ok: true; readonly answers: Readonly<Record<string, ClassifierAnswer>> } | { readonly ok: false; readonly error: string };
+type Classified = { readonly ok: true; readonly answers: Readonly<Record<string, ClassifierAnswer>> } | { readonly ok: false; readonly error: string };
 
 /** Answers typed questions about JSON state with the `[models] classifier` model. Never throws. */
 export type Classify = (state: JsonObject, questions: Readonly<Record<string, ClassifierQuestion>>, context: Context) => Promise<Classified>;
@@ -21,7 +20,7 @@ export function createClassify(models: Models, classifier: ModelRef | undefined)
 	};
 }
 
-export type ClassifyStep = { readonly question: string; readonly yes: string; readonly no: string };
+type ClassifyStep = { readonly question: string; readonly yes: string; readonly no: string };
 
 /** P(yes) for one yes/no question over `state`. A failed classifier throws, so its outage shows. */
 export async function classifyYes(classify: Classify, step: ClassifyStep, state: JsonObject, log: Log, context: Context): Promise<number> {

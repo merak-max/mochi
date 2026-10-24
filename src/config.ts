@@ -35,7 +35,7 @@ export type McpServerConfig = {
 const FileSchema = Type.Object(
 	{
 		timeZone: Type.String({ minLength: 1 }),
-		/** How to reach models; see src/brain/providers.ts. Absent: ANTHROPIC_API_KEY or OPENAI_API_KEY decides. */
+		/** How to reach models; see src/brain/providers.ts. Absent: boot fails. */
 		providers: Type.Optional(Type.Record(Type.String({ pattern: "^[a-z0-9-]+$" }), ProviderSchema)),
 		models: Type.Optional(ModelsSchema),
 		/** MCP servers by name. Each server's tools reach scripts as `tools.<name>_<tool>`. Absent: no MCP tools. */
@@ -75,7 +75,6 @@ export interface Config {
 	readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-/** Resolves the home, loads its `.env` into `process.env`, and reads its config. */
 function webConfig(file: FileConfig, env: NodeJS.ProcessEnv): WebConfig | undefined {
 	if (file.web === undefined) return undefined;
 	const web: WebConfig = { url: file.web.url, keyEnv: file.web.keyEnv, key: env[file.web.keyEnv]?.trim() || undefined };
@@ -91,6 +90,7 @@ function mcpServers(file: FileConfig, env: NodeJS.ProcessEnv): McpServerConfig[]
 	return servers;
 }
 
+/** Resolves the home, loads its `.env` into `process.env`, and reads its config. */
 export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
 	const home = resolveHome(env);
 	if (existsSync(home.envFile)) process.loadEnvFile(home.envFile);
@@ -101,7 +101,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
 	return {
 		home,
 		mcp: mcpServers(file, env),
-		modelSetup: await createModelSetup({ ...(file.providers === undefined ? {} : { providers: file.providers }), ...(file.models === undefined ? {} : { models: file.models }), env }),
+		modelSetup: await createModelSetup({ providers: file.providers, models: file.models, env }),
 		web: webConfig(file, env),
 		timeZone,
 		users: chatUsers(file.users ?? []),
