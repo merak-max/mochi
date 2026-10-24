@@ -1,16 +1,16 @@
-# mochi config. Copy to ~/.mochi/config.toml. [providers] and [models] brain, fast and memory are required. A section left out turns its feature off; nothing is guessed.
+# mochi config. Copy this file to ~/.mochi/config.toml. timeZone, [providers], and brain, fast and memory in [models] are
+# required. A section that you leave out turns its feature off. mochi guesses nothing.
 # Keys and tokens go in ~/.mochi/.env (see .env.example), never here.
 
-# Your time zone. Default: the machine's.
+# Your time zone, as an IANA name. Required.
 timeZone = "America/New_York"
 
 # How mochi reaches models. Each provider is an endpoint, the protocol it speaks, and the
-# variable that holds its key:
-#   api is any pi-ai api id: anthropic-messages, openai-responses, openai-completions,
-#   google-generative-ai, bedrock-converse-stream, mistral-conversations, ... for chat models,
-#   and typesafe-system-one, cloudflare-workers-ai-system-one, openai-decisions or
-#   llama-cpp-classify for the classifier model. Every provider names its url and keyEnv.
-# A gateway is one provider per protocol it serves.
+# variable that holds its key. api is any pi-ai api id. Chat models use anthropic-messages,
+# openai-responses, openai-completions, google-generative-ai, bedrock-converse-stream,
+# mistral-conversations or another chat api. The classifier model uses typesafe-system-one,
+# cloudflare-workers-ai-system-one, openai-decisions or llama-cpp-classify. Every provider
+# names its url and keyEnv. A gateway is one provider per protocol that it serves.
 [providers.anthropic]
 api = "anthropic-messages"
 url = "https://api.anthropic.com"
@@ -21,20 +21,20 @@ keyEnv = "ANTHROPIC_API_KEY"
 # url = "https://openrouter.ai/api/v1"
 # keyEnv = "OPENROUTER_API_KEY"
 
-# A model is <provider>/<model id>. The brain answers you; the fast model reads data for
-# scripts; the memory model writes the summary lines of each conversation's view.
+# A model is <provider>/<model id>. The brain answers you. The fast model reads data for
+# scripts. The memory model writes the summary lines of each conversation's view.
 [models]
 brain = "anthropic/claude-opus-5-5"
 fast = "anthropic/claude-haiku-5-5"
 memory = "anthropic/claude-haiku-5-5"
 
-# The decision model for classify, on a provider with a classifier api. With none set, classify fails.
+# The decision model for classify and gates, on a provider with a classifier api. Without it, classify fails.
 # classifier = "classifier/liquid/d1-ultra"
 
-# Any other key is a name of your own, for a definition's model or a tool call's model.
+# Any other key is a name of your own. A definition or a tool call can use it as its model.
 # opus = "anthropic/claude-opus-5-5"
 
-# A model pi-ai's catalog does not know needs its limits here.
+# A model that pi-ai's catalog does not know needs its limits here.
 # [models.overrides."gateway/some-model"]
 # contextWindow = 1000000
 # maxTokens = 128000
@@ -44,9 +44,10 @@ memory = "anthropic/claude-haiku-5-5"
 # url = "https://openrouter.ai/api/v1"
 # keyEnv = "OPENROUTER_API_KEY"
 
-# Voice notes in and speech out, through any provider that serves the OpenAI audio API
-# (/audio/speech and /audio/transcriptions). provider names a [providers] entry. Images and
-# video take [media.images] and [media.video] with baseUrl, keyEnv and model.
+# Voice notes in and speech out go through a provider that serves the OpenAI audio API
+# (/audio/speech and /audio/transcriptions). provider names a [providers] entry. A [media] section
+# needs [media.images], with default and a providers list (name, baseUrl, keyEnv and model each), so
+# [media.speech] alone does not validate. [media.video] takes baseUrl, keyEnv and model.
 # [providers.gateway]
 # api = "openai-responses"
 # url = "https://gateway.example.com/openai/v1"
@@ -58,19 +59,20 @@ memory = "anthropic/claude-haiku-5-5"
 # stt = "gpt-4o-transcribe"
 # voice = "coral"
 
-# Webhooks for board items. Left out: board_add refuses webhook items. host and port are where the
-# server listens; url is the public base, so an item answers at <url>/hooks/<id>. Bind 0.0.0.0 only
-# behind a proxy. Routines are not config: they live on the board as items, added with board_add.
+# Webhooks for board items. Without this section, board_add refuses webhook items. host and port
+# are where the server listens. url is the public base, so an item answers at <url>/hooks/<id>.
+# Bind 0.0.0.0 only behind a proxy. Routines are not config. They are board items, added with board_add.
 # [webhooks]
 # host = "127.0.0.1"
 # port = 8788
 # url = "https://mochi.example.com"
 
-# Agent definitions are teammates in this daemon. Each is ~/.mochi/agents/<name>.md: front matter
-# with name, description, model, thinking, optionally tools (a comma list of script functions it
-# may use) and resident: true, then its role. A file here replaces the bundled definition of the
-# same name. mochi gives them work with the agent tool. A resident definition keeps one standing
-# conversation with its own memory. Any other definition runs as a fresh child for each job.
+# Agent definitions are teammates in this daemon, not config. Each is ~/.mochi/agents/<name>.md:
+# front matter with description, model, thinking, an optional tools list (the script functions it
+# may use, comma separated) and an optional resident: true, then its role. The file name is the
+# name. A file there replaces the bundled definition of the same name. mochi gives definitions work
+# with the agent tool. A resident definition keeps one standing conversation with its own memory.
+# Any other definition runs as a fresh child for each job.
 
 # Other people who may text mochi on iMessage, each in a thread of their own.
 # [[users]]
@@ -78,8 +80,9 @@ memory = "anthropic/claude-haiku-5-5"
 # handle = "+15550100002"
 # name = "Alex"
 
-# MCP servers. Each [mcp.<name>] gives scripts its tools as tools.<name>_<tool>, found with searchTools().
-# auth = "oauth": log in once with mochi auth <name>. auth = "bearer": the token is in the variable tokenEnv.
+# MCP servers. Each [mcp.<name>] gives scripts its tools as tools.<name>_<tool>. Scripts find them with
+# searchTools(). With auth = "oauth", log in once with mochi auth <name>. With auth = "bearer", the token
+# is in the variable that tokenEnv names.
 # [mcp.apps]
 # url = "https://apps.example.com/mcp"
 # auth = "oauth"
@@ -89,14 +92,15 @@ memory = "anthropic/claude-haiku-5-5"
 # auth = "bearer"
 # tokenEnv = "DOCS_MCP_TOKEN"
 
-# Web search, fetch and the logged-in browser. Left out: no web tools. The client speaks Firecrawl's v2 API.
+# Web search, fetch and the logged-in browser. Without this section, there are no web tools. The client
+# speaks Firecrawl's v2 API. The logged-in browser needs browserProfile.
 [web]
 url = "https://api.firecrawl.dev/v2"
 keyEnv = "FIRECRAWL_API_KEY"
 # browserProfile = "mochi"
 
-# Nightly self-improvement (skills/improve): judges yesterday's skill edits by measured signals, then proposes,
-# applies and records new ones in <home>/improve/library.md. <home> must be a git repository. It is a board
-# item, not config: ask mochi to add it with board_add, owner "mochi", when { cron = "30 4 * * *", tz = "Asia/Kolkata" },
-# check [ "node", "<repo>/scripts/improve-check.ts", "<home>", "24" ], and the text "Run the improve skill: read its
-# SKILL.md from the skills index, then follow it with the check output below."
+# Nightly self-improvement (skills/improve) judges the earlier skill edits by measured signals. Then it
+# proposes, applies and records new edits in <home>/improve/library.md. <home> must be a git repository.
+# It is a board item, not config. Ask mochi to add it with board_add: owner "mochi",
+# when { cron = "30 4 * * *", tz = "Asia/Kolkata" }, check [ "node", "<repo>/scripts/improve-check.ts", "<home>", "24" ],
+# and the text "Run the improve skill: read its SKILL.md from the skills index, then follow it with the check output below."

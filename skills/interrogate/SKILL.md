@@ -1,6 +1,6 @@
 ---
 name: interrogate
-description: Use for "poke holes", or before a costly or one-way plan. Reviewers on other models attack it; you give the verdict.
+description: Use for "poke holes", or before a costly or one-way plan. Reviewers on other models attack it, and you give the verdict.
 ---
 
 # Interrogate

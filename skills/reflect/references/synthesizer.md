@@ -10,10 +10,10 @@ Test each finding:
 
 - **Durable.** Still true in six months.
 - **Specific.** Broad enough to recur, precise enough that a future run knows when it applies. Reject platitudes and one-time facts.
-- **Existing home.** Prefer an existing note, trigger or skill. Propose a new skill only for a recurring workflow with no home.
+- **Existing home.** Prefer an existing memory file, board item or skill. Propose a new skill only for a recurring workflow with no home.
 - **Convergence.** A finding from two or more reviewers weighs more. A lone finding must clear a higher bar.
 - **Decision.** A future run does something different because of the edit.
-- **Mechanism.** If a gate, trigger, note or schema can enforce it, route it there.
+- **Mechanism.** If a check, a gate, a board item, a memory line or a schema can enforce it, route it there.
 - **Used.** Accept only findings that route to something the conversation used, or `tune description` for a skill that should have fired.
 - **Covered.** Read the target first. If it already says this clearly, reject it as a lapse in execution. If it says it weakly, propose a sharper wording instead of an addition.
 
@@ -23,7 +23,7 @@ Output exactly this, one sentence per cell, no preamble:
 
 | Problem | Proposal | Routing |
 |---|---|---|
-| <what went wrong> | <the concrete change> | <memory line, trigger id, or skill and section> |
+| <what went wrong> | <the concrete change> | <memory line, board item id, or skill and section> |
 
 ## Rejected
 

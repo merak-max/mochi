@@ -10,12 +10,12 @@ Look for:
 - Skills used too late or not at all
 - Notifications that were noise, or silence where the owner needed to hear
 
-Route only to skills, tools or notes this conversation used, or to `tune description: <skill>` for a skill that should have triggered.
+Route only to skills, tools, memory files or board items that this conversation used, or to `tune description: <skill>` for a skill that should have triggered.
 
 For each lesson give:
 - **Principle.** One sentence naming the second-order observation.
 - **Evidence.** The moment, with what was said and what was not.
-- **Routing.** A note, a trigger or gate, a skill and section, `tune description: <skill>`, or `new skill: <name>`.
+- **Routing.** A memory line, a board item's text, check or gate, a skill and section, `tune description: <skill>`, or `new skill: <name>`.
 
 Skip trivial and soon-stale details. Return a numbered list with no commentary.
 

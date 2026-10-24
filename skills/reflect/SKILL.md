@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: Use for "reflect", or the same mistake twice. Turns a finished run into a memory line, a trigger or a skill edit.
+description: Use for "reflect", or the same mistake twice. Turns a finished run into a memory line, a board item fix or a skill edit.
 ---
 
 # Reflect
@@ -9,7 +9,7 @@ Mine a conversation for lessons that change what mochi does next time, and route
 
 ## 1. Gather the transcript
 
-Pin the conversation or run: root's recent turns, a trigger's run history, or a fork's or an agent's work. Open it with `zoom`. When it is long, have a fork write a digest of turns, tool calls, corrections and outcomes,.
+Pin the conversation or run: root's recent turns, a board item's fires, or a fork's or an agent's work. Open it with `zoom`. When it is long, have a fork write a digest of turns, tool calls, corrections and outcomes.
 
 ## 2. Review from three angles
 
@@ -27,10 +27,10 @@ Weigh the three outputs per [references/synthesizer.md](references/synthesizer.m
 
 ## 4. Apply
 
-Route each Accepted item to a mechanism that enforces it (a classify step, a schedule, a line in the memory files) instead of a reminder in prose.
+Route each Accepted item to a mechanism that enforces it (a board item's `check` or `gate`, a board item, a line in the memory files) instead of a reminder in prose.
 
-- Memory lines, trigger fixes and classify steps are two-way doors. Apply them and report them.
+- Memory lines and board item fixes (text, `check`, `gate`) are two-way doors. Apply them and report them.
 - A skill edit changes every future run. Show it and apply what the owner approves.
 - A change to mochi's code or config is the owner's. Put it in the reply as a proposal.
 
-**Reply:** what was applied (one line each, with the memory line, trigger id or skill), what awaits approval, and what was dropped and why.
+**Reply:** what was applied (one line each, with the memory line, board item id or skill), what awaits approval, and what was dropped and why.

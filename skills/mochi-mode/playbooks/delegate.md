@@ -7,7 +7,7 @@
    - `agent` with `fork: true`: a slice that needs this conversation.
    - `agent`: one slice of data with a full brief.
    - `agent` with `definition`: only when the work is that definition's role.
-   - Work that can take more than a few minutes goes to `agent` with `background: true`. One slow inline child loses the answers of the whole batch.
+   - Work that can take more than a few minutes goes to `agent` with `background: true`. When an inline script times out, each running child's answer arrives later as a `[name]` note, and the jobs past the current batch of six never start.
 2. Check that the work started. A job to a resident definition whose answer starts with `NOT STARTED` waits behind that agent's current turn, which can take an hour. Its real answer comes back later as a `[name]` note. Send the work to a fork or a fresh agent, call `agent_stop` first when the current turn is the wrong work, or tell the owner it is queued.
 3. Keep one lead per workstream. Before you send a resident agent a stop, a scope change or a correction, read the answer to your last job to it. If that answer was `NOT STARTED`, or the owner said stop, call `agent_stop` first: a stop sent as a message waits behind the queue it should cancel. Then send one complete brief that starts "This replaces my brief of <time>." Send no addenda.
 4. Write the brief for a reader with no memory of this chat. It holds each of these:
@@ -26,7 +26,7 @@
 8. Merge results. Check the claims the owner will rely on, and write your own words. When an answer is a duplicate or changes nothing for the owner, end the turn with no message.
 
 Facts about this workspace (checked 2026-10-20):
-- The bundled definition `mochi` is a teammate, not root. A message tagged `[from mochi]` is its answer. Root's own tag is `[from root]`, on each job that root sends to a resident definition.
+- The bundled definition `mochi` is a teammate, not root. A job to a resident definition carries the sender's tag: `[from root]` from root, `[from mochi]` from a conversation that runs as `mochi`. An answer comes back as the script's return value or as a `[name]` note, never with a `[from ...]` tag.
 - Root's `/stop` does not reach a resident agent's running turn. `agent_stop` does.
 - A resident agent merges its queued jobs into one turn and sends one reply.
 

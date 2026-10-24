@@ -19,7 +19,7 @@ ts	phase	decision	why	evidence	result
 - **phase.** The step or workstream.
 - **decision.** What was chosen or done, in plain words.
 - **why.** The reason.
-- **evidence.** A pointer that proves it: a link, a confirmation number, an entry id, a file path, a trigger id. Never a paragraph.
+- **evidence.** A pointer that proves it: a link, a confirmation number, an entry id, a file path, a board item id. Never a paragraph.
 - **result.** `confirmed`, `booked`, `sent`, `undone`, `NOT VERIFIED`, `open`, or the outcome.
 
 ## Logging
@@ -28,7 +28,7 @@ Append a row with `bash` (`printf` with tabs, `>>`) or `edit`. Strip tabs and ne
 
 Log forks, completed units with their check, pivots and undos with their cause, blockers, and defaults you applied. Write one row per loop iteration. Skip the self-evident.
 
-When a run picks up a log that has rows (a trigger run, a resumed project), its first row has phase `start` and names the run (trigger id, fork name or agent name). Use phase `start` for nothing else.
+When a run picks up a log that has rows (a board fire, a resumed project), its first row has phase `start` and names the run (board item id, fork name or agent name). Use phase `start` for nothing else.
 
 The log is append-only. Correct a wrong row with a new row that supersedes it.
 

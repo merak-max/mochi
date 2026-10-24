@@ -1,6 +1,6 @@
 ---
 name: arena
-description: Use for "arena this", or a draft or plan that matters and has no clear shape. Several attempts; keep the best.
+description: Use for "arena this", or a draft or plan that matters and has no clear shape. Runs several attempts and keeps the best.
 ---
 
 # Arena
