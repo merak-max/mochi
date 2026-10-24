@@ -206,7 +206,7 @@ It edits only `<home>/skills` (which replaces a bundled skill of the same name) 
 
 ## Models and config
 
-`[providers.<name>]` is an endpoint, its protocol and the variable with its key. The protocols are `anthropic`, `responses`, `chat` and `classifier` (System One). A gateway is one provider per protocol it serves. `[models]` names `brain`, `fast`, `strongest`, `classifier` and `aliases`, each `<provider>/<id>`. Without `[models] classifier`, an `OPENROUTER_API_KEY` alone turns on the classifier protocol's default endpoint and model. `[models.overrides]` sets a model's context window, output limit and cache life. mochi carries no prices: token counts stay, and the model provider bills.
+`[providers.<name>]` is an endpoint, its protocol and the variable with its key. `api` is a pi-ai api id, and mochi loads that api's client from pi-ai itself (`@earendil-works/pi-ai/api/<api>.lazy`), so every chat and decision api pi-ai ships works with no list in mochi. Every provider names its `url` and `keyEnv`; nothing defaults. A gateway is one provider per protocol it serves. `[models]` must name `brain` and `fast`, and may name `strongest`, `classifier` and `aliases`, each `<provider>/<id>`. Without `[models] classifier`, `classify` fails. `[models.overrides]` sets a model's context window, output limit and cache life. mochi carries no prices: token counts stay, and the model provider bills.
 
 Other config keys: `timeZone`, `appsUrl` (an MCP server with `execute` and `skills`; `MOCHI_APPS_URL` overrides it), `[web]` (`keyEnv`, `url`, `browserProfile`), `[media]` (images, video, and speech through the OpenAI audio API on a named provider), `[[users]]` and `[[triggers]]`. Boot logs one `setup` line per boundary, and names config keys mochi does not read.
 

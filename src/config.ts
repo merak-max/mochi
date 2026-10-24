@@ -28,7 +28,7 @@ const FileSchema = Type.Object(
 		/** An MCP server with `execute` and `skills` tools for the owner's apps. Absent: the apps functions say they are not connected. */
 		appsUrl: Type.Optional(Type.String({ pattern: "^https?://" })),
 		/** The web and browser service: its API url, the env variable with its key, and the browser profile name. */
-		web: Type.Optional(Type.Object({ url: Type.Optional(Type.String({ pattern: "^https?://" })), keyEnv: Type.Optional(Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" })), browserProfile: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false })),
+		web: Type.Optional(Type.Object({ url: Type.String({ pattern: "^https?://" }), keyEnv: Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" }), browserProfile: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false })),
 		/** Image, video and speech providers; see config.example.toml. */
 		media: Type.Optional(MediaConfigSchema),
 		users: Type.Optional(Type.Array(ChatUserSchema)),
@@ -43,7 +43,7 @@ export function unknownKeys(file: Readonly<Record<string, unknown>>): string[] {
 	return Object.keys(file).filter((key) => !known.has(key));
 }
 
-export type WebConfig = { readonly keyEnv: string; readonly key: string | undefined; readonly url?: string; readonly browserProfile?: string };
+export type WebConfig = { readonly url: string; readonly keyEnv: string; readonly key: string | undefined; readonly browserProfile?: string };
 
 export interface Config {
 	readonly home: Home;
@@ -58,6 +58,12 @@ export interface Config {
 }
 
 /** Resolves the home, loads its `.env` into `process.env`, and reads its config. */
+function webConfig(file: FileConfig, env: NodeJS.ProcessEnv): WebConfig {
+	if (file.web === undefined) throw new Error("config.toml has no [web]. Add [web] with url and keyEnv for a service that speaks Firecrawl's v2 API.");
+	const web: WebConfig = { url: file.web.url, keyEnv: file.web.keyEnv, key: env[file.web.keyEnv]?.trim() || undefined };
+	return file.web.browserProfile === undefined ? web : { ...web, browserProfile: file.web.browserProfile };
+}
+
 export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
 	const home = resolveHome(env);
 	if (existsSync(home.envFile)) process.loadEnvFile(home.envFile);
@@ -67,13 +73,8 @@ export async function loadConfig(env: NodeJS.ProcessEnv): Promise<Config> {
 	return {
 		home,
 		appsUrl: env.MOCHI_APPS_URL ?? file.appsUrl,
-		modelSetup: createModelSetup({ ...(file.providers === undefined ? {} : { providers: file.providers }), ...(file.models === undefined ? {} : { models: file.models }), env }),
-		web: {
-			keyEnv: file.web?.keyEnv ?? "FIRECRAWL_API_KEY",
-			key: env[file.web?.keyEnv ?? "FIRECRAWL_API_KEY"]?.trim() || undefined,
-			...(file.web?.url === undefined ? {} : { url: file.web.url }),
-			...(file.web?.browserProfile === undefined ? {} : { browserProfile: file.web.browserProfile }),
-		},
+		modelSetup: await createModelSetup({ ...(file.providers === undefined ? {} : { providers: file.providers }), ...(file.models === undefined ? {} : { models: file.models }), env }),
+		web: webConfig(file, env),
 		timeZone,
 		users: chatUsers(file.users ?? []),
 		file,

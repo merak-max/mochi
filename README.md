@@ -87,11 +87,11 @@ Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository
 
 ## Models
 
-Any provider works through one of four protocols: `anthropic`, `responses`, `chat`, and `classifier` for the yes or no classifier. A gateway is one provider per protocol it serves.
+Any provider works through a protocol: any pi-ai api id: `anthropic-messages`, `openai-responses`, `openai-completions` and the rest for chat models, and `typesafe-system-one`, `cloudflare-workers-ai-system-one`, `openai-decisions` or `llama-cpp-classify` for the decision model behind `classify`. Each provider names its `url` and `keyEnv`. A gateway is one provider per protocol it serves.
 
 ```toml
 [providers.gateway]
-api = "anthropic"
+api = "anthropic-messages"
 url = "https://gateway.example.com/anthropic"
 keyEnv = "GATEWAY_KEY"
 

@@ -1,7 +1,6 @@
 import type { JsonValue } from "@earendil-works/chord";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const FIRECRAWL_V2_BASE_URL = "https://api.firecrawl.dev/v2";
 /** Free plans allow about 12 requests a minute, and a script's `Promise.all` reaches that fast. */
 const MAX_RATE_LIMIT_RETRIES = 3;
 const MAX_RATE_LIMIT_WAIT_SECONDS = 30;
@@ -112,7 +111,7 @@ export class FirecrawlClient {
 	readonly #apiKey: string;
 	readonly #baseUrl: string;
 
-	constructor(apiKey: string, baseUrl = FIRECRAWL_V2_BASE_URL) {
+	constructor(apiKey: string, baseUrl: string) {
 		this.#apiKey = apiKey;
 		this.#baseUrl = baseUrl.replace(/\/+$/, "");
 	}

@@ -25,7 +25,7 @@ export const MediaConfigSchema = Type.Object({
 		provider: Type.String({ minLength: 1 }),
 		tts: Type.String({ minLength: 1 }),
 		stt: Type.String({ minLength: 1 }),
-		voice: Type.Optional(Type.String({ pattern: "^[a-z]+$" })),
+		voice: Type.String({ pattern: "^[a-z]+$" }),
 	})),
 });
 

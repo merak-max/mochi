@@ -29,7 +29,7 @@ interface WebDeps {
 	readonly models: Models;
 	/** Runs web_fetch's `instruction`. */
 	readonly fast: ModelRef;
-	readonly baseUrl?: string;
+	readonly baseUrl: string;
 }
 
 /** Web search, fetch, map and data providers on mochi's own key, as script functions. The client speaks Firecrawl's v2 API. */

@@ -1,33 +1,34 @@
-import type { AnthropicMessagesCompat, Api, Model, ModelInputLimits, OpenAIResponsesCompat } from "@earendil-works/pi-ai";
-import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
-import { typesafeSystemOneApi } from "@earendil-works/pi-ai/api/typesafe-system-one.lazy";
+import type { AnthropicMessagesCompat, Api, Model, ModelInputLimits, OpenAIResponsesCompat, ProviderClassifier, ProviderStreams } from "@earendil-works/pi-ai";
 import { createModels, createProvider, type MutableModels } from "@earendil-works/pi-ai/models";
-import { getBuiltinClassifierModel, getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import { getBuiltinClassifierModels, getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { type Static, Type } from "typebox";
 import type { Env } from "../channels/types.ts";
 
 /**
- * `[providers.<name>]` in config.toml: an endpoint, the wire protocol it speaks, and the env variable with its key.
- *   anthropic  Anthropic Messages (Anthropic, or a gateway's Anthropic route)
- *   responses  OpenAI Responses (OpenAI, Azure, or a gateway's OpenAI route)
- *   chat       OpenAI chat completions (OpenRouter, Ollama, vLLM, LiteLLM, most gateways)
- *   classifier the System One classifier protocol (OpenRouter, TypeSafe, OpenCode), for the `classifier` model
- * A gateway is one provider per protocol it serves. A model is `<provider>/<model id>`,
- * and the id is sent as written, so a gateway's own ids (`anthropic/claude-opus-5-5`) work unchanged.
+ * `[providers.<name>]` in config.toml: an endpoint, the pi-ai api it speaks (`anthropic-messages`, `openai-responses`,
+ * `openai-completions`, `typesafe-system-one`, `openai-decisions`, ...), and the env variable with its key. A gateway is
+ * one provider per api it serves. A model is `<provider>/<model id>`, and the id is sent as written, so a gateway's own
+ * ids (`anthropic/claude-opus-5-5`) work unchanged.
  */
 export const ProviderSchema = Type.Object(
 	{
-		api: Type.Union([Type.Literal("anthropic"), Type.Literal("responses"), Type.Literal("chat"), Type.Literal("classifier")]),
-		url: Type.Optional(Type.String({ pattern: "^https?://" })),
-		keyEnv: Type.Optional(Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" })),
+		api: Type.String({ pattern: "^[a-z0-9-]+$" }),
+		url: Type.String({ pattern: "^https?://" }),
+		keyEnv: Type.String({ pattern: "^[A-Z_][A-Z0-9_]*$" }),
 		headers: Type.Optional(Type.Record(Type.String(), Type.String())),
 	},
 	{ additionalProperties: false },
 );
 export type ProviderConfig = Static<typeof ProviderSchema>;
+
+/** pi-ai's own client for an api, from `@earendil-works/pi-ai/api/<api>.lazy`. An unknown api fails the import. */
+async function apiClient(api: string): Promise<{ readonly kind: "chat"; readonly client: ProviderStreams } | { readonly kind: "classifier"; readonly client: ProviderClassifier }> {
+	const module = (await import(`@earendil-works/pi-ai/api/${api}.lazy`)) as Record<string, () => ProviderStreams | ProviderClassifier>;
+	const factory = Object.values(module)[0]!;
+	const client = factory();
+	return "classify" in client ? { kind: "classifier", client: client as ProviderClassifier } : { kind: "chat", client: client as ProviderStreams };
+}
 
 const ModelOverrideSchema = Type.Object(
 	{
@@ -58,17 +59,10 @@ export const ModelsSchema = Type.Object(
 );
 type ModelsConfig = Static<typeof ModelsSchema>;
 
-const DEFAULTS = {
-	anthropic: { url: "https://api.anthropic.com", keyEnv: "ANTHROPIC_API_KEY" },
-	responses: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
-	chat: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
-	classifier: { url: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
-} as const;
-
 export function providerEndpoint(name: string, providers: Readonly<Record<string, ProviderConfig>> = {}): { baseUrl: string; keyEnv: string } {
 	const config = providers[name];
 	if (config === undefined) throw new Error(`Provider "${name}" is not in [providers]. Configured: ${Object.keys(providers).join(", ") || "none"}.`);
-	return { baseUrl: (config.url ?? DEFAULTS[config.api].url).replace(/\/$/, ""), keyEnv: config.keyEnv ?? DEFAULTS[config.api].keyEnv };
+	return { baseUrl: config.url.replace(/\/$/, ""), keyEnv: config.keyEnv };
 }
 
 /** The models mochi talks to, resolved once from config. `ref` turns a tier, alias or `provider/id` into a model. */
@@ -94,26 +88,23 @@ const CONTEXT_WINDOW = 200_000;
  */
 const NO_PRICE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
-/** pi-ai's classifier catalog entry for an id served by any System One provider, for its limits. */
+/** pi-ai's catalog entry for a decision model id, from whichever provider lists it, for its limits. */
 function classifierCatalog(id: string): object | undefined {
-	for (const provider of ["openrouter", "typesafe", "opencode"] as const) {
-		try {
-			return getBuiltinClassifierModel(provider, id as never) as object;
-		} catch {
-			continue;
-		}
+	for (const provider of getBuiltinProviders()) {
+		const found = getBuiltinClassifierModels(provider).find((model) => model.id === id);
+		if (found !== undefined) return found;
 	}
 	return undefined;
 }
 
-/** pi-ai's catalog entry for an id, looked up by its last path part, so `anthropic/claude-opus-5-5` finds Opus. */
-function catalog(provider: "anthropic" | "openai", id: string): Model<Api> | undefined {
+/** pi-ai's catalog entry for an id on this wire, from whichever provider lists it, by the id's last path part, so `anthropic/claude-opus-5-5` finds Opus. */
+function catalog(wire: Api, id: string): Model<Api> | undefined {
 	const bare = id.slice(id.lastIndexOf("/") + 1);
-	try {
-		return getBuiltinModel(provider, bare as never) as Model<Api>;
-	} catch {
-		return undefined;
+	for (const provider of getBuiltinProviders()) {
+		const found = getBuiltinModels(provider).find((model) => model.id === bare && model.api === wire);
+		if (found !== undefined) return found as Model<Api>;
 	}
+	return undefined;
 }
 
 function plain(id: string, api: Api): Model<Api> {
@@ -135,9 +126,9 @@ function withImageBytes(limits: ModelInputLimits | undefined): ModelInputLimits 
 
 /** A model definition for `id` on a provider: the catalog's limits and quirks where it knows the model. */
 function definition(id: string, config: ProviderConfig, provider: string, url: string, override: ModelOverride = {}): Model<Api> {
-	const wire: Api = config.api === "anthropic" ? "anthropic-messages" : config.api === "responses" ? "openai-responses" : "openai-completions";
-	const known = catalog(config.api === "anthropic" ? "anthropic" : "openai", id);
-	const base = known === undefined || known.api !== wire ? { ...plain(id, wire), ...(known === undefined ? {} : { contextWindow: known.contextWindow, maxTokens: known.maxTokens, reasoning: known.reasoning }) } : known;
+	const wire: Api = config.api;
+	const known = catalog(wire, id);
+	const base = known ?? plain(id, wire);
 	const compat =
 		wire === "anthropic-messages"
 			? ({ ...(base.compat as AnthropicMessagesCompat | undefined), supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } satisfies AnthropicMessagesCompat)
@@ -158,9 +149,11 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 	} as Model<Api>;
 }
 
-export function createModelSetup(input: { readonly providers?: Record<string, ProviderConfig>; readonly models?: ModelsConfig; readonly env: Env }): ModelSetup {
+export async function createModelSetup(input: { readonly providers?: Record<string, ProviderConfig>; readonly models?: ModelsConfig; readonly env: Env }): Promise<ModelSetup> {
 	const providers = input.providers ?? {};
-	if (Object.keys(providers).length === 0) throw new Error("config.toml has no [providers]. Add one, for example [providers.anthropic] with api = \"anthropic\".");
+	if (Object.keys(providers).length === 0) throw new Error("config.toml has no [providers]. Add one, for example [providers.anthropic] with api = \"anthropic-messages\".");
+	const clients = new Map<string, Awaited<ReturnType<typeof apiClient>>>();
+	for (const [name, config] of Object.entries(providers)) clients.set(name, await apiClient(config.api));
 	const chosen = input.models;
 	if (chosen?.brain === undefined || chosen.fast === undefined) throw new Error("config.toml [models] needs brain and fast, each <provider>/<id>.");
 	const aliases = chosen.aliases ?? {};
@@ -179,16 +172,16 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 	const served = new Map<string, Set<string>>(Object.keys(providers).map((name) => [name, new Set<string>()]));
 	const register = (name: string): void => {
 		const config = providers[name]!;
-		const keyEnv = config.keyEnv ?? DEFAULTS[config.api].keyEnv;
+		const keyEnv = config.keyEnv;
 		const apiKey = input.env[keyEnv]?.trim() ?? "";
-		const url = (config.url ?? DEFAULTS[config.api].url).replace(/\/$/, "");
+		const url = config.url.replace(/\/$/, "");
 		models.setProvider(
 			createProvider<Api>({
 				id: name,
 				name,
 				auth: { apiKey: { name: keyEnv, resolve: async () => ({ auth: { apiKey, ...(config.headers === undefined ? {} : { headers: config.headers }) }, source: keyEnv }) } },
 				models: [...served.get(name)!].map((id) => definition(id, config, name, url, chosen.overrides?.[`${name}/${id}`])),
-				api: config.api === "anthropic" ? anthropicMessagesApi() : config.api === "responses" ? openAIResponsesApi() : openAICompletionsApi(),
+				api: (clients.get(name)!.client as ProviderStreams),
 			}),
 		);
 	};
@@ -197,14 +190,14 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 		served.get(provider)!.add(id);
 	}
 	for (const [name, config] of Object.entries(providers)) {
-		const keyEnv = config.keyEnv ?? DEFAULTS[config.api].keyEnv;
-		if (!input.env[keyEnv]?.trim()) missing.push(`${name}: ${keyEnv} is not set`);
-		if (config.api !== "classifier") register(name);
+		if (!input.env[config.keyEnv]?.trim()) missing.push(`${name}: ${config.keyEnv} is not set`);
+		if (clients.get(name)!.kind === "chat") register(name);
 	}
 	if (chosen.classifier !== undefined) {
 		const { provider, id } = split(chosen.classifier);
 		const config = providers[provider]!;
-		if (config.api !== "classifier") throw new Error(`[models] classifier ${chosen.classifier}: provider "${provider}" has api "${config.api}", not "classifier".`);
+		const found = clients.get(provider)!;
+		if (found.kind !== "classifier") throw new Error(`[models] classifier ${chosen.classifier}: provider "${provider}" has api "${config.api}", which is a chat api, not a decision api.`);
 		const { baseUrl, keyEnv } = providerEndpoint(provider, providers);
 		const apiKey = input.env[keyEnv]?.trim() ?? "";
 		const known = classifierCatalog(id);
@@ -213,8 +206,8 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 				id: provider,
 				name: provider,
 				auth: { apiKey: { name: keyEnv, resolve: async () => ({ auth: { apiKey, ...(config.headers === undefined ? {} : { headers: config.headers }) }, source: keyEnv }) } },
-				models: [{ ...(known ?? { name: id, input: ["text"], contextWindow: 8192 }), cost: NO_PRICE, id, provider, baseUrl, api: "typesafe-system-one", type: "classifier" } as never],
-				classifiers: { "typesafe-system-one": typesafeSystemOneApi() },
+				models: [{ ...(known ?? { name: id, input: ["text"], contextWindow: 8192 }), cost: NO_PRICE, id, provider, baseUrl, api: config.api, type: "classifier" } as never],
+				classifiers: { [config.api]: found.client },
 			}),
 		);
 		classifier = { provider, modelId: id };

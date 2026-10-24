@@ -1,4 +1,4 @@
-# mochi config. Copy to ~/.mochi/config.toml. Every key is optional.
+# mochi config. Copy to ~/.mochi/config.toml. [providers], [models] brain and fast, and [web] are required.
 # Keys and tokens go in ~/.mochi/.env (see .env.example), never here.
 
 # Your time zone. Default: the machine's.
@@ -6,18 +6,18 @@ timeZone = "America/New_York"
 
 # How mochi reaches models. Each provider is an endpoint, the protocol it speaks, and the
 # variable that holds its key:
-#   api = "anthropic"   Anthropic Messages
-#   api = "responses"   OpenAI Responses
-#   api = "chat"        OpenAI chat completions (OpenRouter, Ollama, vLLM, LiteLLM)
-#   api = "classifier"  the System One classifier protocol, for the classifier model
-# A gateway is one provider per protocol it serves. With no [providers], ANTHROPIC_API_KEY
-# (or OPENAI_API_KEY) decides.
+#   api is any pi-ai api id: anthropic-messages, openai-responses, openai-completions,
+#   google-generative-ai, bedrock-converse-stream, mistral-conversations, ... for chat models,
+#   and typesafe-system-one, cloudflare-workers-ai-system-one, openai-decisions or
+#   llama-cpp-classify for the classifier model. Every provider names its url and keyEnv.
+# A gateway is one provider per protocol it serves.
 [providers.anthropic]
-api = "anthropic"
+api = "anthropic-messages"
+url = "https://api.anthropic.com"
 keyEnv = "ANTHROPIC_API_KEY"
 
 # [providers.openrouter]
-# api = "chat"
+# api = "openai-completions"
 # url = "https://openrouter.ai/api/v1"
 # keyEnv = "OPENROUTER_API_KEY"
 
@@ -27,14 +27,14 @@ keyEnv = "ANTHROPIC_API_KEY"
 brain = "anthropic/claude-opus-5-5"
 fast = "anthropic/claude-haiku-5-5"
 
-# The decision model for classify, on a provider with api = "classifier". With none set, classify fails.
+# The decision model for classify, on a provider with a classifier api. With none set, classify fails.
 # classifier = "classifier/liquid/d1-ultra"
 
 [models.aliases]
 haiku = "anthropic/claude-haiku-5-5"
 
 # [providers.classifier]
-# api = "classifier"
+# api = "typesafe-system-one"
 # url = "https://openrouter.ai/api/v1"
 # keyEnv = "OPENROUTER_API_KEY"
 
@@ -42,7 +42,7 @@ haiku = "anthropic/claude-haiku-5-5"
 # (/audio/speech and /audio/transcriptions). provider names a [providers] entry. Images and
 # video take [media.images] and [media.video] with baseUrl, keyEnv and model.
 # [providers.gateway]
-# api = "responses"
+# api = "openai-responses"
 # url = "https://gateway.example.com/openai/v1"
 # keyEnv = "GATEWAY_API_KEY"
 #
@@ -83,10 +83,10 @@ haiku = "anthropic/claude-haiku-5-5"
 # App tools through an MCP server with execute and skills tools. Log in with: mochi auth apps
 # appsUrl = "https://apps.example.com/mcp"
 
-# Web search, fetch and the logged-in browser. The client speaks Firecrawl's v2 API.
-# [web]
-# keyEnv = "FIRECRAWL_API_KEY"
-# url = "https://api.firecrawl.dev/v2"
+# Web search, fetch and the logged-in browser. Required. The client speaks Firecrawl's v2 API.
+[web]
+url = "https://api.firecrawl.dev/v2"
+keyEnv = "FIRECRAWL_API_KEY"
 # browserProfile = "mochi"
 
 # Nightly self-improvement (skills/improve): judges yesterday's skill edits by measured signals, then proposes,

@@ -28,7 +28,7 @@ export interface BrowserDeps {
 	/** The env variable the key comes from, for the error that names it. */
 	readonly keyEnv: string;
 	readonly profile?: string;
-	readonly baseUrl?: string;
+	readonly baseUrl: string;
 }
 
 export class BrowserClient {
@@ -42,7 +42,7 @@ export class BrowserClient {
 		if (!deps.profile?.trim()) throw new Error("Browser is not configured: set [web] browserProfile in config.toml.");
 		this.#deps = deps;
 		this.#profile = deps.profile.trim();
-		this.#baseUrl = (deps.baseUrl ?? "https://api.firecrawl.dev/v2").replace(/\/+$/, "");
+		this.#baseUrl = deps.baseUrl.replace(/\/+$/, "");
 		this.key = `${this.#baseUrl}/${this.#profile}`;
 	}
 

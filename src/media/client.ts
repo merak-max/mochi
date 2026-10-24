@@ -138,9 +138,9 @@ export class MediaClient {
 
 	private speech(): { base: string; headers: Record<string, string>; tts: string; stt: string; voice: string } {
 		const speech = this.deps.config.speech;
-		if (speech === undefined) throw new Error("Speech is not configured: set [media.speech] provider, tts and stt.");
+		if (speech === undefined) throw new Error("Speech is not configured: set [media.speech] provider, tts, stt and voice.");
 		const route = this.route(providerEndpoint(speech.provider, this.deps.providers));
-		return { ...route, tts: speech.tts, stt: speech.stt, voice: speech.voice ?? "coral" };
+		return { ...route, tts: speech.tts, stt: speech.stt, voice: speech.voice };
 	}
 
 	async speak(args: { text: string; voice?: string }, signal?: AbortSignal): Promise<{ path: string }> {

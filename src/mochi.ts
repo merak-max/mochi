@@ -113,7 +113,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		zoomTool(() => harness),
 		reactTool(options.channels),
 		sendTool(options.channels),
-		...webFns({ apiKey: options.web.key, keyEnv: options.web.keyEnv, ...(options.web.url === undefined ? {} : { baseUrl: options.web.url }), models: options.models, fast: options.fast }),
+		...webFns({ apiKey: options.web.key, keyEnv: options.web.keyEnv, baseUrl: options.web.url, models: options.models, fast: options.fast }),
 		...browserFns(browserDeps(options.web)),
 		...fastBrowserFns({ ...browserDeps(options.web), models: options.models, fast: options.fast, classify: options.classify }),
 		...mediaFns({ ...media, workDir: options.workDir }),
@@ -198,7 +198,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	return { harness, classify: options.classify, line, schedule, catalog: options.profiles };
 }
 
-const browserDeps = (web: WebConfig) => ({ apiKey: web.key, keyEnv: web.keyEnv, ...(web.url === undefined ? {} : { baseUrl: web.url }), ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) });
+const browserDeps = (web: WebConfig) => ({ apiKey: web.key, keyEnv: web.keyEnv, baseUrl: web.url, ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) });
 
 const notConnected = async (): Promise<never> => {
 	throw new Error("No apps server is connected in this process.");
