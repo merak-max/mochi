@@ -1,4 +1,3 @@
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	type ConversationId,
@@ -6,7 +5,6 @@ import {
 	type EntryId,
 	defineExtension,
 	type Extension,
-	type ModelRef,
 	type PromptSection,
 	ROOT_CONVERSATION_ID,
 	type ToolRegistration,
@@ -155,28 +153,19 @@ export const defaultSelection = (installed: (name: string) => Extension | undefi
 /** Root's extensions, set when the harness creates root; an existing root keeps its stored ones. */
 export const rootSelection = (installed: (name: string) => Extension | undefined): Extension[] => selection("agent").flatMap((name) => installed(name) ?? []);
 
-interface SeatChange {
-	readonly instructions?: string;
-	/** Absent: root's, read in the same commit. */
-	readonly model?: ModelRef;
-	readonly thinkingLevel?: ModelThinkingLevel;
-}
-
 /**
  * The only creator of conversations. A task-owned conversation would copy its owner's agent and an ownerless one would
- * have no model, so this replaces the whole agent: seat, model and thinking level, in the creating commit.
+ * have no model, so this replaces the whole agent with root's model and thinking level and the seat, in the creating commit.
  */
-export async function createSeatConversation(tx: Tx, seat: Seat, ownership: ConversationOwnership, change: SeatChange = {}): Promise<ConversationId> {
+export async function createSeatConversation(tx: Tx, seat: Seat, ownership: ConversationOwnership, instructions?: string): Promise<ConversationId> {
 	const { id } = await tx.createConversation({ ownership });
 	const root = await tx.doc(AgentDoc, ROOT_CONVERSATION_ID);
 	const agent = await tx.doc(AgentDoc, id);
 	for (const key of Object.keys(agent) as (keyof typeof agent)[]) delete agent[key];
-	const model = change.model ?? root.model;
-	if (model !== undefined) agent.model = { ...model };
-	const thinking = change.thinkingLevel ?? root.thinkingLevel;
-	if (thinking !== undefined) agent.thinkingLevel = thinking;
+	if (root.model !== undefined) agent.model = { ...root.model };
+	if (root.thinkingLevel !== undefined) agent.thinkingLevel = root.thinkingLevel;
 	agent.extensions = selection(seat);
-	if (change.instructions !== undefined) agent.instructions = change.instructions;
+	if (instructions !== undefined) agent.instructions = instructions;
 	return id;
 }
 

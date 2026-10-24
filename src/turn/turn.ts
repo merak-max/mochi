@@ -79,7 +79,7 @@ type ChatTurn = {
 	readonly person?: string;
 	readonly replyTo?: ReplyTarget;
 	readonly threadOn?: string;
-	/** When the message was sent, in ms; absent on Turns stored before the later-message check. */
+	/** When the message was sent, in ms. */
 	readonly at?: number;
 	/** A board fire: it waits for root's current run to end instead of steering into it. */
 	readonly followUp?: true;
@@ -102,14 +102,12 @@ type Answer =
 type Outage = { readonly retryAt: number; readonly attempt: number; readonly downMs: number };
 
 type TurnState =
-	| { readonly phase: "run"; readonly streamed?: readonly string[]; readonly run?: string }
-	| { readonly phase: "claim"; readonly channel: ChannelId; readonly answer: Answer; readonly streamed?: readonly string[]; readonly run?: string }
+	| { readonly phase: "run" }
+	| { readonly phase: "claim"; readonly channel: ChannelId; readonly answer: Answer }
 	| {
 			readonly phase: "send";
 			readonly channel: ChannelId;
 			readonly answer: Answer;
-			/** Paragraphs already sent while the answer was written; the final send skips them. */
-			readonly streamed?: readonly string[];
 			readonly after: TaskId | null;
 			readonly sent: number;
 			readonly outage: Outage | null;
@@ -148,7 +146,6 @@ const OutboxDoc = defineDocFamily<{ text: string }, string>({
 async function recordSent(tx: Tx, channel: ChannelId, delivered: readonly SentBubble[]): Promise<void> {
 	for (const message of delivered) (await tx.doc(OutboxDoc, requestKey(channel, message.id), message.text)).text = message.text;
 }
-/** The one Turn that streams a root run, by the run's task id; the other Turns in that run send nothing. */
 
 export const LastInboundDoc = defineDoc<{ last: { channel: ChannelId; messageId: string } | null }>({
 	kind: "mochi.last-inbound",
@@ -188,7 +185,7 @@ function userInstructions(user: ChatUser): string {
 
 async function ensureUser(tx: Tx, user: ChatUser): Promise<ConversationId> {
 	const doc = await tx.doc(UserDoc, user.handle, null);
-	if (doc.conversation === null) doc.conversation = await createSeatConversation(tx, "user", { kind: "ownerless" }, { instructions: userInstructions(user) });
+	if (doc.conversation === null) doc.conversation = await createSeatConversation(tx, "user", { kind: "ownerless" }, userInstructions(user));
 	return doc.conversation;
 }
 
@@ -245,7 +242,6 @@ function blockedByPolicy(settled: { readonly status: string; readonly detail?: u
 }
 
 const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and the board are kept.";
-
 
 async function saveFiles(workDir: string, message: Extract<Inbound, { kind: "message" }>): Promise<SavedFile[]> {
 	if (message.attachments.length === 0) return [];
@@ -438,7 +434,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 	});
 }
 
-// Not idempotent by itself: ingest dedupes by request id, notify with the Journal.
+// Not idempotent: each call opens a new Turn, so the caller dedupes.
 export function openTurn(tx: Tx, line: Pick<Line, "id" | "turn">, input: TurnInput): Promise<TaskId<TurnResult>> {
 	return tx.createTask(line.turn, input, { ownership: { kind: "conversation" }, conversationId: line.id, background: true });
 }
@@ -547,7 +543,6 @@ async function threadOf(host: Pick<Line, "root" | "harness">, user: ChatUser | u
 	return conversationOf(host, id, context);
 }
 
-/** One bubble to the owner on the channel they last wrote from, now, for an ack or progress. The final text is still the reply. */
 export function sendTool(channels: Channels): ToolRegistration {
 	return defineTool({
 		name: "send",
@@ -567,26 +562,26 @@ export function sendTool(channels: Channels): ToolRegistration {
 
 export function reactTool(channels: Channels): ToolRegistration {
 	return defineTool({
-				name: "react",
-				description:
-					"React to an owner message with one emoji, or none to remove it. messageId: the id= in the tag; default the newest. Use it when a reaction says everything.",
-				parameters: Type.Object({
-					reaction: Type.String({ minLength: 1, maxLength: 16 }),
-					messageId: Type.Optional(Type.String({ minLength: 1 })),
-				}),
-				replay: "safe",
-				execute: async (args, api, context) => {
-					const target = args.messageId === undefined ? (await api.snapshot(LastInboundDoc, context))?.last : await ownerMessage(api, channels, args.messageId, context);
-					if (target == null) {
-						throw new Error(args.messageId === undefined ? "The owner has not written on a chat channel yet, so there is nothing to react to." : `No owner message with id ${args.messageId}.`);
-					}
-					const channel = channels.get(target.channel);
-					if (channel === undefined) throw new Error(`Channel ${target.channel} is not running.`);
-					if (channel.react === undefined) throw new Error(`The ${target.channel} channel does not support reactions.`);
-					await channel.react(target.messageId, args.reaction);
-					const done = args.reaction === "none" ? "Removed the reaction" : `Reacted ${args.reaction}`;
-					return { output: [{ type: "text", text: `${done} on ${target.channel} message ${target.messageId}.` }] };
-				},
+		name: "react",
+		description:
+			"React to an owner message with one emoji, or none to remove it. messageId: the id= in the tag; default the newest. Use it when a reaction says everything.",
+		parameters: Type.Object({
+			reaction: Type.String({ minLength: 1, maxLength: 16 }),
+			messageId: Type.Optional(Type.String({ minLength: 1 })),
+		}),
+		replay: "safe",
+		execute: async (args, api, context) => {
+			const target = args.messageId === undefined ? (await api.snapshot(LastInboundDoc, context))?.last : await ownerMessage(api, channels, args.messageId, context);
+			if (target == null) {
+				throw new Error(args.messageId === undefined ? "The owner has not written on a chat channel yet, so there is nothing to react to." : `No owner message with id ${args.messageId}.`);
+			}
+			const channel = channels.get(target.channel);
+			if (channel === undefined) throw new Error(`Channel ${target.channel} is not running.`);
+			if (channel.react === undefined) throw new Error(`The ${target.channel} channel does not support reactions.`);
+			await channel.react(target.messageId, args.reaction);
+			const done = args.reaction === "none" ? "Removed the reaction" : `Reacted ${args.reaction}`;
+			return { output: [{ type: "text", text: `${done} on ${target.channel} message ${target.messageId}.` }] };
+		},
 	});
 }
 

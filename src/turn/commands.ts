@@ -100,7 +100,7 @@ async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "
 	].join("\n");
 }
 
-// /new keeps background work: processes and background forks. agent_stop reuses this with "stop".
+// /new keeps background work: processes and background forks.
 export async function abortTargets(harness: Pick<Harness, "taskGraph" | "inspect">, target: Pick<Conversation, "id">, command: Command, context: Context) {
 	const graph = await harness.taskGraph(context);
 	try {

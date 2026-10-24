@@ -74,7 +74,6 @@ export class Definitions {
 		this.model = model;
 	}
 
-	/** Bundled first; the owner's file of the same name replaces it. */
 	/** Root's own definition, `<home>/agents/root.md`: the owner's conversation runs under it. Only the owner's copy counts. */
 	async root(): Promise<Definition> {
 		const found = new Map<string, Definition>();
@@ -84,7 +83,7 @@ export class Definitions {
 		return root;
 	}
 
-	/** Every definition a job can name; root is the owner's conversation, never a job. */
+	/** Every definition a job can name; root is the owner's conversation, never a job. Bundled first; the owner's file of the same name replaces it. */
 	async all(): Promise<Definition[]> {
 		const found = new Map<string, Definition>();
 		await readDir(this.#bundled, found);
@@ -101,7 +100,7 @@ export class Definitions {
 	}
 }
 
-type RunAgent = { readonly definition: string | undefined; readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly tools: readonly string[] | undefined; readonly instructions: string };
+type RunAgent = { readonly definition: string; readonly agent: { model: ModelRef; thinkingLevel?: ModelThinkingLevel }; readonly tools: readonly string[] | undefined; readonly instructions: string };
 
 /** The model, tools and instructions a conversation runs under for `definition`, after `header`. */
 export function agentOf(definition: Definition, definitions: Definitions, header: string): RunAgent {
@@ -113,7 +112,7 @@ export function agentOf(definition: Definition, definitions: Definitions, header
 	};
 }
 
-/** A resident definition's standing conversation, by name. The kind keeps its stored name, so history survives. */
+/** A resident definition's standing conversation, by name. */
 const ResidentDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
 	kind: "mochi.profile",
 	version: 1,
@@ -123,7 +122,7 @@ const ResidentDoc = defineDocFamily<{ conversation: ConversationId | null }, nul
 	checkpointWhen: () => false,
 });
 
-/** Which definition owns each conversation. The kind and the `profile` field keep their stored names. */
+/** Which definition owns each conversation, in `profile`. */
 const OwnerDoc = defineDocFamily<{ profile: string | null }, null>({
 	kind: "mochi.profile-of",
 	version: 1,
@@ -136,7 +135,7 @@ const OwnerDoc = defineDocFamily<{ profile: string | null }, null>({
 /** The definition a conversation runs as, or "root". */
 export async function ownerIn(tx: Tx, conversation: ConversationId): Promise<string> {
 	const { profile } = await tx.doc(OwnerDoc, String(conversation), null);
-	return profile ?? "root";
+	return profile ?? ROOT;
 }
 
 /** A fork works as its parent's definition, so its messages carry the same sender. */
@@ -148,7 +147,7 @@ export async function inheritOwner(tx: Tx, parent: ConversationId, child: Conver
 /** Writes a run's definition, model, instructions and tool list into a conversation; no list clears an old one. */
 export async function applyAgent(tx: Tx, conversation: ConversationId, run: RunAgent): Promise<void> {
 	await configure(tx, conversation, { ...run.agent, instructions: run.instructions });
-	(await tx.doc(OwnerDoc, String(conversation), null)).profile = run.definition ?? null;
+	(await tx.doc(OwnerDoc, String(conversation), null)).profile = run.definition;
 	const agent = await tx.doc(AgentDoc, conversation);
 	if (run.tools === undefined) delete agent.tools;
 	else agent.tools = [...run.tools];

@@ -193,10 +193,10 @@ const DEFINITION_HEADER = (id: string) =>
 	"When the item has served its purpose, remove it with tools.board_done.";
 
 /** The last chat channel the owner wrote on; a fire needs one to reach the owner. */
-async function ownerChannel(tx: Tx, line: Line): Promise<{ readonly channel: ChannelId; readonly messageId: string }> {
+async function ownerChannel(tx: Tx, line: Line): Promise<ChannelId> {
 	const last = (await tx.doc(LastInboundDoc)).last;
 	if (last === null || !line.channels.has(last.channel)) throw new Error("The owner has not written on a chat channel yet, so a board fire has nowhere to reach them.");
-	return { ...last };
+	return last.channel;
 }
 
 function defineFire(deps: BoardDeps) {
@@ -226,12 +226,12 @@ function defineFire(deps: BoardDeps) {
 				return runtime.commit(() => ({ status: "running", checkpoint: { phase: "start", item, message: parts.join("\n") } }), context);
 			},
 			start: async (task, runtime, context) => {
-				const { item, message } = task.state.checkpoint as Extract<FireState, { phase: "start" }>;
+				const { item, message } = task.state.checkpoint;
 				const requestId = `board:${item.id}:${task.input.key}`;
 				const stamp = formatStamp(new Date(runtime.now()), timeZone);
 				if (item.owner === ROOT_OWNER) {
 					return runtime.commit(async (tx) => {
-						const { channel } = await ownerChannel(tx, line());
+						const channel = await ownerChannel(tx, line());
 						await openTurn(tx, line(), { source: "chat", channel, key: requestId, tag: `[board ${item.id} ${stamp}]`, text: message, files: [], followUp: true });
 						return done("sent");
 					}, context);
@@ -250,7 +250,7 @@ function defineFire(deps: BoardDeps) {
 				}, context);
 			},
 			ask: async (task, runtime, context) => {
-				const { item, message, conversation } = task.state.checkpoint as Extract<FireState, { phase: "ask" }>;
+				const { item, message, conversation } = task.state.checkpoint;
 				const requestId = `board:${item.id}:${task.input.key}`;
 				const host = { commit: (change: (tx: Tx) => Promise<void>, context: Context) => runtime.commit(async (tx) => void (await change(tx)), context) };
 				const content = await holdText(host, workDir, conversation, `in:${requestId}`, message, context);
@@ -262,7 +262,7 @@ function defineFire(deps: BoardDeps) {
 				}, context);
 			},
 			send: async (task, runtime, context) => {
-				const { item, answer } = task.state.checkpoint as Extract<FireState, { phase: "send" }>;
+				const { item, answer } = task.state.checkpoint;
 				if (answer.trim() === NO_REPLY || answer.trim() === "") return runtime.commit(() => done("silent"), context);
 				if (item.gate !== undefined) {
 					type Verdict = { readonly yes: number } | { readonly failed: string };
@@ -284,7 +284,7 @@ function defineFire(deps: BoardDeps) {
 					}
 				}
 				return runtime.commit(async (tx) => {
-					const { channel } = await ownerChannel(tx, line());
+					const channel = await ownerChannel(tx, line());
 					await openTurn(tx, line(), { source: "run", channel, text: answer, from: { kind: "board", id: item.id } });
 					return done("sent");
 				}, context);

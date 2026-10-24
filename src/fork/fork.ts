@@ -40,7 +40,7 @@ const FORK_BATCH = 6;
 
 /**
  * Resident answers already sent back, by caller and answer. Queued jobs merge into one resident turn and settle with
- * the same answer, so it goes back once. The kind keeps its stored name.
+ * the same answer, so it goes back once.
  */
 const DeliveredDoc = defineDocFamily<{ delivered: boolean }, null>({
 	kind: "mochi.reply-delivered",
@@ -75,7 +75,6 @@ export function defineForkTask(workDir: string) {
 						seen.delivered = true;
 					}, context);
 				}
-				const done = { status: "terminal", outcome: { status: "completed", result } } as const;
 				const waiter = task.input.waiter;
 				let waiting = false;
 				if (waiter !== undefined) await runtime.commit(async (tx) => void (waiting = (await tx.task(waiter))?.state.status !== "terminal"), context);
@@ -86,13 +85,16 @@ export function defineForkTask(workDir: string) {
 					const held = await holdText(host, workDir, back.id, `in:${key}`, body, context);
 					await submitNote(back, key, `[${task.input.name}]\n${held}`, context);
 				}
-				await runtime.commit(() => done, context);
+				await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result } }), context);
 			},
 		},
 		abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 	});
 }
 type ForkTask = ReturnType<typeof defineForkTask>;
+
+/** A child never belongs to the caller's task, so the caller's end never aborts it. */
+const DETACHED: TaskOptions = { ownership: { kind: "conversation" }, background: true };
 
 const childOf = async (tx: Tx, task: TaskId): Promise<ConversationId> => (await tx.scanConversations({ ownerTaskId: task }, 1)).items[0]!.id;
 
@@ -106,8 +108,8 @@ async function depthOf(tx: Tx, caller: ConversationId): Promise<number> {
 }
 
 /** Call inside the commit that read `forkPoint` and the caller's depth. */
-async function startFork(tx: Tx, task: ForkTask, parent: ConversationId, at: EntryId, input: ForkInput, options: TaskOptions): Promise<TaskId<ForkResult>> {
-	const id = await tx.createTask(task, input, options);
+async function startFork(tx: Tx, task: ForkTask, parent: ConversationId, at: EntryId, input: ForkInput): Promise<TaskId<ForkResult>> {
+	const id = await tx.createTask(task, input, DETACHED);
 	// The fork keeps its parent's whole agent and history through `at`, so its first request reuses the parent's cached prompt.
 	const child = await tx.forkConversation(parent, at, { ownership: { kind: "task", taskId: id } });
 	await inheritOwner(tx, parent, child.id);
@@ -116,11 +118,11 @@ async function startFork(tx: Tx, task: ForkTask, parent: ConversationId, at: Ent
 
 /**
  * A fresh child of `caller`. The new task-owned conversation copies the agent of its owner task's conversation, which
- * `options` sets to the caller; a definition then replaces its model, thinking, tools and instructions. No table
- * reads, so it may follow other writes.
+ * is the caller; a definition then replaces its model, thinking, tools and instructions. No table reads, so it may
+ * follow other writes.
  */
-async function startChild(tx: Tx, task: ForkTask, caller: ConversationId, input: ForkInput, options: TaskOptions, keys: readonly string[], definition: Definition | undefined, definitions: Definitions): Promise<TaskId<ForkResult>> {
-	const id = await tx.createTask(task, { ...input, fresh: true }, options);
+async function startChild(tx: Tx, task: ForkTask, caller: ConversationId, input: ForkInput, keys: readonly string[], definition: Definition | undefined, definitions: Definitions): Promise<TaskId<ForkResult>> {
+	const id = await tx.createTask(task, { ...input, fresh: true }, DETACHED);
 	const child = await tx.createConversation({ ownership: { kind: "task", taskId: id } });
 	if (definition === undefined) await inheritOwner(tx, caller, child.id);
 	else await applyAgent(tx, child.id, agentOf(definition, definitions, ""));
@@ -191,15 +193,12 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 			const depth = (await depthOf(tx, api.conversationId)) + 1;
 			const at = await forkPoint(tx, api.conversationId);
 			const sender = await ownerIn(tx, api.conversationId);
-			const detached: TaskOptions = { ownership: { kind: "conversation" }, background: true };
 			// A foreground child waits on this call, but owns itself: when the call ends first, the answer becomes a note.
 			const reply = background ? { back: api.conversationId } : { back: api.conversationId, waiter: api.taskId };
 			const started: Started[] = [];
 			for (const [offset, job] of jobs.entries()) {
 				const index = first + offset;
-				const scratch = scratchDir(job.name);
 				const { model, definition } = planned[index]!;
-				const withModel = model === undefined ? {} : { model };
 				const keys = job.context ?? [];
 				const key = `agent:${index}`;
 				if (definition?.resident === true) {
@@ -211,20 +210,20 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 					const input: ForkInput = { name: job.name, brief: residentBriefOf(sender, job.brief, keys), depth, resident, ...(background || queued ? { back: api.conversationId } : reply) };
 					const made = await journaled(tx, api.taskId, key, async () => {
 						await copyContext(tx, api.conversationId, resident, keys);
-						return tx.createTask(task, input, detached);
+						return tx.createTask(task, input, DETACHED);
 					});
 					started.push({ id: made.id, queued });
 					continue;
 				}
-				const options = detached;
-				const back = reply;
+				const scratch = scratchDir(job.name);
+				const withModel = model === undefined ? {} : { model };
 				let made;
 				if (job.fork === true) {
-					const input: ForkInput = { name: job.name, brief: briefOf(job.name, background, job.brief, scratch), depth, ...back, ...withModel };
-					made = await journaled(tx, api.taskId, key, () => startFork(tx, task, api.conversationId, at, input, options));
+					const input: ForkInput = { name: job.name, brief: briefOf(job.name, background, job.brief, scratch), depth, ...reply, ...withModel };
+					made = await journaled(tx, api.taskId, key, () => startFork(tx, task, api.conversationId, at, input));
 				} else {
-					const input: ForkInput = { name: job.name, brief: jobBriefOf(job.name, job.brief, keys, scratch), depth, ...back, ...withModel };
-					made = await journaled(tx, api.taskId, key, () => startChild(tx, task, api.conversationId, input, options, keys, definition, definitions));
+					const input: ForkInput = { name: job.name, brief: jobBriefOf(job.name, job.brief, keys, scratch), depth, ...reply, ...withModel };
+					made = await journaled(tx, api.taskId, key, () => startChild(tx, task, api.conversationId, input, keys, definition, definitions));
 				}
 				started.push({ id: made.id, queued: false });
 			}
