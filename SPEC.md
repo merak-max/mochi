@@ -12,7 +12,7 @@ One daemon process owns everything:
 
 - the Harness and its SQLite file `<home>/mochi.sqlite`
 - the search index `<home>/index.sqlite`
-- every channel adapter, the trigger and webhook server, and the A2A server
+- every channel adapter, the schedule and webhook server, and the A2A server
 - the attach socket `<home>/mochi.sock`
 
 The daemon takes the lock file `<home>/mochi.lock` at start and exits if another live process holds it. Terminals attach over the socket and never open storage.
@@ -22,7 +22,7 @@ The daemon takes the lock file `<home>/mochi.lock` at start and exits if another
 | `mochi` on a terminal | The TUI. It attaches to the running daemon. Without one, this process becomes the daemon with every configured channel until the TUI exits. |
 | `mochi --headless` | The daemon alone. This is the systemd mode. |
 | `mochi attach <id\|label>` | The TUI on another conversation. It needs a running daemon. |
-| `mochi chat [--to <id\|label>]` | Each stdin line goes to root, or to the `--to` conversation, and its answer prints. Without a daemon, this process becomes one with no channels and no triggers. |
+| `mochi chat [--to <id\|label>]` | Each stdin line goes to root, or to the `--to` conversation, and its answer prints. Without a daemon, this process becomes one with no channels and no schedules. |
 | `mochi -p <prompt> [--to <id\|label>]` | One prompt, then its reply. The same daemon rule as `chat`. |
 | `mochi agents` | Every conversation: id, kind, label, parent, busy or idle, model, title. |
 | `mochi status` | The daemon's pid, uptime, protocol, build, channels, setup report, usage and live tasks. |
@@ -36,7 +36,7 @@ The daemon takes the lock file `<home>/mochi.lock` at start and exits if another
 
 `agents`, `status`, `export` and `attach` never become a daemon. Without one they print "mochi is not running." and exit 1.
 
-A conversation's label is `main`, `line`, `profile:<name>`, `trigger:<id>`, `fork:<name>@<id>`, `agent:<name>@<id>`, `user:<user id>`, or else `conversation:<id>`. A number is always a conversation id. A label must match exactly.
+A conversation's label is `main`, `line`, `profile:<name>`, `schedule:<id>`, `fork:<name>@<id>`, `agent:<name>@<id>`, `user:<user id>`, or else `conversation:<id>`. A number is always a conversation id. A label must match exactly.
 
 `--id <key>` makes a script's submissions replay-safe for any target: line n becomes request `cli:<key>:<n>`, so a rerun after a crash prints the same answers without asking again. `--json` prints the target's view as JSON lines.
 
@@ -47,7 +47,7 @@ The socket speaks protocol 2. Each connection starts with `hello`. The daemon re
 - **Root.** The owner has one root conversation across every channel.
 - **User threads.** Each `[[users]]` entry gets its own conversation on iMessage, keyed by handle. A user thread has seat `user` and never sees the owner's memory.
 - **The line.** One ownerless conversation holds every delivery task, so neither Esc nor `/stop` on root drops an owed reply.
-- **Trigger runs.** Each trigger owns one ownerless conversation with seat `trigger`.
+- **Schedule runs.** Each cron, at or webhook schedule owns one ownerless conversation with seat `trigger`.
 - **Profiles.** Each profile owns one standing ownerless conversation with seat `agent`.
 - **Forks.** Each fork is a task-owned copy of its parent at the parent's newest entry.
 - **A2A contexts.** Each `(peer, contextId)` pair owns one ownerless conversation with seat `peer`.
@@ -67,14 +67,14 @@ A seat is how far a conversation is trusted. It is written once, when the conver
 | Seat | Who | Differs from `agent` |
 |---|---|---|
 | `agent` | root, forks, profiles | (every function) |
-| `trigger` | trigger runs | no `note`, `react`, forks, profiles, board or `trigger_add` |
-| `peer` | A2A contexts | also no `notify`, processes, A2A or triggers |
+| `trigger` | schedule runs | no `note`, `react`, forks, profiles or `schedule_add` |
+| `peer` | A2A contexts | also no `notify`, processes, A2A or schedules |
 | `user` | user threads | files, the web, media, `recall`, `llm` and `classify` only; no `notify` |
 
 The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 
 - `codemode`: JavaScript in a QuickJS sandbox that calls the seat's library as `await tools.<name>(args)`. Each call is a nested durable task. After a restart, a script replays from a journal and continues; a call marked `unsafe` that was running at the crash returns an interrupted error. A script with no `// @options:` line gets a 10-minute timeout and 256 MB.
-- `notify`: sends text verbatim to the owner, or to a trigger's recipients. Refused in root, whose reply already reaches the owner.
+- `notify`: sends text verbatim to the owner, or to a schedule's recipients. Refused in root, whose reply already reaches the owner.
 - `handoff`: starts a fresh context from a note.
 
 `LIBRARY` in `src/seats.ts` lists every script function and the seats that get it. Opening mochi fails when `SURFACE`, `LIBRARY` and the definitions disagree. A profile's `tools` list narrows its conversations further through pi-durable's stored `tools` filter. A narrowed list always keeps `context_read` and `context_list`, so a profile can read its own held input.
@@ -89,8 +89,7 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 | Apps | `apps_search`, `apps_call`, `apps_skills` |
 | Media | `image_gen`, `video_gen`, `speak`, `transcribe`, `gif_search`, `gif_save` |
 | Forks and profiles | `fork`, `fork_start`, `agent`, `profile_list`, `profile_send`, `profile_stop`, `profile_update` |
-| Triggers | `trigger_add`, `trigger_list`, `trigger_remove` |
-| Board | `board_add`, `board_list`, `board_update`, `board_claim` |
+| Scheduling | `schedule_add`, `schedule_list`, `schedule_remove` |
 | Processes | `proc_start`, `proc_status`, `proc_logs`, `proc_stop` |
 | Peers | `a2a_list`, `a2a_ask`, `a2a_send`, `a2a_status` |
 | Channels | `react` |
@@ -107,7 +106,7 @@ Sections render in this order, and each must be stable between requests so the p
 4. `skills-index`: one line per bundled skill. The model opens a skill with `read`.
 5. `codemode`: the inline library functions. `searchTools()` finds the deferred ones.
 6. `context`: the context keys and `store()` keys the conversation holds, with their sizes. It is empty until a value exists.
-7. `instructions`: root's `<home>/instructions.md`, or a profile's or trigger's instructions.
+7. `instructions`: root's `<home>/instructions.md`, or a profile's or schedule's instructions.
 
 A changed section reaches the next request as a mid-conversation system message that carries only the change, so a `note` does not break the cache.
 
@@ -132,7 +131,7 @@ Long input is a value, not prompt text. `holdText` in `src/context.ts` is the on
 
 - Keys are immutable and name their source: `in:<request id>` for inbound text, `put:<task id>` for a script's `context_put`. The same key with other text throws.
 - The same key and text give the same file and the same header, so a replay submits identical content and its request id dedupes it.
-- Held inputs: chat and cli messages, trigger check output, webhook bodies, A2A text, profile messages and replies, fork answers that merge back, proc wakes and child briefs.
+- Held inputs: chat and cli messages, schedule check output, webhook bodies, A2A text, profile messages and replies, fork answers that merge back, proc wakes and child briefs.
 - `context_read({ key, offset?, length? })` returns one page (64K chars by default) and the offset of the next. `context_put({ text })` keeps a script's value and returns its key and file path. `context_list` lists the catalog.
 - The catalog forks `asOf`, like the codemode store. Compaction does not touch it, and the `context` section lists its keys after compaction.
 
@@ -156,40 +155,44 @@ A profile is a standing teammate inside the daemon: `<home>/profiles/<name>/inst
 
 A busy profile queues a message (`whenBusy: "followUp"`) and `profile_send` returns at once with a result that starts with `NOT STARTED`. Queued messages merge into the profile's next turn, so they settle with one answer; `mochi.reply` keys each delivery by asker and answer (`mochi.reply-delivered`) and sends that answer back once.
 
-`profile_stop({ name })` aborts the profile's running turn, its queued submissions and the child tasks under its conversation, the same walk `/stop` does for root (`abortTargets` in `turn/commands.ts`). It does not stop processes, triggers or board tasks.
+`profile_stop({ name })` aborts the profile's running turn, its queued submissions and the child tasks under its conversation, the same walk `/stop` does for root (`abortTargets` in `turn/commands.ts`). It does not stop processes or schedules.
 
-## Triggers
+## Scheduling
 
-A trigger is one durable `mochi.trigger` task in its own conversation. Its input is the definition, and its checkpoint holds the next slot, so the task record is the only copy of the schedule. Config seeds in `[[triggers]]` reconcile at start: an equal seed stays, a changed one is re-added, and a seed that is gone is aborted.
+One durable task kind, `mochi.schedule`, does all later work. Its input is the definition, and its checkpoint holds the next slot, so the task record is the only copy of the schedule.
 
 ```ts
-type Trigger =
-  | { kind: "cron"; id; prompt; cron; tz; check?: string[]; steps?: Step[]; profile?; model?; thinking?; notify?: string[] }
-  | { kind: "webhook"; id; prompt; auth; steps?: Step[]; profile?; model?; thinking?; notify?: string[] };
+type Schedule = { id; when: When; prompt; check?: string[]; steps?: Step[]; profile?; model?; thinking?; notify?: string[] };
+
+type When =
+  | { cron; tz }                      // each slot
+  | { at }                            // once, ISO time with an offset
+  | { webhook: { auth } }             // each POST /hooks/<id>
+  | { process: { name; pid; watch? } }; // when a background process exits
 
 type Step =
   | { classify: { question; yes; no; threshold?; on?: "input" | "output" } }
   | { model: {} };
 ```
 
-A run is the ordered `steps`. A classify step before the model step asks the classifier about the input (a webhook body, a check script's output, or the prompt) and stops the run when P(yes) is below `threshold` (default 0.5), so the model never starts for junk. A classifier that fails passes and logs `classify.failed`, so an outage lets alerts through instead of silencing them. A classify step with `on: "output"` judges each `notify` text instead. The model step runs the prompt under the trigger's `profile` (its instructions, model, tools and memory), else its `model`, else the fast tier. A trigger without `steps` is one model step. A stored `notifyWhen` reads as an output classify step and `admitWhen` as one before the model, and `role` reads as `profile`, so triggers stored before steps run as they did.
+`schedule_add`, `schedule_list` and `schedule_remove` are the library. The same id replaces. Config seeds in `[[triggers]]` (the key keeps its old name, so configs load unchanged; `kind` is `cron`, `at` or `webhook` with its fields flat) reconcile at start: an equal seed stays, a changed one is re-added, and a seed that is gone is aborted.
 
-- A cron `check` script runs first. Empty output ends the run `quiet` with no model call.
-- Each run starts from a keyed reset whose handoff is the last run's closing note, so a run never resends its history.
+- **cron** and **webhook** runs: each runs in the schedule's own ownerless conversation with seat `trigger`, from a keyed reset whose handoff is the last run's closing note, so a run never resends its history.
+- **at**: the same run, once. It is the promise list: every promise and follow-up is an `at` schedule whose prompt is the whole task for a cold reader. A late `at` still fires; it then ends.
+- **process**: `proc_start` adds `proc-<name>` in the calling conversation. The task polls the process each second. When it exits, the prompt and the log tail enter that conversation (root through a chat Turn on the owner's last channel), and the schedule ends. A `watch` regex also fires once on the first matching line. `proc_stop` and `schedule_remove` stop the process.
+
+A run is the ordered `steps`. A classify step before the model step asks the classifier about the input (a webhook body, a check script's output, or the prompt) and stops the run when P(yes) is below `threshold` (default 0.5), so the model never starts for junk. A classifier that fails passes and logs `classify.failed`, so an outage lets alerts through instead of silencing them. A classify step with `on: "output"` judges each `notify` text instead. The model step runs the prompt under the schedule's `profile` (its instructions, model, tools and memory), else its `model`, else the fast tier. A schedule without `steps` is one model step.
+
+- A `check` script runs first at each cron or at slot. Empty output ends the run `quiet` with no model call.
 - A cron slot more than 15 minutes late is `missed`. A run still going after 30 minutes is aborted and recorded `timed-out`.
 - Webhooks arrive at `POST /hooks/<id>` on `MOCHI_HOOKS_PORT` (default 8788). Authentication (HMAC-SHA256 or bearer) runs first, the body limit is 1 MB, and the handler returns 202 before the run.
-- A trigger reaches people only through `notify`, to its `notify` ids (default the owner).
+- A run reaches people only through `notify`, to its `notify` ids (default the owner).
 
-## The board
-
-The board (`mochi.board`) holds what mochi and its profiles owe. A task has an id, a title, an optional `due`, `bots` (root or profile names, the first leads), a status (`open`, `waiting`, `done`, `dropped`), a log, and an optional claim. `board_claim` takes a lease (default 2 hours) and fails while someone else holds a live one, so two workers never take the same task. Setting a task done or dropped clears its claim.
-
-The sweep (`mochi.board-sweep`) reads the board in code every 60 s and costs no model call unless a task is due. For a due task led by root, it forks root with the task as the brief. For a task led by a profile, it sends the brief to that profile. A woken task with no log line for 24 hours is woken again, at most 3 times per due time; the last wake asks for a notify that the task is stuck.
-
+At daemon start, `schedule/migrate.ts` carries the three schedulers of before into `mochi.schedule`, once: each live `mochi.trigger` becomes a schedule in its own conversation, each live `mochi.proc` a process schedule, and each open or waiting board task with a due an `at` schedule `board-<id>` whose prompt holds its title, owners and log. The old tasks are aborted and the board document is retired. A board task with no due, or one the old sweep already woke for its due, has no time left to fire and is dropped with a `schedule.board_dropped` log line. Claims, leases and re-wakes are gone: a schedule fires once per slot, in one conversation.
 
 ## Self-improvement
 
-The `improve` trigger runs `skills/improve` nightly. It follows Harness² (recursive agent harnessing), with one change: mochi does not rerun a task to compare harnesses, because its tasks act on the world. Instead `scripts/improve-check.ts` counts failure signals per owner turn since the last run (busy sends, refused notify, side schedulers, lost children, timeouts, owner chases, duplicate replies) and writes the transcripts. The run judges each pending edit on its signal (helped, hurt, no observed effect, confounded), reverts a hurt one with git, then proposes from two dimensions (procedure and practice) with `llm` on the strongest model, composes at most 3 edits, and applies them.
+The `improve` schedule runs `skills/improve` nightly. It follows Harness² (recursive agent harnessing), with one change: mochi does not rerun a task to compare harnesses, because its tasks act on the world. Instead `scripts/improve-check.ts` counts failure signals per owner turn since the last run (busy sends, refused notify, side schedulers, lost children, timeouts, owner chases, duplicate replies) and writes the transcripts. The run judges each pending edit on its signal (helped, hurt, no observed effect, confounded), reverts a hurt one with git, then proposes from two dimensions (procedure and practice) with `llm` on the strongest model, composes at most 3 edits, and applies them.
 
 It edits only `<home>/skills` (which replaces a bundled skill of the same name) and `<home>/profiles`, one git commit in `<home>` per edit. Code and config changes go to the owner as proposals. `<home>/improve/library.md` keeps every edit, its verdict and at most one transferable lesson per run, and each run reads it first. A window with fewer than 10 owner turns is quiet and grows until the next run.
 
@@ -210,7 +213,7 @@ Other agents reach mochi over A2A v1.0 (JSON-RPC): the agent card, `SendMessage`
 ```text
 src/
   main.ts           arguments and modes, lock, open the harness, start channels and components, setup report
-  mochi.ts          openMochi: the registry, tools, extensions, root, the line, the sweep
+  mochi.ts          openMochi: the registry, tools, extensions, root, the line, the migration
   config.ts         config.toml and .env, parsed with TypeBox at the boundary
   home.ts           the home directory layout
   seats.ts          SURFACE, LIBRARY, seat extensions with codemode, conversation creation, forkPoint
@@ -222,14 +225,13 @@ src/
   context.ts        held text: files, the catalog, holdText, context_* tools and the context section
   fork/fork.ts      the child task, fork, fork_start, agent and depth
   profiles/         profiles on disk, standing conversations, profile_* tools, memory owner
-  triggers/         cron parser, trigger task, steps, seeds, webhooks
-  board/board.ts    the board, claims, the sweep
+  schedule/         cron parser, the schedule task, steps, seeds, webhooks, the one-time migration
   turn/             ingest and the Turn task, commands (/new, /stop, /status), handoff
   channels/         the channel interface, present(), iMessage
   apps/, auth/      the apps server client and its OAuth login
   web/, browser/    web functions and the logged-in browser
   media/            images, video, speech, gifs, inbound attachments
-  procs/            background processes and their wakes
+  procs/            background processes; their wakes are process schedules
   a2a/              A2A protocol, server and tools
   attach/           the socket protocol, server, client, TUI and line modes
   skills/           the skills-index section
@@ -242,11 +244,11 @@ src/
 |---|---|
 | No approvals, guard hooks or tool sandbox. | The owner trusts the model on their own machine. A prompt injection in a page or a mail can reach the daemon user's files and keys; that is the accepted cost. |
 | Three model tools; everything else is a script function. | The first request stays small, and a script fans out work and filters data before the model reads it. |
-| Triggers run in their own conversations and reach people only by `notify`. | Root's transcript and cache stay clean, and silence is the default for periodic checks. |
+| Schedule runs live in their own conversations and reach people only by `notify`. | Root's transcript and cache stay clean, and silence is the default for periodic checks. |
 | Forks by default; fresh agents only for a slice of data. | A fork reuses the parent's prompt cache and knows the context. Measured live on Opus 5.5: each fork's first request read about 6,500 cached tokens and wrote about 225. A fresh `agent` pays its own prompt, so it is for bulk work on a cheaper model over context it is given. |
 | Profiles live in the one daemon, not one service each. | One process, one store, one schedule; a profile still has its own role, model, tools and memory. |
 | OptMem memory and window instead of rewrite-on-compaction. | Rewriting the whole prefix on every compaction lost detail each pass, and promises died at compaction. A tree builds each summary once and keeps every raw line reachable. |
-| The board holds promises, not one-shot triggers. | Of 23 commitments root made from Oct 6 to 14, 10 had nothing behind them. |
+| One scheduler: a promise is an `at` schedule. | Of 23 commitments root made from Oct 6 to 14, 10 had nothing behind them. Three schedulers (triggers, the board sweep, proc wakes) meant three places to look and three sets of rules; one task kind with a `when` is one list. |
 | No caps on memory or context. | Sizes are reading budgets, not storage limits. Transport limits at HTTP boundaries and process timeouts stay. |
 | No vendor names in the core. | Providers, the classifier, apps and the web are config. The web client speaks Firecrawl's v2 API and the apps client speaks Executor's protocol, each as the one adapter. |
-| Verification is a live run on a copy of a store, not unit tests. | Without a daemon, `-p` and `chat` start no channels or triggers, so a copy reaches no one. |
+| Verification is a live run on a copy of a store, not unit tests. | Without a daemon, `-p` and `chat` start no channels or schedules, so a copy reaches no one. |

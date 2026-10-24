@@ -60,7 +60,8 @@ haiku = "anthropic/claude-haiku-5-5"
 # ordered chain of steps: a classify step is a fast yes/no question that stops the chain on
 # no, before the model runs (on = "output" judges the notify text instead); { model = {} }
 # is the run of prompt. Without steps a routine is one model step. profile names whose
-# instructions, model and memory the run uses.
+# instructions, model and memory the run uses. Each entry loads as a schedule; the key keeps
+# the name [[triggers]]. kind is "cron" (cron, tz), "at" (at) or "webhook" (auth).
 # [[triggers]]
 # kind = "cron"
 # id = "morning"

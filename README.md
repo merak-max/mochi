@@ -26,11 +26,11 @@ Some work is standing work: someone has to watch the inbox, the bills, the outre
 
 Memory and every conversation's turns are append-only logs. Old lines merge into summary lines, once, in the background, following the merge tree from OptMem. The prompt shows recent lines whole and older ones merged, and `zoom` opens any merged line back down to the raw text. Nothing is summarized twice and nothing is thrown away.
 
-The reason for this is a failure the earlier design had. It rewrote the whole history on each compaction, and each pass lost a little. Promises died first. Of 23 commitments mochi made from October 6 to 14, 10 had nothing behind them by the end of the week. So now every promise goes on a board with a due time, and at the due time the board wakes a copy of mochi with the task.
+The reason for this is a failure the earlier design had. It rewrote the whole history on each compaction, and each pass lost a little. Promises died first. Of 23 commitments mochi made from October 6 to 14, 10 had nothing behind them by the end of the week. So now every promise is a schedule with an `at` time, and at that time a fresh run of mochi gets the task.
 
 ## Routines
 
-Cron and webhook triggers run in their own conversations, as a chain of steps. A step can be a classify step: a fast yes or no question that stops the chain before the model runs. A mail check that runs every 30 minutes and usually finds nothing costs one classifier call, not one model call. A run reaches you only when it calls `notify`, so silence is the default.
+One scheduler runs everything later: a cron, a one-time `at`, a webhook, or the exit of a background process. Each run lives in its own conversation, as a chain of steps. A step can be a classify step: a fast yes or no question that stops the chain before the model runs. A mail check that runs every 30 minutes and usually finds nothing costs one classifier call, not one model call. A run reaches you only when it calls `notify`, so silence is the default.
 
 ## It survives a crash
 
@@ -113,7 +113,7 @@ A profile is a Markdown file at `~/.mochi/profiles/<name>/instructions.md`:
 description: Mail. Triage new mail and draft replies.
 model: fast
 thinking: medium
-tools: recall, note, apps_search, apps_call, board_list, board_update, board_claim
+tools: recall, note, apps_search, apps_call, schedule_list
 ---
 
 You are relay. You own the inboxes. Notify only when ignoring a mail would cost the owner something.

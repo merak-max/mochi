@@ -9,7 +9,7 @@ Rebuild the recent context on a topic and hand back a short brief. Read only wha
 
 1. **Pin the scope.** The topic, and the window. "Recent" is the last 7 days unless the owner says otherwise. Never quietly turn "everything" into "recent".
 2. **Search the record.** Run `recall` with a few phrasings: the topic, names, places, amounts. Read around the strongest chat hits with the hit's `entry`. Open a merged memory block with `zoom({ block })`. For a broad topic or a long window, give slices to forks in one `fork` call, each returning decisions, open threads and artifacts with entry ids.
-3. **Check live state.** `trigger_list`, `board_list`, `proc_status`, the work directory (todo files, decision logs, resume notes), and the owner's apps for what changed since.
+3. **Check live state.** `schedule_list`, `proc_status`, the work directory (todo files, decision logs, resume notes), and the owner's apps for what changed since.
 4. **Separate words from summaries.** Quote the owner's own message, with its entry id, for each decision. Label your earlier summaries as summaries.
 5. **Check before you say "never".** Search the history with at least two phrasings, then memory, then the work directory. Say what you searched.
 
