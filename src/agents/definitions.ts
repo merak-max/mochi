@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
 import { AgentDoc, configure, type PromptSection, section, type ConversationId, defineDocFamily, defineTool, type Harness, type ModelRef, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { abortTargets } from "../turn/commands.ts";
-import { allPages } from "../pages.ts";
 import { createSeatConversation } from "../seats.ts";
 
 // An agent definition is a named worker: `<home>/agents/<name>.md` or the bundled `agents/<name>.md`, with front matter
@@ -153,26 +152,6 @@ export async function applyAgent(tx: Tx, conversation: ConversationId, run: RunA
 	const agent = await tx.doc(AgentDoc, conversation);
 	if (run.tools === undefined) delete agent.tools;
 	else agent.tools = [...run.tools];
-}
-
-const CONTEXT_READERS = ["context_read", "context_list"];
-
-/**
- * Gives every definition's conversation with a narrowed tool list the context readers, so held input stays readable in
- * conversations whose list was written before the readers existed or by a path that skips applyAgent. Run before resume.
- */
-export async function addContextReaders(tx: Tx): Promise<void> {
-	const records = await allPages((cursor) => tx.scanConversations({}, 256, cursor));
-	for (const record of records) {
-		const { profile } = await tx.doc(OwnerDoc, String(record.id), null);
-		if (profile === null) continue;
-		const agent = await tx.doc(AgentDoc, record.id);
-		const tools = agent.tools;
-		if (!Array.isArray(tools)) continue;
-		for (const name of CONTEXT_READERS) {
-			if (!tools.includes(name)) tools.push(name);
-		}
-	}
 }
 
 const RESIDENT_HEADER = (name: string) =>

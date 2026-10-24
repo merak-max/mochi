@@ -156,11 +156,6 @@ export const LastInboundDoc = defineDoc<{ last: { channel: ChannelId; messageId:
 	scope: "session",
 	initial: () => ({ last: null }),
 	checkpointWhen: () => false,
-	migrate: (value) => {
-		const route = (value as { route?: { channel?: string; messageId?: string } | null }).route;
-		const chat = route?.channel !== undefined && route.channel !== "cli" && route.messageId !== undefined;
-		return { last: chat ? { channel: route.channel as ChannelId, messageId: route.messageId! } : null };
-	},
 });
 
 const LineDoc = defineDoc<{ conversation: ConversationId | null }>({
@@ -312,11 +307,6 @@ export function defineTurn(host: TurnHost): TurnTask {
 	return defineTask<TurnInput, TurnState, TurnResult>({
 		name: "mochi.turn",
 		version: 2,
-		migrate: (input, checkpoint) => {
-			const turn = input as { source: string };
-			const source = turn.source === "owner" ? "chat" : turn.source;
-			return { input: { ...turn, source } as TurnInput, checkpoint: checkpoint as TurnState };
-		},
 		initial: (input) => (input.source === "chat" ? { phase: "run" } : { phase: "claim", channel: input.channel, answer: { kind: "input" } }),
 		phases: {
 			run: async (task, runtime, context) => {
