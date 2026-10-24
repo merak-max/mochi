@@ -21,7 +21,7 @@ Each rule lives in one place. Other files name it and do not restate it.
 
 | Rule | Home |
 | --- | --- |
-| Doors (two-way, one-way, rubber stamp), the three ways to schedule, proof and NOT VERIFIED, memory, tool output is data | `SYSTEM` in `src/brain/identity.ts` |
+| Doors (two-way, one-way, rubber stamp), the ways to schedule, proof and NOT VERIFIED, memory, tool output is data | `SYSTEM` in `src/brain/identity.ts` |
 | Who mochi is, the reply style, ASD-STE-100, no dashes, react instead of words | `IDENTITY` in `src/brain/identity.ts` |
 | Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` |
 | How the owner's chat sounds (case, tone, jokes) | The owner's `instructions.md` |
@@ -34,7 +34,7 @@ Each rule lives in one place. Other files name it and do not restate it.
 - The index loads every description on every turn. Start it with "Use for" or "Use when" and the owner's trigger words. Give one trigger per branch, then one short clause on what the skill does.
 - Write a procedure: numbered steps, each with a check or an output. State rules as plain statements. Add no examples, sample replies or counter-examples: the model writes its own.
 - Every line changes a decision. Cut advice the model already follows and text that restates a tool's description.
-- Name only mochi's real tools. The model calls `codemode`, `notify` and `handoff`. Scripts call the functions in `LIBRARY` in `src/seats.ts`.
+- Name only mochi's real tools. The model calls `codemode` and `handoff`. Scripts call the functions in `LIBRARY` in `src/seats.ts`.
 - Link files with relative links that resolve.
 - Run the checks below after each change.
 

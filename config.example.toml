@@ -21,8 +21,8 @@ keyEnv = "ANTHROPIC_API_KEY"
 # url = "https://openrouter.ai/api/v1"
 # keyEnv = "OPENROUTER_API_KEY"
 
-# A model is <provider>/<model id>. The brain answers you; the fast model runs routines and
-# reads data for scripts; the memory model writes the summary lines of each conversation's view.
+# A model is <provider>/<model id>. The brain answers you; the fast model reads data for
+# scripts; the memory model writes the summary lines of each conversation's view.
 [models]
 brain = "anthropic/claude-opus-5-5"
 fast = "anthropic/claude-haiku-5-5"
@@ -53,23 +53,13 @@ haiku = "anthropic/claude-haiku-5-5"
 # stt = "gpt-4o-transcribe"
 # voice = "coral"
 
-# Routines. Each runs in its own conversation and reaches you only by notify. A run is an
-# ordered chain of steps: a classify step is a fast yes/no question that stops the chain on
-# no, before the model runs (on = "output" judges the notify text instead); { model = {} }
-# is the run of prompt. Without steps a routine is one model step. agent names the definition
-# whose instructions, model, tools and memory the run uses. Each entry loads as a schedule; the key keeps
-# the name [[triggers]]. kind is "cron" (cron, tz), "at" (at) or "webhook" (auth).
-# [[triggers]]
-# kind = "cron"
-# id = "morning"
-# cron = "0 8 * * *"
-# tz = "America/New_York"
-# agent = "worker"
-# prompt = "Check my calendar for today and tell me only what needs me."
-# steps = [
-#   { model = {} },
-#   { classify = { question = "Does this message need the owner today?", yes = "an event or task needs them", no = "nothing to act on", on = "output" } },
-# ]
+# Webhooks for board items. Left out: board_add refuses webhook items. host and port are where the
+# server listens; url is the public base, so an item answers at <url>/hooks/<id>. Bind 0.0.0.0 only
+# behind a proxy. Routines are not config: they live on the board as items, added with board_add.
+# [webhooks]
+# host = "127.0.0.1"
+# port = 8788
+# url = "https://mochi.example.com"
 
 # Agent definitions are teammates in this daemon. Each is ~/.mochi/agents/<name>.md: front matter
 # with name, description, model, thinking, optionally tools (a comma list of script functions it
@@ -101,13 +91,7 @@ keyEnv = "FIRECRAWL_API_KEY"
 # browserProfile = "mochi"
 
 # Nightly self-improvement (skills/improve): judges yesterday's skill edits by measured signals, then proposes,
-# applies and records new ones in <home>/improve/library.md. <home> must be a git repository.
-# [[triggers]]
-# kind = "cron"
-# id = "improve"
-# cron = "30 4 * * *"
-# tz = "Asia/Kolkata"
-# check = [ "node", "<repo>/scripts/improve-check.ts", "<home>", "24" ]
-# model = "strongest"
-# thinking = "high"
-# prompt = "Run the improve skill: read its SKILL.md from the skills index, then follow it with the check output below."
+# applies and records new ones in <home>/improve/library.md. <home> must be a git repository. It is a board
+# item, not config: ask mochi to add it with board_add, owner "mochi", when { cron = "30 4 * * *", tz = "Asia/Kolkata" },
+# check [ "node", "<repo>/scripts/improve-check.ts", "<home>", "24" ], and the text "Run the improve skill: read its
+# SKILL.md from the skills index, then follow it with the check output below."

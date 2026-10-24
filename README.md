@@ -16,25 +16,25 @@ Housekeeping items:
 
 You get one long conversation across every channel. Text it "move my 4pm to Friday" from your phone, and the reply comes back in the same thread. Each friend you configure gets a thread of their own, and those threads never see your memory or your apps.
 
-The model sees three tools. One of them, `codemode`, runs JavaScript in a sandbox, and everything else is a function that script calls: the web, the tools of any MCP server you configure, files, a shell, memory, agents, routines. This sounds like a small detail, and it is the main design choice. A model that writes a loop over 200 mails and filters them before it reads anything uses far fewer tokens than a model that calls a tool 200 times. It also keeps the first request small, which keeps the prompt cache warm.
+The model sees two tools. One of them, `codemode`, runs JavaScript in a sandbox, and everything else is a function that script calls: the web, the tools of any MCP server you configure, files, a shell, memory, agents, the board. This sounds like a small detail, and it is the main design choice. A model that writes a loop over 200 mails and filters them before it reads anything uses far fewer tokens than a model that calls a tool 200 times. It also keeps the first request small, which keeps the prompt cache warm.
 
 When a task splits, `agent` with `fork: true` copies the current conversation, context and all, once per job, six at a time. Each copy reads the parent's prompt cache, so three drafts at once cost about the price of the new tokens. Measured on Opus 5.5, each fork's first request read about 6,500 cached tokens and wrote about 225. Forks can fork.
 
-Some work belongs to a role: someone has to watch the inbox, the bills, the outreach. That is an agent definition. A definition is a Markdown file with a role, a model and a tool list. mochi hands it a job with `agent`, or a routine runs under it. A resident definition also keeps one standing conversation with its own memory, inside the same daemon.
+Some work belongs to a role: someone has to watch the inbox, the bills, the outreach. That is an agent definition. A definition is a Markdown file with a role, a model and a tool list. mochi hands it a job with `agent`, or it owns a board item. A resident definition also keeps one standing conversation with its own memory, inside the same daemon.
 
 ## Memory that does not forget
 
 The chat is the memory. Each message is summarized into one line, and neighboring lines merge in pairs, again and again, into a binary tree, as in uniichat. Each request sees a view of the whole chat: recent messages whole, older ones covered by fewer, broader lines. `zoom` opens any line into the two it was made from, down to the original message. A cheaper model builds the tree in the background, and the view changes only at its end, so the prompt cache stays warm. Nothing is thrown away. Facts that must outlive a reset go in plain markdown files under `~/.mochi/memory`, which you can read and edit too.
 
-The reason for this is a failure the earlier design had. It rewrote the whole history on each compaction, and each pass lost a little. Promises died first. Of 23 commitments mochi made from October 6 to 14, 10 had nothing behind them by the end of the week. So now every promise is a schedule with an `at` time, and at that time a fresh run of mochi gets the task.
+The reason for this is a failure the earlier design had. It rewrote the whole history on each compaction, and each pass lost a little. Promises died first. Of 23 commitments mochi made from October 6 to 14, 10 had nothing behind them by the end of the week. So now every promise is a board item with an `at` time, and at that time the item's owner gets the task as a message.
 
-## Routines
+## The board
 
-One scheduler runs everything later: a cron, a one-time `at`, a webhook, or the exit of a background process. Each run lives in its own conversation, as a chain of steps. A step can be a classify step: a fast yes or no question that stops the chain before the model runs. A mail check that runs every 30 minutes and usually finds nothing costs one classifier call, not one model call. A run reaches you only when it calls `notify`, so silence is the default.
+One board holds everything owed. An item has a text and an owner: root, or an agent definition. An item with no `when` is only listed. An item fires once at an `at` time, at each slot of a `cron`, or on each POST to its webhook. A fire first runs the item's `check` script, if it has one. Empty output ends the fire with no model call, so a mail check that runs every 30 minutes and usually finds nothing costs one script run. Then the fire sends the item's text to its owner. Root's final text is the reply to you. A definition's final text goes to you verbatim, after an optional yes or no gate on the classifier. `NO_REPLY` stays silent, so silence is the default. A background process wakes the conversation that started it when it exits.
 
 ## It survives a crash
 
-Every reply, routine and agent job is a durable task in one SQLite file. A crash or a restart picks up where it stopped. A reply records each bubble as it sends, so a crash repeats at most one bubble, and a message that arrives twice is answered once.
+Every reply, board fire and agent job is a durable task in one SQLite file. A crash or a restart picks up where it stopped. A reply records each bubble as it sends, so a crash repeats at most one bubble, and a message that arrives twice is answered once.
 
 Delivery has three kinds of failure, and each has one response. A channel that is down waits 5 seconds, doubles up to 5 minutes, and gives up after an hour. A send whose outcome is unknown retries once. A send the platform refuses for good is skipped.
 
@@ -78,7 +78,7 @@ Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository
 
 | Path | What |
 |---|---|
-| `config.toml` | Time zone, providers and models, routines, users, MCP servers and web. See `config.example.toml`. |
+| `config.toml` | Time zone, providers and models, users, MCP servers, web and webhooks. See `config.example.toml`. |
 | `.env` | Keys and tokens. See `.env.example`. |
 | `instructions.md` | Facts about you, after root's definition. |
 | `agents/root.md` | Required. Root's definition: who root is and how it works. Start from `root.example.md`. |
@@ -106,7 +106,7 @@ memory = "gateway/claude-haiku-5-5"
 sol = "gateway/gpt-6.1-sol"
 ```
 
-`brain` answers you. `fast` runs routines and reads data for scripts. `memory` writes the summary lines of each conversation's view; it makes many small calls, so a cheap model fits. Definitions and routines pick a tier or an alias by name.
+`brain` answers you. `fast` reads data for scripts and runs definitions that name it. `memory` writes the summary lines of each conversation's view; it makes many small calls, so a cheap model fits. Definitions pick a tier or an alias by name.
 
 ## Agents
 
@@ -117,14 +117,14 @@ An agent definition is a Markdown file at `~/.mochi/agents/<name>.md`:
 description: Mail. Triage new mail and draft replies.
 model: fast
 thinking: medium
-tools: executor_execute, executor_skills, schedule_list
+tools: executor_execute, executor_skills, board_list
 resident: true
 ---
 
-You are relay. You own the inboxes. Notify only when ignoring a mail would cost the owner something.
+You are relay. You own the inboxes. Speak only when ignoring a mail would cost the owner something.
 ```
 
-`tools` is optional. Without it the definition has every function. An edit reaches the next job without a restart. Name a definition in a routine with `agent = "relay"`, or ask mochi to give it work. Without `resident: true`, each job is a fresh child that ends with its answer. With it, every job goes to the same standing conversation, so the agent remembers earlier jobs.
+`tools` is optional. Without it the definition has every function. An edit reaches the next job without a restart. Make a definition the owner of a board item with `owner: "relay"`, or ask mochi to give it work. Without `resident: true`, each job is a fresh child that ends with its answer. With it, every job goes to the same standing conversation, so the agent remembers earlier jobs.
 
 ## What it does not do
 
@@ -138,6 +138,6 @@ Messages sent while the iMessage link is down are not replayed, because the Spec
 npm run typecheck
 ```
 
-There are no unit tests. Verify a change by running the real daemon on a copy of a store: `MOCHI_HOME=<copy> node src/main.ts -p "<prompt>"`. Without a running daemon, `-p` and `chat` start no channels and no triggers, so a copy reaches no one.
+There are no unit tests. Verify a change by running the real daemon on a copy of a store: `MOCHI_HOME=<copy> node src/main.ts -p "<prompt>"`. Without a running daemon, `-p` and `chat` start no channels and no board fires, so a copy reaches no one.
 
-`SPEC.md` is the design: process shape, conversations, tools, prompt, memory, routines, agents, and the decisions that still hold and why.
+`SPEC.md` is the design: process shape, conversations, tools, prompt, memory, the board, agents, and the decisions that still hold and why.

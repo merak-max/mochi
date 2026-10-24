@@ -1,4 +1,4 @@
-// The improve trigger's check: counts failure signals over the last day of the store and writes the evidence for
+// The improve board item's check: counts failure signals over the last day of the store and writes the evidence for
 // the run. Prints a short JSON summary, or nothing when the window holds fewer than 10 owner turns;
 // then the window grows until it does.
 // The window starts at the last run (<home>/improve/last-run), so a verdict reads only work done after the edits it
@@ -26,7 +26,6 @@ const SIGNALS = {
 	owner_turns: "Owner messages on a chat channel or the cli.",
 	owner_chase: "Owner messages that chase or complain: status, still, why not, too slow, its been. Heuristic.",
 	busy_queued: "agent results that say a resident agent was busy and the job only queued.",
-	notify_refused: "notify calls refused in the owner's own thread.",
 	side_scheduler: "Model scripts that schedule work outside mochi: systemd-run, crontab, at, nohup.",
 	script_failed: "codemode scripts that failed.",
 	script_timeout: "codemode scripts that hit their time limit.",
@@ -79,7 +78,6 @@ for (const row of db.prepare("select id, conversation_id, record from entries or
 				const text: string = part.text ?? "";
 				if (message.role === "toolResult") {
 					if (/NOT STARTED: |is busy; your message is queued/.test(text)) bump("busy_queued", where);
-					if (/notify is for agents working out of their sight/.test(text)) bump("notify_refused", where);
 					if (/Validation failed for tool/.test(text)) bump("validation_failed", where);
 					if (/Script error|Script failed/.test(text)) bump("script_failed", where);
 					if (/Script timed out|timed out after/i.test(text)) bump("script_timeout", where);
