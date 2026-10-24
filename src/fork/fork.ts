@@ -58,10 +58,9 @@ export function defineForkTask(workDir: string) {
 		initial: () => ({ phase: "run" }),
 		phases: {
 			run: async (task, runtime, context) => {
-				const host = { commit: (change: (tx: Tx) => Promise<void>, context: Context) => runtime.commit(async (tx) => void (await change(tx)), context) };
 				let child = task.input.resident;
 				if (child === undefined) await runtime.commit(async (tx) => void (child = await childOf(tx, task.id)), context);
-				const brief = await holdText(host, workDir, child!, `in:agent:${task.id}`, task.input.brief, context);
+				const brief = await holdText(runtime, workDir, child!, `in:agent:${task.id}`, task.input.brief, context);
 				const submission = await (await runtime.conversation(child!, context))!.submit({ type: "input", content: brief, requestId: `agent:${task.id}`, whenBusy: "followUp" }, context);
 				const settled = await submission.wait(context);
 				let result = { failure: settled.reason ?? settled.status } as ForkResult;
@@ -82,7 +81,7 @@ export function defineForkTask(workDir: string) {
 				if (back !== undefined) {
 					const body = "answer" in result ? result.answer || "(empty answer)" : `(no answer: ${result.failure})`;
 					const key = `fork-back:${task.id}`;
-					const held = await holdText(host, workDir, back.id, `in:${key}`, body, context);
+					const held = await holdText(runtime, workDir, back.id, `in:${key}`, body, context);
 					await submitNote(back, key, `[${task.input.name}]\n${held}`, context);
 				}
 				await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result } }), context);

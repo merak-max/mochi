@@ -172,8 +172,7 @@ export function defineProcWatch(dir: string, line: () => Line) {
 						return;
 					}
 					const conversation = (await runtime.conversation(runtime.conversationId, context))!;
-					const host = { commit: (change: (tx: Tx) => Promise<void>, context: Context) => runtime.commit(async (tx) => void (await change(tx)), context) };
-					const held = await holdText(host, line().workDir, conversation.id, `in:${requestId}`, frozen.body, context);
+					const held = await holdText(runtime, line().workDir, conversation.id, `in:${requestId}`, frozen.body, context);
 					await conversation.submit({ type: "input", content: `${tag}\n${held}`, requestId, whenBusy: "followUp" }, context);
 					await runtime.commit(() => next, context);
 				};

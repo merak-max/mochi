@@ -252,8 +252,7 @@ function defineFire(deps: BoardDeps) {
 			ask: async (task, runtime, context) => {
 				const { item, message, conversation } = task.state.checkpoint;
 				const requestId = `board:${item.id}:${task.input.key}`;
-				const host = { commit: (change: (tx: Tx) => Promise<void>, context: Context) => runtime.commit(async (tx) => void (await change(tx)), context) };
-				const content = await holdText(host, workDir, conversation, `in:${requestId}`, message, context);
+				const content = await holdText(runtime, workDir, conversation, `in:${requestId}`, message, context);
 				const submission = await (await runtime.conversation(conversation, context))!.submit({ type: "input", content, requestId, whenBusy: "followUp" }, context);
 				const settled = await submission.wait(context);
 				return runtime.commit(async (tx) => {

@@ -43,9 +43,9 @@ const ContextDoc = defineDoc<{ values: Record<string, ContextDescriptor> }>({
 	checkpointWhen: () => false,
 });
 
-/** A harness, a tool api, or a task runtime wrapped to this shape. */
+/** A harness, a tool api, or a task runtime. */
 export interface Committer {
-	commit(change: (tx: Tx) => Promise<void>, context: Context): Promise<unknown>;
+	commit(change: (tx: Tx) => Promise<undefined>, context: Context): Promise<unknown>;
 }
 
 const digestOf = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 32);
@@ -100,6 +100,7 @@ async function keep(host: Committer, workDir: string, conversation: Conversation
 	let kept = fresh;
 	await host.commit(async (tx) => {
 		kept = record((await tx.doc(ContextDoc, conversation)).values, key, fresh);
+		return undefined;
 	}, context);
 	return kept;
 }
