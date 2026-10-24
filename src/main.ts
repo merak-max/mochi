@@ -26,7 +26,6 @@ import { Definitions } from "./agents/definitions.ts";
 import { webhooksComponent } from "./board/webhooks.ts";
 import { login, tokenFile } from "./mcp/oauth.ts";
 import { ingest, notifyOwner } from "./turn/turn.ts";
-import type { TaskId } from "@earendil-works/pi-durable";
 import { runCompactor } from "./memory/compactor.ts";
 import { fastCompletion } from "./turn/lifecycle.ts";
 
@@ -208,7 +207,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		{
 			storage: await openNodeSqliteStorage(join(config.home.dir, "mochi.sqlite")),
 			models,
-			brain: config.modelSetup.brain,
 			fast: config.modelSetup.fast,
 			classify: createClassify(models, config.modelSetup.classifier),
 			web: config.web,
@@ -247,7 +245,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const channelsRunning = new AbortController();
 	const sink: InboundSink = async (message) => {
 		const turn = await ingest(mochi.line, message, running);
-		return { answered: turn === undefined ? Promise.resolve() : turnEnd(mochi.harness, turn) };
+		return { answered: turn === undefined ? Promise.resolve() : mochi.harness.waitForTask(turn, BACKGROUND_CONTEXT).then(() => {}) };
 	};
 	const inbound = [...configured.channels.values()].map((channel) =>
 		channel.run(sink, channelsRunning.signal).catch((error: unknown) => {
@@ -277,11 +275,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			return stopped;
 		},
 	};
-}
-
-/** Settles when Turn `id` ends, however it ends. */
-async function turnEnd(harness: Awaited<ReturnType<typeof openMochi>>["harness"], id: TaskId): Promise<void> {
-	await harness.waitForTask(id, BACKGROUND_CONTEXT);
 }
 
 async function readInstructions(home: Home): Promise<{ instructions?: string }> {
@@ -332,7 +325,6 @@ async function run(args: readonly string[]): Promise<void> {
 	try {
 		process.exitCode = await main(cli);
 	} catch (error) {
-		// Only a daemon logs a crash; a client command prints one line.
 		if (cli.kind === "daemon") log("mochi.crashed", { error: error instanceof Error ? (error.stack ?? error.message) : String(error) });
 		else process.stderr.write(`mochi: ${error instanceof Error ? error.message : String(error)}\n`);
 		process.exit(1);

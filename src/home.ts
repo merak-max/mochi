@@ -23,7 +23,6 @@ export interface Home {
 	readonly logFile: string;
 }
 
-/** `MOCHI_HOME`, else `~/.mochi`. */
 export function resolveHome(env: Readonly<Record<string, string | undefined>>): Home {
 	const dir = resolve(env.MOCHI_HOME ?? join(homedir(), ".mochi"));
 	return {

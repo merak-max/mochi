@@ -1,7 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import { contentText, type Message, type TextContent, Type } from "@earendil-works/pi-ai";
 import {
-	AgentDoc,
 	type ConversationId,
 	defineDocFamily,
 	defineExtension,
@@ -11,7 +10,6 @@ import {
 	type Harness,
 	hook,
 	section,
-	type Tx,
 } from "@earendil-works/pi-durable";
 import { allPages } from "../pages.ts";
 import { VIEW } from "./prompt.ts";
@@ -81,7 +79,7 @@ export function nodeOf(tree: Pick<Tree, "nodes">, chat: readonly Message[]): Nod
  * The tail runs from the last user message, cut to its last `high` bytes as uniichat's `whole` does. It starts on a
  * view line's first message and never on a tool result, so no line is cut and every tool call keeps its result.
  */
-export function request(messages: readonly Message[], tree: Readonly<Tree>, high: number): Message[] | undefined {
+function request(messages: readonly Message[], tree: Readonly<Tree>, high: number): Message[] | undefined {
 	const system = messages.filter((message) => message.role === "system");
 	const chat = messagesOf(messages);
 	if (chat.length === 0 || chat[0]!.timestamp !== tree.start) return undefined;
@@ -146,7 +144,7 @@ export function zoomTool(harness: () => Harness) {
 }
 
 /** The extension that holds the view. It keeps the name the stored conversations already select. */
-export const VIEW_EXTENSION = "notes";
+const VIEW_EXTENSION = "notes";
 
 /**
  * The memory section and the request hook. A conversation with no tree (a child) sends its context
@@ -167,15 +165,4 @@ export function memoryExtension(): Extension {
 			}),
 		],
 	});
-}
-
-/** Every stored agent selects the view: user threads were created without it, while compaction kept them small. */
-export async function selectView(tx: Tx): Promise<void> {
-	const records = await allPages((cursor) => tx.scanConversations({}, 256, cursor));
-	for (const record of records) {
-		const agent = await tx.doc(AgentDoc, record.id);
-		const extensions = agent.extensions;
-		if (!Array.isArray(extensions) || extensions.includes(VIEW_EXTENSION)) continue;
-		extensions.push(VIEW_EXTENSION);
-	}
 }

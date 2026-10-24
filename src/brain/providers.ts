@@ -9,7 +9,7 @@ import type { Env } from "../channels/types.ts";
  * `[providers.<name>]` in config.toml: an endpoint, the pi-ai api it speaks (`anthropic-messages`, `openai-responses`,
  * `openai-completions`, `typesafe-system-one`, `openai-decisions`, ...), and the env variable with its key. A gateway is
  * one provider per api it serves. A model is `<provider>/<model id>`, and the id is sent as written, so a gateway's own
- * ids (`anthropic/claude-opus-5-5`) work unchanged.
+ * `<vendor>/<model>` ids work unchanged.
  */
 export const ProviderSchema = Type.Object(
 	{
@@ -59,24 +59,21 @@ export const ModelsSchema = Type.Object(
 );
 type ModelsConfig = Static<typeof ModelsSchema>;
 
-export function providerEndpoint(name: string, providers: Readonly<Record<string, ProviderConfig>> = {}): { baseUrl: string; keyEnv: string } {
-	const config = providers[name];
-	if (config === undefined) throw new Error(`Provider "${name}" is not in [providers]. Configured: ${Object.keys(providers).join(", ") || "none"}.`);
+export function providerEndpoint(name: string, providers: Readonly<Record<string, ProviderConfig>> | undefined): { baseUrl: string; keyEnv: string } {
+	const config = providers?.[name];
+	if (config === undefined) throw new Error(`Provider "${name}" is not in [providers]. Configured: ${Object.keys(providers ?? {}).join(", ") || "none"}.`);
 	return { baseUrl: config.url.replace(/\/$/, ""), keyEnv: config.keyEnv };
 }
 
-/** The models mochi talks to, resolved once from config. `ref` turns a tier, alias or `provider/id` into a model. */
+/** The models mochi talks to, resolved once from config. */
 export interface ModelSetup {
 	readonly models: MutableModels;
-	readonly brain: ModelRef;
 	readonly fast: ModelRef;
 	readonly memory: ModelRef;
 	/** `[models] classifier`; absent, `classify` and classify steps fail with a clear error. */
 	readonly classifier?: ModelRef;
 	/** A name from `[models]`, or `provider/id`. */
 	ref(name: string): ModelRef;
-	/** The chat model names in `[models]`, for tool schemas. */
-	readonly names: readonly string[];
 	/** One line per provider whose key is not set, for the setup report. */
 	readonly missing: readonly string[];
 }
@@ -96,7 +93,7 @@ function classifierCatalog(id: string): object | undefined {
 	return undefined;
 }
 
-/** pi-ai's catalog entry for an id on this wire, from whichever provider lists it, by the id's last path part, so `anthropic/claude-opus-5-5` finds Opus. */
+/** pi-ai's catalog entry for an id on this wire, from whichever provider lists it, by the id's last path part, so a gateway's `<vendor>/<model>` id finds the vendor's entry. */
 function catalog(wire: Api, id: string): Model<Api> | undefined {
 	const bare = id.slice(id.lastIndexOf("/") + 1);
 	for (const provider of getBuiltinProviders()) {
@@ -151,9 +148,9 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 	} as Model<Api>;
 }
 
-export async function createModelSetup(input: { readonly providers?: Record<string, ProviderConfig>; readonly models?: ModelsConfig; readonly env: Env }): Promise<ModelSetup> {
-	const providers = input.providers ?? {};
-	if (Object.keys(providers).length === 0) throw new Error("config.toml has no [providers]. Add one, for example [providers.anthropic] with api = \"anthropic-messages\".");
+export async function createModelSetup(input: { readonly providers: Record<string, ProviderConfig> | undefined; readonly models: ModelsConfig | undefined; readonly env: Env }): Promise<ModelSetup> {
+	const providers = input.providers;
+	if (providers === undefined || Object.keys(providers).length === 0) throw new Error("config.toml has no [providers]. Add one, for example [providers.anthropic] with api = \"anthropic-messages\".");
 	const clients = new Map<string, Awaited<ReturnType<typeof apiClient>>>();
 	for (const [name, config] of Object.entries(providers)) clients.set(name, await apiClient(config.api));
 	const chosen = input.models;
@@ -200,7 +197,8 @@ export async function createModelSetup(input: { readonly providers?: Record<stri
 		const config = providers[provider]!;
 		const found = clients.get(provider)!;
 		if (found.kind !== "classifier") throw new Error(`[models] classifier ${chosen.classifier}: provider "${provider}" has api "${config.api}", which is a chat api, not a decision api.`);
-		const { baseUrl, keyEnv } = providerEndpoint(provider, providers);
+		const keyEnv = config.keyEnv;
+		const baseUrl = config.url.replace(/\/$/, "");
 		const apiKey = input.env[keyEnv]?.trim() ?? "";
 		const known = classifierCatalog(id);
 		models.setProvider(
@@ -224,5 +222,5 @@ export async function createModelSetup(input: { readonly providers?: Record<stri
 		}
 		return { provider, modelId: id };
 	};
-	return { models, brain: ref("brain"), fast: ref("fast"), memory: ref("memory"), ...(classifier === undefined ? {} : { classifier }), ref, names: Object.keys(named), missing };
+	return { models, fast: ref("fast"), memory: ref("memory"), ...(classifier === undefined ? {} : { classifier }), ref, missing };
 }

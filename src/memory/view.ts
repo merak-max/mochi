@@ -20,7 +20,7 @@ export type Node = (part: Part) => string | null;
 export const NODE = 512;
 export const HIGH = 128000;
 export const SEEN = 32000;
-export const BLOCK = 4;
+const BLOCK = 4;
 export const TRIES = 5;
 
 /** A ruler, not a sample line: the compactor copied a sample's content. */
@@ -61,13 +61,13 @@ export function ctx(l: number, i: number): number {
 	return l === 0 ? i : (i + 1) * 2 ** l;
 }
 
-export function halves(part: Part): Part[] {
+function halves(part: Part): Part[] {
 	if (part.l === 0) return [];
 	return [{ l: part.l - 1, i: 2 * part.i }, { l: part.l - 1, i: 2 * part.i + 1 }];
 }
 
 /** The tree's roots: a node per power of two in the count, largest first. */
-export function roots(count: number): Part[] {
+function roots(count: number): Part[] {
 	const out: Part[] = [];
 	let id = 0;
 	for (let l = 30; l >= 0; l--) {
@@ -84,17 +84,17 @@ export function ref(part: Part): string {
 	return part.i * 2 ** part.l + "+" + 2 ** part.l;
 }
 
-export function flat(text: string): string {
+function flat(text: string): string {
 	if (!text.includes("\n")) return text;
 	return text.replace(/\s*\n\s*/g, " ");
 }
 
-export function line(part: Part, text: string): string {
+function line(part: Part, text: string): string {
 	return ref(part) + "|" + flat(text);
 }
 
 /** A text's first NODE bytes. */
-export function cut(text: string): string {
+function cut(text: string): string {
 	return Buffer.from(text, "utf8").subarray(0, NODE).toString("utf8").replace(/�+$/, "");
 }
 
@@ -130,7 +130,7 @@ export function size(node: Node, part: Part): number {
 }
 
 /** The message after a view's last line. */
-export function end(parts: readonly Part[]): number {
+function end(parts: readonly Part[]): number {
 	if (parts.length === 0) return 0;
 	return span(parts[parts.length - 1]!)[1] + 1;
 }
@@ -163,7 +163,7 @@ type Pair = { d: number; k: number; a: Part; b: Part };
  * ((T + 1) / 2^l - i, T the view's end: its age from its last message, in halves), the oldest of equals; a heap of
  * pairs over the view as a linked list, so a view of thousands merges in milliseconds.
  */
-export function merge(from: View, node: Node): { parts: Part[]; size: number } {
+function merge(from: View, node: Node): { parts: Part[]; size: number } {
 	const t = end(from.parts);
 	const low = from.high / 2;
 	const view: Array<Part | null> = [...from.parts];
@@ -281,7 +281,7 @@ export function whole(sizes: readonly number[], from: number, high: number): num
 }
 
 /** Line id+n as a node; null: n is not a power of 2, or id not a multiple of n, or past the count. */
-export function part(id: number, n: number, count: number): Part | null {
+function part(id: number, n: number, count: number): Part | null {
 	const l = Math.log2(n);
 	const ok = Number.isInteger(id) && Number.isInteger(l) && id >= 0 && id % n === 0 && id + n <= count;
 	return ok ? { l, i: id / n } : null;
