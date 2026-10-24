@@ -3,7 +3,7 @@ import { AgentDoc, type ConversationId, type ConversationRecord, type Harness, L
 import type { ChatUser } from "../config.ts";
 import { allPages } from "../pages.ts";
 import { ownerOf, type Profiles } from "../profiles/profiles.ts";
-import { scanTriggers } from "../triggers/trigger.ts";
+import { scanSchedules } from "../schedule/schedule.ts";
 import { userConversation } from "../turn/turn.ts";
 import type { AgentKind, AgentSummary, Target } from "./protocol.ts";
 
@@ -27,12 +27,12 @@ const briefTitle = (brief: string): string => firstLine(brief.replace(PREAMBLE, 
 /** Kind, label, parent and title of every conversation, from records and documents only: no entry scans. */
 async function names(deps: RosterDeps, context: Context): Promise<Named[]> {
 	const { harness } = deps;
-	const { records, triggers } = await harness.commit(
-		async (tx) => ({ records: await allPages((cursor) => tx.scanConversations({}, 256, cursor)), triggers: await scanTriggers(tx) }),
+	const { records, schedules } = await harness.commit(
+		async (tx) => ({ records: await allPages((cursor) => tx.scanConversations({}, 256, cursor)), schedules: await scanSchedules(tx) }),
 		context,
 	);
 	const triggerOf = new Map<number, { readonly id: string; readonly prompt: string }>();
-	for (const task of triggers) triggerOf.set(task.conversationId, { id: task.input.trigger.id, prompt: task.input.trigger.prompt });
+	for (const task of schedules) if (!("process" in task.input.schedule.when)) triggerOf.set(task.conversationId, { id: task.input.schedule.id, prompt: task.input.schedule.prompt });
 	const userOf = new Map<number, string>();
 	for (const user of deps.users) {
 		const id = await userConversation(harness, user.handle, context);
@@ -69,7 +69,7 @@ async function nameOf(
 		return { id, kind: "conversation", label: `conversation:${id}`, ...parent };
 	}
 	const trigger = triggerOf.get(id);
-	if (trigger !== undefined) return { id, kind: "trigger", label: `trigger:${trigger.id}`, ...parent, title: firstLine(trigger.prompt) };
+	if (trigger !== undefined) return { id, kind: "trigger", label: `schedule:${trigger.id}`, ...parent, title: firstLine(trigger.prompt) };
 	const owner = await ownerOf(deps.harness, id, context);
 	if (owner !== "root") {
 		const description = descriptions.get(owner.profile) ?? "";

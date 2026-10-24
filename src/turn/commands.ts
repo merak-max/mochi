@@ -14,7 +14,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { ChatChannelId } from "../channels/types.ts";
 import { allPages } from "../pages.ts";
-import { plan, scanTriggers } from "../triggers/trigger.ts";
+import { live as liveSchedule, plan, scanSchedules } from "../schedule/schedule.ts";
 import { keyedReset, threadHandoff, type FastCompletion } from "./lifecycle.ts";
 
 type Command = "new" | "stop" | "status";
@@ -65,22 +65,23 @@ function relativeTime(at: number, now: number): string {
 
 async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "timeZone" | "channels">, context: Context): Promise<string> {
 	const now = deps.now();
-	const [live, view, usage, triggers] = await Promise.all([
+	const [live, view, usage, schedules] = await Promise.all([
 		deps.harness.snapshot(LiveDoc, deps.root.id, context),
 		deps.root.context(context),
 		deps.harness.usage(context),
-		deps.harness.commit(scanTriggers, context),
+		deps.harness.commit(scanSchedules, context),
 	]);
 	const assistant = view.messages.findLast((message): message is AssistantMessage => message.role === "assistant");
 	const tokens = assistant === undefined ? 0 : assistant.usage.input + assistant.usage.cacheRead + assistant.usage.cacheWrite;
 	const reset = (await allPages((cursor) => deps.root.entries({}, 256, cursor, context))).find((entry) => entry.kind === ResetEntry.kind);
 	const resetAt = reset?.data !== null && typeof reset?.data === "object" && "at" in reset.data && typeof reset.data.at === "number" ? reset.data.at : reset?.model?.[0]?.timestamp;
-	const active = triggers.filter((task) => task.state.status !== "terminal" && !task.abortRequested);
+	const active = schedules.filter(liveSchedule);
 	const slots = active.flatMap((task) => {
 		if (task.state.status === "terminal" || task.state.status === "completing") return [];
 		const checkpoint = task.state.checkpoint;
+		if (checkpoint.phase === "watch") return [];
 		if (checkpoint.phase !== "wait") return [checkpoint.slot];
-		const next = plan(task.input.trigger, checkpoint.last, now);
+		const next = plan(task.input.schedule, checkpoint.last, now);
 		return next.kind === "fire" || next.kind === "miss" ? [next.slot] : [];
 	});
 	const next = slots.length === 0 ? "no timed slot" : `next ${relativeTime(Math.min(...slots), now)}`;
@@ -98,7 +99,7 @@ async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "
 	return [
 		`${activity}. thread about ${Math.round(tokens).toLocaleString("en-US")} tokens.`,
 		`reset ${resetAt === undefined ? "not yet" : relativeTime(resetAt, now)}. today about ${Math.max(0, total - older).toLocaleString("en-US")} tokens.`,
-		`${active.length} live triggers, ${next}.`,
+		`${active.length} live schedules, ${next}.`,
 		`channels ${deps.channels.length === 0 ? "none" : deps.channels.map(plain).sort().join(", ")}.`,
 	].join("\n");
 }

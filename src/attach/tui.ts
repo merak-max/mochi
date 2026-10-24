@@ -611,11 +611,12 @@ function loadMochiTheme(): void {
 function dock(graph: TaskGraph | undefined, width: number): string {
 	const nodes = Object.values(graph?.tasks ?? {}).filter((node) => !node.abortRequested);
 	const agents = nodes.filter((node) => node.kind === "mochi.agent").length;
-	const triggers = nodes.filter((node) => node.kind === "mochi.trigger" && !(node.state.status !== "completing" && node.state.phase === "wait")).length;
-	const procs = nodes.filter((node) => node.kind === "mochi.proc").length;
+	const schedules = nodes.filter((node) => node.kind === "mochi.schedule");
+	const triggers = schedules.filter((node) => node.state.status !== "completing" && node.state.phase !== "wait" && node.state.phase !== "watch").length;
+	const procs = schedules.filter((node) => node.state.status !== "completing" && node.state.phase === "watch").length;
 	const count = (glyph: string, n: number, noun: string) => theme.fg(n > 0 ? "success" : "muted", `${glyph} ${n} ${noun}`);
 	const separator = dim("  ·  ");
-	const row = ` ${count("◆", agents, "agents")}${separator}${count("◷", triggers, "triggers")}${separator}${count("▸", procs, "procs")}`;
+	const row = ` ${count("◆", agents, "agents")}${separator}${count("◷", triggers, "schedules")}${separator}${count("▸", procs, "procs")}`;
 	return row.length > 0 && visibleWidth(row) > width ? row.slice(0, width) : row;
 }
 

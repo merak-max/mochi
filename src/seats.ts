@@ -19,8 +19,8 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  * A seat is how far a conversation is trusted, stored in its agent and written only here.
  *   agent    root, every fork of it and every profile. A fork has its parent's tools and prompt, so it reuses its
  *            parent's prompt cache, and forks can fork at any depth.
- *   trigger  a trigger run. It reads outside data (webhook bodies, mail), so it cannot write notes, fork, add
- *            triggers or change profiles. It reaches the owner only with notify.
+ *   trigger  a schedule run. It reads outside data (webhook bodies, mail), so it cannot write notes, fork, add
+ *            schedules or change profiles. It reaches the owner only with notify.
  *   peer     another agent's requests over A2A. It works with the owner's apps and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
@@ -63,9 +63,9 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	agent: { seats: AGENT, inline: true },
 	apps_search: { seats: NOT_USER, inline: true },
 	apps_call: { seats: NOT_USER, inline: true },
-	trigger_add: { seats: AGENT, inline: true },
-	trigger_list: { seats: AGENT_TRIGGER, inline: true },
-	trigger_remove: { seats: AGENT_TRIGGER, inline: false },
+	schedule_add: { seats: AGENT, inline: true },
+	schedule_list: { seats: AGENT_TRIGGER, inline: true },
+	schedule_remove: { seats: AGENT_TRIGGER, inline: false },
 	web_map: { seats: ALL, inline: false },
 	web_find_tools: { seats: ALL, inline: false },
 	web_alexandria: { seats: ALL, inline: false },
@@ -88,10 +88,6 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	a2a_ask: { seats: AGENT_TRIGGER, inline: false },
 	a2a_send: { seats: AGENT_TRIGGER, inline: false },
 	a2a_status: { seats: AGENT_TRIGGER, inline: false },
-	board_add: { seats: AGENT, inline: true },
-	board_list: { seats: AGENT, inline: false },
-	board_update: { seats: AGENT, inline: false },
-	board_claim: { seats: AGENT, inline: false },
 	profile_list: { seats: AGENT, inline: false },
 	profile_send: { seats: AGENT, inline: true },
 	profile_update: { seats: AGENT, inline: false },
@@ -130,7 +126,7 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 	if (disagree.length > 0) throw new Error(`SURFACE, LIBRARY and the definitions disagree on ${disagree.join(", ")}.`);
 	return SEATS.map((seat) => {
 		// handoff's `control` works only on a model-issued call, so scripts do not see it. notify sends from a script too;
-		// only its early end of the run is lost there, and trigger runs have alerted the owner from scripts.
+		// only its early end of the run is lost there, and schedule runs have alerted the owner from scripts.
 		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat)).map((each): ToolRegistration => (each.name === "handoff" ? { ...each, callers: ["model"] } : each));
 		const scripted: ToolRegistration[] = [];
 		for (const each of library) {

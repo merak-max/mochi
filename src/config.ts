@@ -29,7 +29,7 @@ const A2APeerSchema = Type.Object(
 	{ additionalProperties: false },
 );
 
-/** `<home>/config.toml`. `triggers` is read by the trigger seeds. */
+/** `<home>/config.toml`. `[[triggers]]` is read as schedule seeds; the key keeps its old name so configs load unchanged. */
 const FileSchema = Type.Object(
 	{
 		timeZone: Type.Optional(Type.String({ minLength: 1 })),

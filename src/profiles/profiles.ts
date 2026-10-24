@@ -114,7 +114,7 @@ const ProfileDoc = defineDocFamily<{ conversation: ConversationId | null }, null
 	checkpointWhen: () => false,
 });
 
-/** Which profile owns each conversation: its standing one and each trigger run that names it. */
+/** Which profile owns each conversation: its standing one and each schedule run that names it. */
 const ProfileOfDoc = defineDocFamily<{ profile: string | null }, null>({
 	kind: "mochi.profile-of",
 	version: 1,
@@ -173,7 +173,7 @@ export async function addContextReaders(tx: Tx): Promise<void> {
 const HEADER = (name: string) =>
 	`You are the ${name} profile, a standing teammate of mochi. Each message here starts with [from <sender>]: root (mochi) or another profile, never the owner. ` +
 	"Answer the sender. Ask any teammate directly with tools.profile_send when you need what they know; profile_list shows who does what. Use notify only when the owner must see something now. " +
-	"Anything that must happen later goes on tools.board_add with a due, and repeating work on tools.trigger_add. Never use systemd-run, crontab, at or nohup: root cannot see or stop those.";
+	"Anything that must happen later is a tools.schedule_add: {at} once, {cron} repeating. Never use systemd-run, crontab, at or nohup: root cannot see or stop those.";
 
 async function ensureConversation(tx: Tx, profile: Profile, profiles: Profiles): Promise<ConversationId> {
 	const doc = await tx.doc(ProfileDoc, profile.name, null);
@@ -266,7 +266,7 @@ export function profileFns(profiles: Profiles, host: () => Host & StopHost, repl
 		defineTool({
 			name: "profile_send",
 			description:
-				"Give a profile a task, question or board item id; it works in its own conversation and memory and resolves to its answer. With background, the answer comes later as a new message. " +
+				"Give a profile a task or question; it works in its own conversation and memory and resolves to its answer. With background, the answer comes later as a new message. " +
 				"A busy profile queues it and the result starts NOT STARTED: tell the owner it is queued, and give urgent work to fork_start or an idle profile, or call profile_stop first.",
 			parameters: Type.Object({ name: Type.String(), message: Type.String({ minLength: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.String(),
@@ -294,7 +294,7 @@ export function profileFns(profiles: Profiles, host: () => Host & StopHost, repl
 			name: "profile_stop",
 			description:
 				"Stop a profile now: abort its running turn, its queued messages, and the forks and agents it started. Use it when the owner says stop or a brief is wrong. " +
-				"It does not stop shell processes, triggers or board tasks the profile made: check proc_status, trigger_list, board_list and `systemctl --user list-timers` after it. Resolves to what it stopped.",
+				"It does not stop shell processes or schedules the profile made: check proc_status, schedule_list and `systemctl --user list-timers` after it. Resolves to what it stopped.",
 			parameters: Type.Object({ name: Type.String() }),
 			structuredOutputSchema: Type.String(),
 			replay: "safe",

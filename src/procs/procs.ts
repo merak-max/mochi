@@ -4,29 +4,23 @@ import { mkdir, open, readdir, readFile, rm, stat, writeFile } from "node:fs/pro
 import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
-import { awaitWithContext } from "@earendil-works/chord/context";
 import { type Static, Type } from "@earendil-works/pi-ai";
-import { defineTask, defineTool, type NextTaskState, ROOT_CONVERSATION_ID, type Task, type TaskId, type ToolExecutionApi, type ToolRegistration, type TaskRuntime } from "@earendil-works/pi-durable";
-import { type Committer, holdText } from "../context.ts";
-import type { ChatChannelId } from "../channels/types.ts";
-import type { Log } from "../log.ts";
-import { allPages } from "../pages.ts";
+import { defineTool, type TaskId, type ToolExecutionApi, type ToolRegistration } from "@earendil-works/pi-durable";
 import { parseWith } from "../parse.ts";
-import { LastInboundDoc, type Line, openTurn } from "../turn/turn.ts";
+import { addSchedule, live, scanSchedules, type ScheduleTask } from "../schedule/schedule.ts";
+import { ProcName } from "../schedule/types.ts";
+import type { Profiles } from "../profiles/profiles.ts";
 
 export const PROC_POLL_MS = 1000;
-const WAKE_LINES = 30;
 const TAIL_BYTES = 256 * 1024;
 const STOP_GRACE_MS = 3000;
-
-const KIND = "mochi.proc";
 
 const WRAPPER = `trap 'true' TERM INT HUP
 sh -c "$1"
 code=$?
 printf '%s\\n' "$code" > "$2.tmp" && mv "$2.tmp" "$2"`;
 
-const Name = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 40 });
+const Name = ProcName;
 
 const MetaSchema = Type.Object({
 	name: Type.String(),
@@ -38,11 +32,6 @@ const MetaSchema = Type.Object({
 });
 type Meta = Static<typeof MetaSchema>;
 
-type ProcInput = { readonly name: string; readonly pid: number; readonly watch?: string };
-type ProcState = { readonly phase: "watch"; readonly fired: boolean };
-type ProcResult = { readonly code: number | null };
-type ProcTask = Task<ProcInput, ProcState, ProcResult, object>;
-
 type Status = { readonly state: "running" } | { readonly state: "exited"; readonly code: number } | { readonly state: "lost" };
 
 interface ProcFiles {
@@ -51,7 +40,7 @@ interface ProcFiles {
 	readonly exit: string;
 }
 
-const filesOf = (dir: string, name: string): ProcFiles => ({ log: join(dir, `${name}.log`), meta: join(dir, `${name}.json`), exit: join(dir, `${name}.exit`) });
+export const filesOf = (dir: string, name: string): ProcFiles => ({ log: join(dir, `${name}.log`), meta: join(dir, `${name}.json`), exit: join(dir, `${name}.exit`) });
 
 async function exitCode(files: ProcFiles): Promise<number | undefined> {
 	const text = await readFile(files.exit, "utf8").catch(() => undefined);
@@ -68,7 +57,7 @@ function signal(pid: number, name: NodeJS.Signals | 0): boolean {
 	}
 }
 
-async function statusOf(files: ProcFiles, pid: number): Promise<Status> {
+export async function procStatus(files: ProcFiles, pid: number): Promise<Status> {
 	const code = await exitCode(files);
 	if (code !== undefined) return { state: "exited", code };
 	if (signal(pid, 0)) return { state: "running" };
@@ -83,7 +72,7 @@ async function readMeta(files: ProcFiles): Promise<Meta | undefined> {
 	return parseWith(MetaSchema, JSON.parse(text), files.meta);
 }
 
-async function readFrom(path: string, offset: number): Promise<Buffer> {
+export async function readFrom(path: string, offset: number): Promise<Buffer> {
 	const file = await open(path, "r").catch(() => undefined);
 	if (file === undefined) return Buffer.alloc(0);
 	try {
@@ -97,14 +86,14 @@ async function readFrom(path: string, offset: number): Promise<Buffer> {
 	}
 }
 
-async function tailLines(path: string, count: number): Promise<string[]> {
+export async function tailLines(path: string, count: number): Promise<string[]> {
 	const size = (await stat(path).catch(() => undefined))?.size ?? 0;
 	const lines = (await readFrom(path, Math.max(0, size - TAIL_BYTES))).toString("utf8").split("\n");
 	if (lines.at(-1) === "") lines.pop();
 	return lines.slice(-count);
 }
 
-async function stopGroup(pid: number, files: ProcFiles): Promise<void> {
+export async function stopGroup(pid: number, files: ProcFiles): Promise<void> {
 	if (!signal(-pid, 0)) return;
 	signal(-pid, "SIGTERM");
 	const until = Date.now() + STOP_GRACE_MS;
@@ -146,88 +135,9 @@ function checkPattern(watch: string): void {
 	}
 }
 
-interface ProcWatchDeps {
-	readonly dir: string;
-	readonly workDir: string;
-	readonly harness: () => Committer;
-	readonly line: () => Line;
-	readonly pollMs: number;
-	readonly log: Log;
-}
-
-type ProcRuntime = TaskRuntime<ProcInput, ProcState, ProcResult, object>;
-
-/** A wake's text and destination, fixed on first run so a replay submits the same content to the same place. */
-type WakeMemo = { readonly tag: string; readonly body: string; readonly last: { readonly channel: ChatChannelId; readonly messageId: string } | null };
-
-/** A wake into root goes through a chat Turn on the owner's last chat channel, so the reply reaches them. */
-export function defineProcWatch(deps: ProcWatchDeps): ProcTask {
-	const wake = async (task: { readonly id: TaskId }, runtime: ProcRuntime, event: "watch" | "exit", tag: string, files: ProcFiles, next: NextTaskState<ProcState, ProcResult>, context: Context) => {
-		const key = `proc:${task.id}:${event}`;
-		deps.log("proc.wake", { task: task.id, event, tag });
-		let frozen = await runtime.memo<WakeMemo>(`wake:${event}`, context);
-		if (frozen === undefined) {
-			const lines = await tailLines(files.log, WAKE_LINES);
-			const text = lines.length === 0 ? "(no output)" : lines.join("\n");
-			const last = runtime.conversationId === ROOT_CONVERSATION_ID ? (await runtime.snapshot(LastInboundDoc, context))?.last : undefined;
-			frozen = await runtime.memo<WakeMemo>(`wake:${event}`, { tag, body: text, last: last ?? null }, context);
-		}
-		const { body, last } = frozen;
-		if (last !== null) {
-			await runtime.commit(async (tx) => {
-				await openTurn(tx, deps.line(), { source: "chat", channel: last.channel, key, tag: frozen.tag, text: body, files: [] });
-				return next;
-			}, context);
-			return;
-		}
-		const conversation = (await runtime.conversation(runtime.conversationId, context))!;
-		const held = await holdText(deps.harness(), deps.workDir, conversation.id, `in:${key}`, body, context);
-		await conversation.submit({ type: "input", content: `${frozen.tag}\n${held}`, requestId: key, whenBusy: "followUp" }, context);
-		await runtime.commit(() => next, context);
-	};
-
-	return defineTask<ProcInput, ProcState, ProcResult>({
-		name: KIND,
-		version: 1,
-		initial: () => ({ phase: "watch", fired: false }),
-		phases: {
-			watch: async (task, runtime, context) => {
-				const { name, pid, watch } = task.input;
-				const files = filesOf(deps.dir, name);
-				const pattern = watch === undefined || task.state.checkpoint.fired ? undefined : new RegExp(watch);
-				let offset = 0;
-				let partial = "";
-				for (;;) {
-					const status = await statusOf(files, pid);
-					const ended = status.state !== "running";
-					if (pattern !== undefined) {
-						const appended = await readFrom(files.log, offset);
-						offset += appended.length;
-						const lines = (partial + appended.toString("utf8")).split("\n");
-						partial = ended ? "" : lines.pop()!;
-						if (lines.some((line) => pattern.test(line))) {
-							const tag = `[process ${name} matched /${watch}/, ${ended ? "now ended" : "still running"}]`;
-							return wake(task, runtime, "watch", tag, files, { status: "running", checkpoint: { phase: "watch", fired: true } }, context);
-						}
-					}
-					if (ended) {
-						const code = status.state === "exited" ? status.code : null;
-						const tag = code === null ? `[process ${name} ended, exit code unknown]` : `[process ${name} exited code=${code}]`;
-						return wake(task, runtime, "exit", tag, files, { status: "terminal", outcome: { status: "completed", result: { code } } }, context);
-					}
-					await awaitWithContext(new Promise<void>((resolve) => runtime.setTimer(resolve, deps.pollMs)), context);
-				}
-			},
-		},
-		abort: async (task, runtime, context) => {
-			await stopGroup(task.input.pid, filesOf(deps.dir, task.input.name));
-			await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context);
-		},
-	});
-}
-
 interface ProcFnDeps {
-	readonly task: ProcTask;
+	readonly task: ScheduleTask;
+	readonly catalog: Profiles;
 	readonly dir: string;
 	readonly workDir: string;
 	readonly abortTask: (id: TaskId, context: Context) => Promise<unknown>;
@@ -246,16 +156,15 @@ const StatusRow = Type.Object({
 export function procFns(deps: ProcFnDeps): ToolRegistration[] {
 	const liveWatchers = (api: ToolExecutionApi, name: string, context: Context): Promise<TaskId[]> =>
 		api.commit(async (tx) => {
-			const tasks = await allPages((cursor) => tx.scanTasks({ kind: KIND }, 256, cursor));
-			const live = tasks.filter((task) => (task.input as ProcInput).name === name && task.state.status !== "terminal");
-			return live.map((task) => task.id);
+			const watching = (await scanSchedules(tx)).filter((task) => live(task) && "process" in task.input.schedule.when && task.input.schedule.when.process.name === name);
+			return watching.map((task) => task.id);
 		}, context);
 
 	return [
 		defineTool({
 			name: "proc_start",
 			description:
-				"Run a shell command in the background and return at once. Use it for any command that can take more than 30 seconds. This conversation wakes with the log tail when the command exits, and once when a line first matches the watch regex.",
+				"Run a shell command in the background and return at once. Use it for any command that can take more than 30 seconds. This conversation wakes with the log tail when the command exits, and once when a line first matches the watch regex: proc_start adds a process schedule, proc-<name>, that schedule_list shows.",
 			parameters: Type.Object({ name: Name, command: Type.String({ minLength: 1 }), cwd: Type.Optional(Type.String()), watch: Type.Optional(Type.String({ minLength: 1 })) }),
 			structuredOutputSchema: Type.Object({ name: Type.String(), pid: Type.Number(), log: Type.String() }),
 			replay: "unsafe",
@@ -264,15 +173,17 @@ export function procFns(deps: ProcFnDeps): ToolRegistration[] {
 				const files = filesOf(deps.dir, name);
 				if ((await liveWatchers(api, name, context)).length > 0) throw new Error(`Process ${name} is still running. Stop it or pick another name.`);
 				const previous = await readMeta(files);
-				if (previous !== undefined && (await statusOf(files, previous.pid)).state === "running") throw new Error(`Process ${name} is still running. Stop it or pick another name.`);
+				if (previous !== undefined && (await procStatus(files, previous.pid)).state === "running") throw new Error(`Process ${name} is still running. Stop it or pick another name.`);
 				const directory = cwd === undefined ? deps.workDir : isAbsolute(cwd) ? cwd : resolve(deps.workDir, cwd);
 				await mkdir(deps.dir, { recursive: true });
 				const pid = await startProcess(files, command, directory);
 				const meta: Meta = { name, command, cwd: directory, pid, startedAt: new Date().toISOString(), ...(watch === undefined ? {} : { watch }) };
 				await writeFile(files.meta, `${JSON.stringify(meta)}\n`);
-				const input: ProcInput = { name, pid, ...(watch === undefined ? {} : { watch }) };
+				const process = { name, pid, ...(watch === undefined ? {} : { watch }) };
+				const schedule = { id: `proc-${name}`, when: { process }, prompt: `Output of process ${name} (${command}), last lines:` };
 				await api.commit(async (tx) => {
-					await tx.createTask(deps.task, input, { ownership: { kind: "conversation" }, conversationId: api.conversationId, background: true });
+					const existing = await scanSchedules(tx);
+					await addSchedule(tx, deps.task, { schedule, origin: "model" }, existing, deps.catalog, api.conversationId);
 				}, context);
 				return { structuredOutput: { name, pid, log: files.log } };
 			},
@@ -290,7 +201,7 @@ export function procFns(deps: ProcFnDeps): ToolRegistration[] {
 					const files = filesOf(deps.dir, each);
 					const meta = await readMeta(files);
 					if (meta === undefined) throw new Error(`No process named ${each}.`);
-					const status = await statusOf(files, meta.pid);
+					const status = await procStatus(files, meta.pid);
 					rows.push({ name: each, ...status, pid: meta.pid, command: meta.command, startedAt: meta.startedAt, log: files.log });
 				}
 				return { structuredOutput: rows };

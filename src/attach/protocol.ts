@@ -49,7 +49,7 @@ export type ClientMessage = Static<typeof ClientMessageSchema>;
 export type AgentKind = "root" | "line" | "profile" | "trigger" | "fork" | "agent" | "user" | "conversation";
 
 /**
- * One conversation as the CLI names it. Labels: main, line, profile:<name>, trigger:<id>, fork:<name>@<id>,
+ * One conversation as the CLI names it. Labels: main, line, profile:<name>, schedule:<id>, fork:<name>@<id>,
  * agent:<name>@<id>, user:<user id>, else conversation:<id>.
  */
 export type AgentSummary = {

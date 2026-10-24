@@ -227,7 +227,7 @@ type TurnHost = Pick<Line, "root" | "harness" | "users" | "channels" | "workDir"
 const NOTIFY_ENTRY = "app.notify";
 
 function deliveredRecord(input: RunTurn, recipient: string): string {
-	const from = input.from.kind === "trigger" ? `trigger ${input.from.id}` : `conversation ${input.from.id}`;
+	const from = input.from.kind === "trigger" ? `schedule ${input.from.id}` : `conversation ${input.from.id}`;
 	const where = input.channel === "cli" ? "in the terminal" : `on ${input.channel}`;
 	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${input.text}`;
 }
@@ -252,7 +252,7 @@ function blockedByPolicy(settled: { readonly status: string; readonly detail?: u
 	return settled.status === "unanswered" && typeof settled.detail === "string" && settled.detail.includes("Usage Policy");
 }
 
-const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and the board are kept.";
+const POLICY_RESET_NOTE = "the provider blocked this thread, so I started a fresh one. memory and schedules are kept.";
 
 
 async function saveFiles(workDir: string, message: Extract<Inbound, { kind: "message" }>): Promise<SavedFile[]> {

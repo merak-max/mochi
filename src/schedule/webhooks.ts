@@ -12,7 +12,7 @@ import type { Mochi } from "../mochi.ts";
 import { pause } from "../pause.ts";
 import type { Classify } from "../brain/classifier.ts";
 import { applyAgent, type Profiles } from "../profiles/profiles.ts";
-import { inputPasses, liveTrigger, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds, runAgent } from "./trigger.ts";
+import { inputPasses, liveSchedule, parseSeeds, RUN_DEADLINE_MS, reconcileSeeds, runAgent } from "./schedule.ts";
 import type { WebhookAuth } from "./types.ts";
 
 const BODY_LIMIT = 1024 * 1024;
@@ -73,14 +73,14 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	const match = /^\/hooks\/([a-z0-9-]+)\/?$/.exec(new URL(request.url ?? "/", "http://hooks").pathname);
 	if (request.method !== "POST" || match === null) return reply(response, 404, "not found");
 	const id = match[1] ?? "";
-	const found = await deps.harness.commit((tx) => liveTrigger(tx, id), context);
-	const trigger = found?.input.trigger;
-	if (found === undefined || trigger?.kind !== "webhook") return reply(response, 404, "not found");
+	const found = await deps.harness.commit((tx) => liveSchedule(tx, id), context);
+	const schedule = found?.input.schedule;
+	if (found === undefined || schedule === undefined || !("webhook" in schedule.when)) return reply(response, 404, "not found");
 
 	const body = await readBody(request, response, BODY_LIMIT);
 	if (body === undefined) return;
 
-	if (!authorized(trigger.auth, request.headers, body)) {
+	if (!authorized(schedule.when.webhook.auth, request.headers, body)) {
 		deps.log("webhook.unauthorized", { id, remote: request.socket.remoteAddress });
 		return reply(response, 401, "unauthorized");
 	}
@@ -88,12 +88,12 @@ async function handle(deps: WebhookDeps, request: IncomingMessage, response: Ser
 	const requestId = `webhook:${id}:${delivery}`;
 	const memo = new Map<string, number>();
 	const remember = async (key: string, value?: number) => (value === undefined ? memo.get(key) : (memo.set(key, value), value));
-	if (!(await inputPasses(trigger, body.toString("utf8"), deps.classify, remember, deps.log, context))) return reply(response, 202, "accepted");
-	const run = await runAgent(trigger, deps.catalog);
+	if (!(await inputPasses(schedule, body.toString("utf8"), deps.classify, remember, deps.log, context))) return reply(response, 202, "accepted");
+	const run = await runAgent(schedule, deps.catalog);
 	await deps.harness.commit((tx) => applyAgent(tx, found.conversationId, run), context);
 	const conversation = await deps.harness.conversation(found.conversationId, context);
 	try {
-		const content = await holdText(deps.harness, deps.workDir, found.conversationId, `in:${requestId}`, webhookContent(id, trigger.prompt, body.toString("utf8")), context);
+		const content = await holdText(deps.harness, deps.workDir, found.conversationId, `in:${requestId}`, webhookContent(id, schedule.prompt, body.toString("utf8")), context);
 		const submission = await conversation!.submit({ type: "input", content, requestId, whenBusy: "reject" }, context);
 		deps.log("webhook.admitted", { id, delivery, submissionId: submission.id });
 		reply(response, 202, "accepted");
@@ -114,10 +114,10 @@ function reply(response: ServerResponse, status: number, text: string): void {
 	response.end(`${text}\n`);
 }
 
-export async function triggersComponent({ harness, trigger, catalog, classify, line }: Mochi, config: Config, context: Context): Promise<void> {
+export async function schedulesComponent({ harness, schedule, catalog, classify, line }: Mochi, config: Config, context: Context): Promise<void> {
 	const seeds = parseSeeds(config.file, config.users);
-	await reconcileSeeds(harness, trigger, seeds, catalog, context);
+	await reconcileSeeds(harness, schedule, seeds, catalog, context);
 	const listen = { host: config.env.MOCHI_BIND_HOST || "127.0.0.1", port: Number(config.env.MOCHI_HOOKS_PORT || 8788) };
 	const { address } = await startWebhookServer({ harness, catalog, log, classify, workDir: line.workDir }, listen, context);
-	log("triggers.started", { seeds: seeds.map((seed) => seed.id), hooks: `${address.address}:${address.port}` });
+	log("schedules.started", { seeds: seeds.map((seed) => seed.id), hooks: `${address.address}:${address.port}` });
 }

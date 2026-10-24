@@ -27,7 +27,7 @@ import type { ModelRef } from "@earendil-works/pi-durable";
 import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
 import { Profiles } from "./profiles/profiles.ts";
-import { triggersComponent } from "./triggers/webhooks.ts";
+import { schedulesComponent } from "./schedule/webhooks.ts";
 import { a2aComponent, a2aServerSetup } from "./a2a/server.ts";
 import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
 import { connectApps } from "./apps/apps.ts";
@@ -280,8 +280,8 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const background = [
 		runFeed(mochi.harness, index, fastCompletion(models, config.modelSetup.fast), mochi.catalog, running, (error) => log("memory.failed", { error: String(error) })),
 		...(apps === undefined ? [] : [apps.run(running)]),
-		// A terminal-only daemon (chat, print) serves one script; triggers wait for the real daemon.
-		...(channelSet === "terminal" ? [] : [triggersComponent(mochi, config, running), a2aComponent(mochi, config, a2a, running)]),
+		// A terminal-only daemon (chat, print) serves one script; schedules wait for the real daemon.
+		...(channelSet === "terminal" ? [] : [schedulesComponent(mochi, config, running), a2aComponent(mochi, config, a2a, running)]),
 	];
 	// Channels stop after the harness, so no Turn sends on a closed channel.
 	const channelsRunning = new AbortController();

@@ -18,11 +18,12 @@ import { type FileIndexes, searchFns } from "./search/search.ts";
 import type { Log } from "./log.ts";
 import { contextFns, contextSection } from "./context.ts";
 import { defineForkTask, forkFns } from "./fork/fork.ts";
-import { addContextReaders, defineReply, ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
+import { addContextReaders, defineReply, ownerIn, ownerOf } from "./profiles/profiles.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
 import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
-import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
+import { defineSchedule, notifyTool, RUN_DEADLINE_MS, scanSchedules, type ScheduleTask, scheduleFns } from "./schedule/schedule.ts";
+import { migrateSchedulers } from "./schedule/migrate.ts";
 import { defaultSelection, rootSelection, seatExtensions } from "./seats.ts";
 import { reactTool, sendTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
 import { webFns } from "./web/web.ts";
@@ -32,7 +33,7 @@ import type { MediaDeps } from "./media/client.ts";
 import { mediaFns } from "./media/media.ts";
 import { gifFns } from "./media/gif.ts";
 import { messageTool } from "./channels/message-tool.ts";
-import { defineProcWatch, PROC_POLL_MS, procFns } from "./procs/procs.ts";
+import { PROC_POLL_MS, procFns } from "./procs/procs.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
 import { fastCompletion, handoffTool } from "./turn/lifecycle.ts";
 import type { Classify } from "./brain/classifier.ts";
@@ -40,7 +41,6 @@ import type { ChatUser } from "./config.ts";
 import { thinkFns } from "./brain/think.ts";
 import { identityExtension } from "./brain/identity.ts";
 import { type A2APeers, a2aFns } from "./a2a/tools.ts";
-import { boardFns, defineSweep, ensureSweep, SWEEP_EVERY_MS } from "./board/board.ts";
 import { profileFns, type Profiles, rosterSection } from "./profiles/profiles.ts";
 import type { WebConfig } from "./config.ts";
 
@@ -80,7 +80,7 @@ export interface Mochi {
 	readonly harness: Harness;
 	readonly classify: Classify;
 	readonly line: Line;
-	readonly trigger: TriggerTask;
+	readonly schedule: ScheduleTask;
 	readonly catalog: Profiles;
 }
 
@@ -98,9 +98,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users }),
 		handoffTool(),
 	];
-	const trigger = defineTrigger({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, log, harness: () => harness, catalog: options.profiles, classify: options.classify, workDir: options.workDir });
 	const procDir = join(options.workDir, ".procs");
-	const procWatch = defineProcWatch({ dir: procDir, workDir: options.workDir, harness: () => harness, line: lineOf, pollMs: PROC_POLL_MS, log });
+	const schedule = defineSchedule({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, pollMs: PROC_POLL_MS, procDir, log, harness: () => harness, line: lineOf, catalog: options.profiles, classify: options.classify, workDir: options.workDir });
 	const reply = defineReply(() => harness, options.workDir);
 	const forkTask = defineForkTask(options.workDir);
 	const library: ToolRegistration[] = [
@@ -122,11 +121,10 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...appsFns(options.apps ?? NO_APPS),
 		...contextFns(options.workDir),
 		...forkFns({ task: forkTask, scratchDir: (name) => join(options.workDir, "forks", name), ref: options.profiles.model }),
-		...triggerFns({ task: trigger, catalog: options.profiles, triggers: (context) => harness.commit(scanTriggers, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: Date.now, users }),
-		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
+		...scheduleFns({ task: schedule, catalog: options.profiles, schedules: (context) => harness.commit(scanSchedules, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: Date.now, users }),
+		...procFns({ task: schedule, catalog: options.profiles, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 		...a2aFns(a2aPeers),
 		...profileFns(options.profiles, () => harness, reply, options.workDir),
-		...boardFns({ by: async (tx, conversation) => { const owner = await ownerIn(tx, conversation); return owner === "root" ? "root" : owner.profile; }, now: Date.now }),
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),
@@ -134,9 +132,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		skillsExtension(options.skillDirs),
 		windowExtension(),
 		defineExtension({ name: "agents", tasks: [forkTask, reply] }),
-		defineExtension({ name: "procs", tasks: [procWatch] }),
-		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
-		...(options.scheduling === "daemon" ? [defineExtension({ name: "triggers", tasks: [trigger] })] : []),
+		// Daemon only, so a terminal without a daemon leaves schedules and Turns waiting for one.
+		...(options.scheduling === "daemon" ? [defineExtension({ name: "schedules", tasks: [schedule] })] : []),
 		...seatExtensions(modelTools, library, [rosterSection(options.profiles)], [contextSection()]),
 	]) {
 		registry.install(extension);
@@ -177,11 +174,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		openReply: (tx, input) => openTurn(tx, lineOf(), input),
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
-	if (options.scheduling === "daemon") {
-		const sweep = defineSweep({ harness: () => harness, forkTask, everyMs: SWEEP_EVERY_MS, log, toProfile: async (name, brief, key, context) => void (await sendToProfile(harness, options.profiles, options.workDir, name, `[from board] ${brief}`, key, context)) });
-		registry.install(defineExtension({ name: "board", tasks: [sweep] }));
-		await ensureSweep(harness, sweep, context);
-	}
+	if (options.scheduling === "daemon") await migrateSchedulers(harness, schedule, options.profiles, log, context);
 	line = {
 		harness,
 		root,
@@ -197,7 +190,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	await harness.commit(importOldNotes, context);
 	await harness.commit(addContextReaders, context);
 	index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
-	return { harness, classify: options.classify, line, trigger, catalog: options.profiles };
+	return { harness, classify: options.classify, line, schedule, catalog: options.profiles };
 }
 
 const browserDeps = (web: WebConfig) => ({ apiKey: web.key, keyEnv: web.keyEnv, ...(web.url === undefined ? {} : { baseUrl: web.url }), ...(web.browserProfile === undefined ? {} : { profile: web.browserProfile }) });
