@@ -67,7 +67,7 @@ node src/main.ts service install   # writes ~/.config/systemd/user/mochi.service
 systemctl --user daemon-reload && systemctl --user enable --now mochi
 ```
 
-`node src/main.ts --headless` starts the daemon by hand. `node src/main.ts -p "hello"` sends one message to a running daemon. `node src/main.ts chat` sends each line of stdin. `node src/main.ts help` lists the rest.
+`node src/main.ts --headless` starts the daemon by hand. `node src/main.ts -p "hello"` sends one message to a running daemon. `node src/main.ts chat` sends each line of stdin. The terminal is one more channel, like iMessage, so `/new` starts a fresh thread there too. `node src/main.ts help` lists the rest.
 
 iMessage goes through [Photon Spectrum](https://photon.codes), which needs a project id and secret.
 
@@ -77,11 +77,12 @@ Everything that is yours lives in `~/.mochi`, or in `MOCHI_HOME`. The repository
 
 | Path | What |
 |---|---|
-| `config.toml` | Time zone, providers and models, routines, users, peers, apps and web. See `config.example.toml`. |
+| `config.toml` | Time zone, providers and models, routines, users, apps and web. See `config.example.toml`. |
 | `.env` | Keys and tokens. See `.env.example`. |
 | `instructions.md` | Your own instructions, after the built-in prompt. This is where its voice comes from. |
 | `profiles/<name>/instructions.md` | One profile. A profile with a bundled name replaces the bundled one. |
 | `skills/` | Your skills, next to the bundled ones. |
+| `tools/<name>.ts` | Your own tools, one `defineTool` default export each. `tools_reload` loads them without a restart. |
 | `mochi.sqlite`, `work/` | The durable store and mochi's working directory. |
 
 ## Models

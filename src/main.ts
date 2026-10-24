@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -10,19 +10,16 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { openMochi } from "./mochi.ts";
 import { createClassify } from "./brain/classifier.ts";
 import { createIMessageChannel } from "./channels/imessage.ts";
-import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./channels/types.ts";
+import type { Channel, ChannelId, Env, InboundSink } from "./channels/types.ts";
+import { createCliChannel, type DaemonFacts, WIRE, watchLive } from "./channels/cli.ts";
 import { type Config, unknownKeys, type ChatUser, loadConfig } from "./config.ts";
 import { type Home, resolveHome } from "./home.ts";
 import { FileIndexes } from "./search/search.ts";
 import { acquireLock } from "./lock.ts";
 import { log, setLogFile } from "./log.ts";
 import { broken, off, ready, type Setup, setupReport } from "./setup.ts";
-import { type DaemonFacts, listenAttach, modelSummaries } from "./attach/server.ts";
-import type { AttachClient } from "./attach/client.ts";
-import { doctor, reach, stopDaemon } from "./attach/daemon.ts";
-import { printModels, runAgents, runExport, runStatus, table } from "./attach/inspect.ts";
+import { doctor, printStatus, reach, stopDaemon, table } from "./attach/daemon.ts";
 import { type Cli, helpText, parseCli } from "./cli.ts";
-import type { ModelRef } from "@earendil-works/pi-durable";
 import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
 import { Profiles } from "./profiles/profiles.ts";
@@ -30,11 +27,13 @@ import { schedulesComponent } from "./schedule/webhooks.ts";
 import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
 import { connectApps } from "./apps/apps.ts";
 import { ingest } from "./turn/turn.ts";
+import type { TaskId } from "@earendil-works/pi-durable";
 import { runCompactor } from "./memory/compactor.ts";
 import { notifyOwner } from "./schedule/schedule.ts";
 import { fastCompletion } from "./turn/lifecycle.ts";
 
-const ADAPTERS: Readonly<Record<ChatChannelId, (env: Env, users: readonly ChatUser[]) => Setup<Channel>>> = {
+/** The channels config turns on. The terminal channel always runs. */
+const ADAPTERS: Readonly<Record<Exclude<ChannelId, "cli">, (env: Env, users: readonly ChatUser[]) => Setup<Channel>>> = {
 	imessage: (env, users) => createIMessageChannel(env, users.map((user) => user.handle)),
 };
 
@@ -75,26 +74,17 @@ async function main(cli: Cli): Promise<number> {
 			else process.stdout.write(`${table(checks.map((check) => [check.level, check.name, check.detail]))}\n`);
 			return checks.some((check) => check.level === "fail") ? 1 : 0;
 		}
-		case "models": {
+		case "status": {
 			const found = await reach(socket, false);
 			if (found.kind === "refused") throw new Error(found.reason);
-			if (found.kind === "ready") {
-				printModels(await found.client.request({ op: "models" }), cli.search, cli.json);
-				found.client.close();
-				return 0;
+			if (found.kind === "absent") {
+				process.stderr.write("mochi is not running.\n");
+				return 1;
 			}
-			const config = await loadConfig(process.env);
-			printModels(modelSummaries(config.modelSetup.models, modelRoles(config)), cli.search, cli.json);
+			printStatus(found.terminal.facts, cli.json);
+			found.terminal.close();
 			return 0;
 		}
-		case "agents":
-		case "status":
-		case "export":
-			return inspect(socket, async (client) => {
-				if (cli.kind === "agents") await runAgents(client, cli.json);
-				else if (cli.kind === "status") await runStatus(client, cli.json);
-				else await runExport(client, cli.to, cli.out);
-			});
 		case "tui":
 		case "lines":
 			return attach(cli, home, socket);
@@ -105,34 +95,14 @@ async function main(cli: Cli): Promise<number> {
 	}
 }
 
-/** Commands that only read: they need a running daemon and never become one. */
-async function inspect(socket: string, run: (client: AttachClient) => Promise<void>): Promise<number> {
-	const found = await reach(socket, false);
-	if (found.kind === "refused") throw new Error(found.reason);
-	if (found.kind === "absent") {
-		process.stderr.write("mochi is not running.\n");
-		return 1;
-	}
-	try {
-		await run(found.client);
-	} finally {
-		found.client.close();
-	}
-	return 0;
-}
-
 // A terminal attaches to the running daemon. Without one, this process becomes the daemon for as long as the
-// terminal runs: every channel for the TUI, only the terminal for chat and print. attach needs a running daemon.
+// terminal runs: every channel for the TUI, only the terminal for chat and print.
 async function attach(cli: Extract<Cli, { kind: "tui" | "lines" }>, home: Home, socket: string): Promise<number> {
-	const watch = cli.kind === "tui" || cli.json;
+	const watch = cli.kind === "tui";
 	let found = await reach(socket, watch);
 	if (found.kind === "refused") throw new Error(found.reason);
 	let local: Daemon | undefined;
 	if (found.kind === "absent") {
-		if (cli.kind === "tui" && cli.to !== undefined) {
-			process.stderr.write("mochi is not running.\n");
-			return 1;
-		}
 		const config = await loadConfig(process.env);
 		await mkdir(config.home.dir, { recursive: true });
 		if (cli.kind === "tui") setLogFile(config.home.logFile);
@@ -140,13 +110,13 @@ async function attach(cli: Extract<Cli, { kind: "tui" | "lines" }>, home: Home, 
 		found = await reach(socket, watch);
 		if (found.kind !== "ready") throw new Error(found.reason);
 	}
-	const client = found.client;
-	if (local !== undefined) stopOnSignal(local, () => client.close());
+	const terminal = found.terminal;
+	if (local !== undefined) stopOnSignal(local, () => terminal.close());
 	try {
-		if (cli.kind === "tui") await runTui(client, home.dir, cli.to);
-		else await runLines(client, cli.prompt, cli);
+		if (cli.kind === "tui") await runTui(terminal, home.dir);
+		else await runLines(terminal, cli.prompt);
 	} finally {
-		client.close();
+		terminal.close();
 		await local?.stop("terminal closed");
 	}
 	return 0;
@@ -198,15 +168,6 @@ async function installService(home: Home): Promise<void> {
 	process.stdout.write(`Wrote ${join(dir, "mochi.service")}. Start it: systemctl --user daemon-reload && systemctl --user enable --now mochi\n`);
 }
 
-/** Each config name for a model (brain, fast, strongest, classifier, aliases) and the model it picks. */
-function modelRoles(config: Config): Record<string, ModelRef> {
-	const { modelSetup } = config;
-	const roles: Record<string, ModelRef> = { brain: modelSetup.brain, fast: modelSetup.fast, strongest: modelSetup.ref("strongest") };
-	if (modelSetup.classifier !== undefined) roles.classifier = modelSetup.classifier;
-	for (const alias of Object.keys(config.file.models?.aliases ?? {})) roles[alias] = modelSetup.ref(alias);
-	return roles;
-}
-
 /** The git short hash of this checkout, with "+dirty" for uncommitted changes. */
 function buildOf(): string {
 	try {
@@ -218,17 +179,28 @@ function buildOf(): string {
 	}
 }
 
-/** Open storage, the Harness, channels, components and the attach socket. `terminal` runs no outside channel. */
+/** Open storage, the Harness, the channels and the components. `terminal` runs no outside channel and no schedules. */
 async function startDaemon(config: Config, channelSet: "configured" | "terminal"): Promise<{ stop(reason: string): Promise<void> }> {
 	const releaseLock = acquireLock(join(config.home.dir, "mochi.lock"));
 	const controller = new AbortController();
 	const running = withAbortSignal(controller.signal, BACKGROUND_CONTEXT);
 	const files = new FileIndexes();
 
-	const { channels, report: channelReport } = channelSet === "terminal" ? { channels: new Map() as Channels, report: [] } : configuredChannels(config.env, config.users);
+	const configured = channelSet === "terminal" ? { channels: new Map<ChannelId, Channel>(), report: [] } : configuredChannels(config.env, config.users);
+	const setup = [...setupReport(services(config)), ...configured.report];
+	const facts: DaemonFacts = {
+		wire: WIRE,
+		pid: process.pid,
+		startedAt: new Date().toISOString(),
+		build: buildOf(),
+		home: config.home.dir,
+		channels: ["cli", ...configured.channels.keys()],
+		setup,
+	};
+	const cli = createCliChannel(socketPath(config.home.dir), facts);
+	const channels = new Map<ChannelId, Channel>([["cli", cli], ...configured.channels]);
 	const workDir = join(config.home.dir, "work");
 	await mkdir(workDir, { recursive: true });
-	const setup = [...setupReport(services(config)), ...channelReport];
 	log("setup", { ok: setup.filter((line) => line.startsWith("ok")).map((line) => line.slice(5)), other: setup.filter((line) => !line.startsWith("ok")) });
 	const { models } = config.modelSetup;
 	const profiles = new Profiles(config.home.profilesDir, join(REPO, "agents"), config.modelSetup.ref);
@@ -246,6 +218,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			...(apps === undefined ? {} : { apps }),
 			files,
 			skillDirs: [join(REPO, "skills"), config.home.skillsDir],
+			toolsDir: config.home.toolsDir,
 			profiles,
 			workDir,
 			channels,
@@ -259,16 +232,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		BACKGROUND_CONTEXT,
 	);
 	mochi.harness.resume();
-	const facts: DaemonFacts = {
-		startedAt: new Date(),
-		build: buildOf(),
-		home: config.home.dir,
-		scheduling: channelSet === "terminal" ? "local" : "daemon",
-		channels: [...channels.keys()],
-		setup,
-		roles: modelRoles(config),
-	};
-	await listenAttach(socketPath(config.home.dir), { line: mochi.line, models, log, profiles, users: config.users, facts }, running);
+	const stopWatching = watchLive(mochi.harness, mochi.line.root.id, (status) => cli.status(status));
 
 	const background = [
 		runCompactor({ harness: mochi.harness, fast: fastCompletion(models, config.modelSetup.fast), log, notify: (text, context) => notifyOwner(mochi.harness, mochi.line, text, context), now: Date.now }, running),
@@ -278,24 +242,29 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	];
 	// Channels stop after the harness, so no Turn sends on a closed channel.
 	const channelsRunning = new AbortController();
-	const sink: InboundSink = async (message) => void (await ingest(mochi.line, message, running));
-	const inbound = [...channels.values()].map((channel) =>
+	const sink: InboundSink = async (message) => {
+		const turn = await ingest(mochi.line, message, running);
+		return { answered: turn === undefined ? Promise.resolve() : turnEnd(mochi.harness, turn) };
+	};
+	const inbound = [...configured.channels.values()].map((channel) =>
 		channel.run(sink, channelsRunning.signal).catch((error: unknown) => {
 			log("channel.failed", { channel: channel.profile.id, error: String(error) });
 		}),
 	);
+	// The socket listens before startDaemon returns, so a terminal that started this daemon can connect at once.
+	await cli.run(sink, channelsRunning.signal);
 	log("mochi.started", { channels: [...channels.keys()], pid: process.pid });
 
 	let stopped: Promise<void> | undefined;
 	const stop = async (reason: string): Promise<void> => {
 		log("mochi.stopping", { reason });
 		controller.abort();
+		stopWatching();
 		await Promise.allSettled(background);
 		await mochi.harness.close(BACKGROUND_CONTEXT);
 		channelsRunning.abort();
 		await Promise.allSettled(inbound);
 		files.close();
-		rmSync(socketPath(config.home.dir), { force: true });
 		releaseLock();
 	};
 	// The signal handler and the terminal's own exit can both ask; the daemon stops once.
@@ -305,6 +274,11 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			return stopped;
 		},
 	};
+}
+
+/** Settles when Turn `id` ends, however it ends. */
+async function turnEnd(harness: Awaited<ReturnType<typeof openMochi>>["harness"], id: TaskId): Promise<void> {
+	await harness.waitForTask(id, BACKGROUND_CONTEXT);
 }
 
 async function readInstructions(home: Home): Promise<{ instructions?: string }> {
@@ -332,8 +306,8 @@ function services(config: Pick<Config, "modelSetup" | "web" | "home" | "appsUrl"
 	];
 }
 
-function configuredChannels(env: Env, users: readonly ChatUser[]): { readonly channels: Channels; readonly report: readonly string[] } {
-	const setups = (Object.keys(ADAPTERS) as ChatChannelId[]).map((id) => [id, ADAPTERS[id](env, users)] as const);
+function configuredChannels(env: Env, users: readonly ChatUser[]): { readonly channels: ReadonlyMap<ChannelId, Channel>; readonly report: readonly string[] } {
+	const setups = (Object.keys(ADAPTERS) as (keyof typeof ADAPTERS)[]).map((id) => [id, ADAPTERS[id](env, users)] as const);
 	const channels = new Map(setups.flatMap(([id, setup]) => (setup.kind === "ready" ? [[id, setup.value] as const] : [])));
 	return { channels, report: setupReport(setups) };
 }

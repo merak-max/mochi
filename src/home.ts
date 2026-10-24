@@ -15,6 +15,8 @@ export interface Home {
 	readonly instructionsFile: string;
 	readonly skillsDir: string;
 	readonly profilesDir: string;
+	/** The owner's own tools, one `<name>.ts` each, loaded by `tools_reload`. */
+	readonly toolsDir: string;
 	readonly logFile: string;
 }
 
@@ -28,6 +30,7 @@ export function resolveHome(env: Readonly<Record<string, string | undefined>>): 
 		instructionsFile: join(dir, "instructions.md"),
 		skillsDir: join(dir, "skills"),
 		profilesDir: join(dir, "profiles"),
+		toolsDir: join(dir, "tools"),
 		logFile: join(dir, "mochi.log"),
 	};
 }

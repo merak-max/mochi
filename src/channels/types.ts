@@ -1,12 +1,10 @@
 import { broken, off, ready, type Setup } from "../setup.ts";
 import type { EffectName } from "./directives.ts";
 
-export type ChatChannelId = "imessage";
-/** `cli` is a view, not a line: attached terminals render replies from the transcript, and nothing is delivered to it. */
-export type ChannelId = ChatChannelId | "cli";
+export type ChannelId = "imessage" | "cli";
 
 export interface ChannelProfile {
-	readonly id: ChatChannelId;
+	readonly id: ChannelId;
 	readonly style: string;
 	readonly maxBubbles: number;
 	readonly paragraphsAreBubbles: boolean;
@@ -34,7 +32,7 @@ export interface ReplyTarget {
 export type Inbound =
 	| {
 			readonly kind: "message";
-			readonly channel: ChatChannelId;
+			readonly channel: ChannelId;
 			readonly messageId: string;
 			readonly text: string;
 			readonly at: Date;
@@ -46,7 +44,7 @@ export type Inbound =
 	/** The owner or a user reacted to a message. It becomes a passive transcript write, never a model turn. */
 	| {
 			readonly kind: "tapback";
-			readonly channel: ChatChannelId;
+			readonly channel: ChannelId;
 			/** The reaction event's own id, so a redelivery dedupes. */
 			readonly messageId: string;
 			readonly on: string;
@@ -64,7 +62,8 @@ export interface SentBubble {
 	readonly text: string;
 }
 
-export type InboundSink = (inbound: Inbound) => Promise<void>;
+/** `answered` settles when the Turn the message opened ends; a duplicate, a tapback or a command has no Turn and settles at once. */
+export type InboundSink = (inbound: Inbound) => Promise<{ readonly answered: Promise<void> }>;
 
 export type Bubble =
 	/** `effect`: an iMessage send effect; other channels ignore it. */
@@ -112,7 +111,7 @@ export interface Channel {
 }
 
 
-export type Channels = ReadonlyMap<ChatChannelId, Channel>;
+export type Channels = ReadonlyMap<ChannelId, Channel>;
 
 export function attachmentKind(mimeType: string): Attachment["kind"] {
 	if (mimeType.startsWith("image/")) return "image";

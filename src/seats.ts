@@ -24,8 +24,8 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  *   peer     the line, which holds delivery tasks. It works with the owner's apps and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
-const SEATS = ["agent", "trigger", "peer", "user"] as const;
-type Seat = (typeof SEATS)[number];
+export const SEATS = ["agent", "trigger", "peer", "user"] as const;
+export type Seat = (typeof SEATS)[number];
 
 const ALL = SEATS;
 const AGENT: readonly Seat[] = ["agent"];
@@ -85,6 +85,7 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	profile_send: { seats: AGENT, inline: true },
 	profile_update: { seats: AGENT, inline: false },
 	profile_stop: { seats: AGENT, inline: false },
+	tools_reload: { seats: AGENT, inline: false },
 };
 
 /** `notes` holds the view: every seat's conversation reads its own chat through it. */
@@ -108,16 +109,16 @@ function withDeadline(code: string): string {
 }
 
 /**
- * One `seat-<seat>` extension per seat: its model tools, `codemode` with its prompt section, and the library tools its
- * scripts may call. Throws when the tables and the definitions disagree.
+ * Builds the `seat-<seat>` extension: its model tools, `codemode` with its prompt section, the library tools its scripts
+ * may call, and for the agent seat the owner's home tools. Throws when the tables and the definitions disagree.
  */
-export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], agentSections: readonly PromptSection[], everySeat: readonly PromptSection[]): Extension[] {
+export function seatExtensions(modelTools: readonly ToolRegistration[], library: readonly ToolRegistration[], agentSections: readonly PromptSection[], everySeat: readonly PromptSection[]): (seat: Seat, homeTools?: readonly ToolRegistration[]) => Extension {
 	const codemode = createCodemodeExtension({ sandbox: new CodemodeSandbox({ memoryLimitBytes: SCRIPT_MEMORY_BYTES }), models: false });
 	const tool = codemode.tools![0]!;
 	const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
 	const disagree = [...drift([...modelTools.map((each) => each.name), "codemode"], SURFACE), ...drift(library.map((each) => each.name), LIBRARY)];
 	if (disagree.length > 0) throw new Error(`SURFACE, LIBRARY and the definitions disagree on ${disagree.join(", ")}.`);
-	return SEATS.map((seat) => {
+	return (seat, homeTools = []) => {
 		// handoff's `control` works only on a model-issued call, so scripts do not see it. notify sends from a script too;
 		// only its early end of the run is lost there, and schedule runs have alerted the owner from scripts.
 		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat)).map((each): ToolRegistration => (each.name === "handoff" ? { ...each, callers: ["model"] } : each));
@@ -128,8 +129,8 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 			scripted.push(entry.inline ? { ...each, callers: ["tools"] } : { ...each, callers: ["tools"], deferred: true });
 		}
 		const sections = seat === "agent" ? [...agentSections, ...(codemode.sections ?? []), ...everySeat] : [...(codemode.sections ?? []), ...everySeat];
-		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted], sections });
-	});
+		return defineExtension({ name: `seat-${seat}`, tools: [...direct, codemodeTool, ...scripted, ...homeTools], sections });
+	};
 }
 
 /** The host default, for anything that reaches a conversation without a seat: the least capable one. */

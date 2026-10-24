@@ -12,7 +12,7 @@ import {
 	type TaskId,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import type { ChatChannelId } from "../channels/types.ts";
+import type { ChannelId } from "../channels/types.ts";
 import { allPages } from "../pages.ts";
 import { live as liveSchedule, plan, scanSchedules } from "../schedule/schedule.ts";
 import { keyedReset, threadHandoff, type FastCompletion } from "./lifecycle.ts";
@@ -27,9 +27,10 @@ export const commandOf = (text: string): Command | undefined => {
 	}
 };
 
-export type CommandInput = { readonly key: string; readonly command: Command; readonly channel: ChatChannelId; readonly conversation?: ConversationId; readonly person?: string };
-export type CommandTurn = { readonly source: "command"; readonly key: string; readonly channel: ChatChannelId; readonly text: string; readonly person?: string };
-export type CommandReply = { readonly submission: SubmissionId; readonly text: string };
+export type CommandInput = { readonly key: string; readonly command: Command; readonly channel: ChannelId; readonly conversation?: ConversationId; readonly person?: string };
+export type CommandTurn = { readonly source: "command"; readonly key: string; readonly channel: ChannelId; readonly text: string; readonly person?: string };
+/** `turn`: the Turn that sends `text`; absent on commands stored before it was kept. */
+export type CommandReply = { readonly submission: SubmissionId; readonly text: string; readonly turn?: TaskId };
 type State =
 	| { readonly phase: "prepare" }
 	| { readonly phase: "abort"; readonly tasks: readonly TaskId[]; readonly submissions: readonly SubmissionId[]; readonly running: boolean }
@@ -179,8 +180,8 @@ export function commandTask(deps: CommandDeps) {
 				}, context)).id;
 				await runtime.commit(async (tx) => {
 					const person = task.input.person;
-					await deps.openReply(tx, { source: "command", key: task.input.key, channel: task.input.channel, text, ...(person === undefined ? {} : { person }) });
-					return { status: "terminal", outcome: { status: "completed", result: { submission, text } } };
+					const turn = await deps.openReply(tx, { source: "command", key: task.input.key, channel: task.input.channel, text, ...(person === undefined ? {} : { person }) });
+					return { status: "terminal", outcome: { status: "completed", result: { submission, text, turn } } };
 				}, context);
 			},
 		},

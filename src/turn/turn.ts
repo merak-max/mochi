@@ -31,7 +31,6 @@ import {
 	ChannelDown,
 	type ChannelId,
 	type Channels,
-	type ChatChannelId,
 	DeliveryError,
 	type Inbound,
 	type ReplyTarget,
@@ -70,7 +69,7 @@ export interface SavedFile {
 
 type ChatTurn = {
 	readonly source: "chat";
-	readonly channel: ChatChannelId;
+	readonly channel: ChannelId;
 	readonly key: string;
 	readonly tag: string;
 	readonly text: string;
@@ -102,10 +101,10 @@ type Outage = { readonly retryAt: number; readonly attempt: number; readonly dow
 
 type TurnState =
 	| { readonly phase: "run"; readonly streamed?: readonly string[]; readonly run?: string }
-	| { readonly phase: "claim"; readonly channel: ChatChannelId; readonly answer: Answer; readonly streamed?: readonly string[]; readonly run?: string }
+	| { readonly phase: "claim"; readonly channel: ChannelId; readonly answer: Answer; readonly streamed?: readonly string[]; readonly run?: string }
 	| {
 			readonly phase: "send";
-			readonly channel: ChatChannelId;
+			readonly channel: ChannelId;
 			readonly answer: Answer;
 			/** Paragraphs already sent while the answer was written; the final send skips them. */
 			readonly streamed?: readonly string[];
@@ -144,12 +143,12 @@ const OutboxDoc = defineDocFamily<{ text: string }, string>({
 	checkpointWhen: () => false,
 });
 
-async function recordSent(tx: Tx, channel: ChatChannelId, delivered: readonly SentBubble[]): Promise<void> {
+async function recordSent(tx: Tx, channel: ChannelId, delivered: readonly SentBubble[]): Promise<void> {
 	for (const message of delivered) (await tx.doc(OutboxDoc, requestKey(channel, message.id), message.text)).text = message.text;
 }
 /** The one Turn that streams a root run, by the run's task id; the other Turns in that run send nothing. */
 
-export const LastInboundDoc = defineDoc<{ last: { channel: ChatChannelId; messageId: string } | null }>({
+export const LastInboundDoc = defineDoc<{ last: { channel: ChannelId; messageId: string } | null }>({
 	kind: "mochi.last-inbound",
 	version: 2,
 	scope: "session",
@@ -158,7 +157,7 @@ export const LastInboundDoc = defineDoc<{ last: { channel: ChatChannelId; messag
 	migrate: (value) => {
 		const route = (value as { route?: { channel?: string; messageId?: string } | null }).route;
 		const chat = route?.channel !== undefined && route.channel !== "cli" && route.messageId !== undefined;
-		return { last: chat ? { channel: route.channel as ChatChannelId, messageId: route.messageId! } : null };
+		return { last: chat ? { channel: route.channel as ChannelId, messageId: route.messageId! } : null };
 	},
 });
 
@@ -293,12 +292,12 @@ function keepTyping(channel: Channel | undefined, person: string | undefined): (
 }
 
 // A user's replies chain apart from the owner's, so one never waits behind the other.
-const tailKey = (channel: ChatChannelId, person: string | undefined): string => (person === undefined ? channel : `${channel}:${person}`);
+const tailKey = (channel: ChannelId, person: string | undefined): string => (person === undefined ? channel : `${channel}:${person}`);
 
 const running = (checkpoint: TurnState): NextTaskState<TurnState, TurnResult> => ({ status: "running", checkpoint });
 const completed = (result: TurnResult): NextTaskState<TurnState, TurnResult> => ({ status: "terminal", outcome: { status: "completed", result } });
 
-function claimKey(answer: Answer, task: TaskId, channel: ChatChannelId): string {
+function claimKey(answer: Answer, task: TaskId, channel: ChannelId): string {
 	switch (answer.kind) {
 		case "entry":
 			return `${answer.entry}:${channel}`;
@@ -320,10 +319,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 			const source = turn.source === "owner" ? "chat" : turn.source;
 			return { input: { ...turn, source } as TurnInput, checkpoint: checkpoint as TurnState };
 		},
-		initial: (input) => {
-			if (input.source === "chat") return { phase: "run" };
-			return input.channel === "cli" ? { phase: "record" } : { phase: "claim", channel: input.channel, answer: { kind: "input" } };
-		},
+		initial: (input) => (input.source === "chat" ? { phase: "run" } : { phase: "claim", channel: input.channel, answer: { kind: "input" } }),
 		phases: {
 			run: async (task, runtime, context) => {
 				const input = task.input;
@@ -469,18 +465,8 @@ export async function submitNote(conversation: Pick<Conversation, "submit">, req
 	await conversation.submit({ type: "write", requestId, entry: { kind: "mochi.note", model: [{ role: "user", content: text, timestamp: Date.now() }] } }, context);
 }
 
-/** `to`: the conversation it goes to; absent, root. */
-type CliInbound = {
-	readonly kind: "cli";
-	readonly messageId: string;
-	readonly text: string;
-	readonly at: Date;
-	readonly to?: ConversationId;
-	readonly whenBusy?: "steer" | "followUp";
-};
-
 /** Fills a reply target's empty text from the outbox; it stays "" when mochi never recorded that message. */
-async function quotedText(harness: Pick<Harness, "snapshot">, channel: ChatChannelId, target: ReplyTarget, context: Context): Promise<ReplyTarget> {
+async function quotedText(harness: Pick<Harness, "snapshot">, channel: ChannelId, target: ReplyTarget, context: Context): Promise<ReplyTarget> {
 	if (target.text !== "") return target;
 	const stored = await harness.snapshot(OutboxDoc, requestKey(channel, target.messageId), context);
 	return stored === undefined ? target : { ...target, text: stored.text };
@@ -489,17 +475,10 @@ async function quotedText(harness: Pick<Harness, "snapshot">, channel: ChatChann
 const tagOf = (channel: ChannelId, messageId: string, at: Date, timeZone: string) => `[${channel} ${formatStamp(at, timeZone)} id=${messageId}]`;
 
 // A chat message opens its Turn in the commit that finds no submission for its request key, then submits itself,
-// so arrival order is root's order.
-export async function ingest(line: Line, inbound: Inbound | CliInbound, context: Context): Promise<SubmissionId> {
+// so arrival order is root's order. Resolves to the Turn that answers it; a tapback or a redelivery has none.
+export async function ingest(line: Line, inbound: Inbound, context: Context): Promise<TaskId | undefined> {
 	const { root, harness } = line;
 	switch (inbound.kind) {
-		case "cli": {
-			const target = await conversationOf(line, inbound.to ?? root.id, context);
-			const key = requestKey("cli", inbound.messageId);
-			const text = await holdText(harness, line.workDir, target.id, `in:${key}`, inbound.text, context);
-			const content = `${tagOf("cli", inbound.messageId, inbound.at, line.timeZone)}\n${text}`;
-			return (await target.submit({ type: "input", content, requestId: key, whenBusy: inbound.whenBusy ?? "steer" }, context)).id;
-		}
 		case "tapback": {
 			const user = userOf(line.users, inbound.person);
 			const who = user === undefined ? OWNER_ID : user.id;
@@ -507,13 +486,15 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 			const quoted = inbound.onText === "" ? "" : `: "${inbound.onText}"`;
 			const model = [{ role: "user" as const, content: `[context, no reply needed: ${who} reacted ${inbound.emoji} to ${whose} message id=${inbound.on}${quoted}]`, timestamp: inbound.at.getTime() }];
 			const target = await threadOf(line, user, context);
-			return (await target.submit({ type: "write", requestId: requestKey(inbound.channel, inbound.messageId), entry: { kind: "mochi.tapback", model } }, context)).id;
+			await target.submit({ type: "write", requestId: requestKey(inbound.channel, inbound.messageId), entry: { kind: "mochi.tapback", model } }, context);
+			return undefined;
 		}
 		case "message": {
 			const key = requestKey(inbound.channel, inbound.messageId);
 			const user = userOf(line.users, inbound.person);
+			// The terminal may be closed later, so a notify or a send never goes there by default.
 			const recordInbound = async (tx: Tx) => {
-				if (user === undefined) (await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
+				if (user === undefined && inbound.channel !== "cli") (await tx.doc(LastInboundDoc)).last = { channel: inbound.channel, messageId: inbound.messageId };
 			};
 			const command = inbound.attachments.length === 0 ? commandOf(inbound.text) : undefined;
 			if (command !== undefined) {
@@ -522,12 +503,12 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 					return user === undefined ? undefined : ensureUser(tx, user);
 				}, context);
 				const forUser = user === undefined || conversation === undefined ? {} : { conversation, person: user.handle };
-				return (await line.command({ key, command, channel: inbound.channel, ...forUser }, context)).submission;
+				return (await line.command({ key, command, channel: inbound.channel, ...forUser }, context)).turn;
 			}
 			const known = user === undefined ? ROOT_CONVERSATION_ID : ((await harness.snapshot(UserDoc, user.handle, context))?.conversation ?? null);
 			if (known !== null) {
 				const prior = await harness.commit((tx) => tx.submissionByRequest(known, key), context);
-				if (prior !== undefined) return prior.id;
+				if (prior !== undefined) return undefined;
 			}
 			const tag = tagOf(inbound.channel, inbound.messageId, inbound.at, line.timeZone);
 			const files = await saveFiles(line.workDir, inbound);
@@ -539,17 +520,18 @@ export async function ingest(line: Line, inbound: Inbound | CliInbound, context:
 				const known = user === undefined ? ROOT_CONVERSATION_ID : (await tx.doc(UserDoc, user.handle, null)).conversation;
 				if (known !== null) {
 					const submission = await tx.submissionByRequest(known, key);
-					if (submission !== undefined) return { kind: "existing" as const, submission: submission.id };
+					if (submission !== undefined) return { kind: "existing" as const };
 				}
 				const conversation = known ?? (await ensureUser(tx, user!));
-				await openTurn(tx, line, user === undefined ? turn : { ...turn, conversation, person: user.handle });
+				const opened = await openTurn(tx, line, user === undefined ? turn : { ...turn, conversation, person: user.handle });
 				await recordInbound(tx);
-				return { kind: "opened" as const, conversation };
+				return { kind: "opened" as const, conversation, turn: opened };
 			}, context);
-			if (opened.kind === "existing") return opened.submission;
+			if (opened.kind === "existing") return undefined;
 			const target = await conversationOf(line, opened.conversation, context);
 			const content = await inputOf(line.workDir, user === undefined ? turn : { ...turn, conversation: opened.conversation }, line.media, harness, context);
-			return (await target.submit({ type: "input", content, requestId: key, whenBusy: "steer" }, context)).id;
+			await target.submit({ type: "input", content, requestId: key, whenBusy: "steer" }, context);
+			return opened.turn;
 		}
 	}
 }
@@ -618,7 +600,7 @@ export function reactTool(channels: Channels): ToolRegistration {
 	});
 }
 
-async function ownerMessage(api: ToolExecutionApi, channels: Channels, messageId: string, context: Context): Promise<{ channel: ChatChannelId; messageId: string } | undefined> {
+async function ownerMessage(api: ToolExecutionApi, channels: Channels, messageId: string, context: Context): Promise<{ channel: ChannelId; messageId: string } | undefined> {
 	for (const channel of channels.keys()) {
 		const found = await api.commit((tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, requestKey(channel, messageId)), context);
 		if (found !== undefined) return { channel, messageId };

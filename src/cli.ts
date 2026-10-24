@@ -1,24 +1,16 @@
-import type { Target } from "./attach/protocol.ts";
-
 type Flag = { readonly name: string; readonly value?: string; readonly help: string };
 type Command = { readonly name: string; readonly args: string; readonly summary: string; readonly flags: readonly Flag[] };
 
 const JSON_FLAG: Flag = { name: "--json", help: "Print JSON instead of text." };
-const ID_FLAG: Flag = { name: "--id", value: "key", help: "Make it safe to run again: line n becomes request cli:<key>:<n>, and a repeat gets the first answer." };
-const TO_FLAG: Flag = { name: "--to", value: "id|label", help: "Send to this conversation instead of main." };
 
 /** Every command. parseCli reads flags and arguments from it and helpText prints it. Order is the help order. */
 export const COMMANDS = [
 	{ name: "tui", args: "", summary: "Full-screen chat with main (also: mochi with no arguments on a terminal). Without a daemon, this process becomes one until it exits.", flags: [] },
-	{ name: "attach", args: "<id|label>", summary: "The full-screen chat on another conversation. Needs a running daemon.", flags: [] },
-	{ name: "chat", args: "", summary: "Each stdin line is a message; each answer prints.", flags: [TO_FLAG, ID_FLAG, JSON_FLAG] },
-	{ name: "-p", args: "<prompt>", summary: "One message, then its answer. Also --print.", flags: [TO_FLAG, ID_FLAG, JSON_FLAG] },
-	{ name: "agents", args: "", summary: "Every conversation: id, kind, label, parent, state, model, title.", flags: [JSON_FLAG] },
-	{ name: "status", args: "", summary: "The daemon: pid, uptime, protocol, build, channels, setup report, usage, live tasks.", flags: [JSON_FLAG] },
-	{ name: "doctor", args: "", summary: "Checks home, config, lock, socket, protocol, systemd unit and log. Changes nothing. Exits 1 when a check fails.", flags: [JSON_FLAG] },
-	{ name: "models", args: "[search]", summary: "The configured models and their roles (brain, fast, strongest, classifier, aliases).", flags: [JSON_FLAG] },
+	{ name: "chat", args: "", summary: "Each stdin line is a message to main; each answer prints. /new and /stop work here.", flags: [] },
+	{ name: "-p", args: "<prompt>", summary: "One message to main, then its answer. Also --print.", flags: [] },
+	{ name: "status", args: "", summary: "The daemon: pid, uptime, wire, build, channels, setup report.", flags: [JSON_FLAG] },
+	{ name: "doctor", args: "", summary: "Checks home, config, lock, socket, wire, systemd unit and log. Changes nothing. Exits 1 when a check fails.", flags: [JSON_FLAG] },
 	{ name: "stop", args: "", summary: "Stops the daemon: systemctl --user stop mochi when systemd runs it, else SIGTERM and wait.", flags: [] },
-	{ name: "export", args: "<id|label> [out]", summary: "A conversation's history as JSON lines, to a new file out or to stdout.", flags: [] },
 	{ name: "--headless", args: "", summary: "The daemon alone. This is the systemd mode.", flags: [] },
 	{ name: "auth", args: "apps", summary: "OAuth login to the apps server.", flags: [] },
 	{ name: "service", args: "install", summary: "Writes the systemd user unit.", flags: [] },
@@ -29,21 +21,16 @@ export const COMMANDS = [
 export type CommandName = (typeof COMMANDS)[number]["name"];
 
 export type Cli =
-	| { readonly kind: "tui"; readonly to?: Target }
+	| { readonly kind: "tui" }
 	| { readonly kind: "daemon" }
-	| { readonly kind: "lines"; readonly prompt?: string; readonly to?: Target; readonly id?: string; readonly json: boolean }
-	| { readonly kind: "agents"; readonly json: boolean }
+	| { readonly kind: "lines"; readonly prompt?: string }
 	| { readonly kind: "status"; readonly json: boolean }
 	| { readonly kind: "doctor"; readonly json: boolean }
-	| { readonly kind: "models"; readonly search?: string; readonly json: boolean }
 	| { readonly kind: "stop" }
-	| { readonly kind: "export"; readonly to: Target; readonly out?: string }
 	| { readonly kind: "auth-apps" }
 	| { readonly kind: "service-install" }
 	| { readonly kind: "help"; readonly command?: CommandName }
 	| { readonly kind: "version" };
-
-const ID_KEY = /^[A-Za-z0-9._-]+$/;
 
 function find(name: string): Command | undefined {
 	const ALIASES: Readonly<Record<string, string>> = { "--print": "-p", "-h": "help", "--help": "help", "-v": "version", "--version": "version" };
@@ -58,16 +45,12 @@ const fail = (problem: string, command?: string): never => {
 	throw new Error(`${problem} Run mochi help${command === undefined ? "" : ` ${command}`}.`);
 };
 
-/** A number in a target is a conversation id; anything else is a label. */
-const targetOf = (text: string): Target => (/^[0-9]+$/.test(text) ? Number(text) : text);
-
 /**
- * argv to Cli. No arguments: the TUI on a terminal, else the daemon. "--json" alone streams main's view.
+ * argv to Cli. No arguments: the TUI on a terminal, else the daemon.
  * "<command> --help" and "-h" give that command's help.
  */
 export function parseCli(argv: readonly string[], interactive: boolean): Cli {
 	if (argv.length === 0) return interactive ? { kind: "tui" } : { kind: "daemon" };
-	if (argv.length === 1 && argv[0] === "--json") return { kind: "lines", json: true };
 	const command = find(argv[0]!);
 	if (command === undefined) return fail(`Unknown command ${argv[0]}.`);
 	const name = command.name as CommandName;
@@ -100,33 +83,20 @@ export function parseCli(argv: readonly string[], interactive: boolean): Cli {
 	}
 
 	const json = switches.has("--json");
-	const id = values.get("--id");
-	if (id !== undefined && !ID_KEY.test(id)) return fail("--id needs a key of letters, digits, dot, dash or underscore.", name);
-	const toText = values.get("--to");
-	const to = toText === undefined ? {} : { to: targetOf(toText) };
 	const first = positional[0];
-	const second = positional[1];
 	switch (name) {
 		case "tui":
 			return { kind: "tui" };
-		case "attach":
-			return { kind: "tui", to: targetOf(first!) };
 		case "chat":
-			return { kind: "lines", json, ...to, ...(id === undefined ? {} : { id }) };
+			return { kind: "lines" };
 		case "-p":
-			return { kind: "lines", prompt: first!, json, ...to, ...(id === undefined ? {} : { id }) };
-		case "agents":
-			return { kind: "agents", json };
+			return { kind: "lines", prompt: first! };
 		case "status":
 			return { kind: "status", json };
 		case "doctor":
 			return { kind: "doctor", json };
-		case "models":
-			return { kind: "models", json, ...(first === undefined ? {} : { search: first }) };
 		case "stop":
 			return { kind: "stop" };
-		case "export":
-			return { kind: "export", to: targetOf(first!), ...(second === undefined ? {} : { out: second }) };
 		case "--headless":
 			return { kind: "daemon" };
 		case "auth":

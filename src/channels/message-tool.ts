@@ -1,7 +1,7 @@
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { LastInboundDoc } from "../turn/turn.ts";
-import type { Channels, ChatChannelId, MessageRequest } from "./types.ts";
+import type { Channels, ChannelId, MessageRequest } from "./types.ts";
 
 const Params = Type.Object({
 	action: Type.Union([Type.Literal("sent"), Type.Literal("edit"), Type.Literal("unsend"), Type.Literal("poll"), Type.Literal("contact"), Type.Literal("read")]),
@@ -51,7 +51,7 @@ export function messageTool(channels: Channels): ToolRegistration {
 		replay: "unsafe",
 		execute: async (args, api, context) => {
 			const last = (await api.snapshot(LastInboundDoc, context))?.last?.channel;
-			const id: ChatChannelId | undefined = last ?? (channels.has("imessage") ? "imessage" : [...channels.keys()][0]);
+			const id: ChannelId | undefined = last ?? (channels.has("imessage") ? "imessage" : [...channels.keys()][0]);
 			const channel = id === undefined ? undefined : channels.get(id);
 			if (id === undefined || channel === undefined) throw new Error("No chat channel is running.");
 			if (channel.message === undefined) throw new Error(`message is not supported on ${id}.`);

@@ -23,7 +23,8 @@ import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineSchedule, notifyTool, RUN_DEADLINE_MS, scanSchedules, type ScheduleTask, scheduleFns } from "./schedule/schedule.ts";
 import { migrateSchedulers } from "./schedule/migrate.ts";
-import { defaultSelection, rootSelection, seatExtensions } from "./seats.ts";
+import { defaultSelection, rootSelection, SEATS, seatExtensions } from "./seats.ts";
+import { homeTools } from "./tools/home-tools.ts";
 import { reactTool, sendTool, defineTurn, ensureLine, type Line, openTurn } from "./turn/turn.ts";
 import { webFns } from "./web/web.ts";
 import { browserFns } from "./browser/browser.ts";
@@ -58,13 +59,15 @@ interface MochiOptions {
 	readonly files: FileIndexes;
 	/** Skill directories, `<dir>/<name>/SKILL.md`: bundled first, then the owner's, which replace bundled ones by name. */
 	readonly skillDirs: readonly string[];
+	/** The owner's own tools, `<dir>/<name>.ts`; `tools_reload` loads them. */
+	readonly toolsDir: string;
 	readonly profiles: Profiles;
 	/** Where bash, read, edit and write run when a conversation sets no cwd. */
 	readonly workDir: string;
 	readonly channels: Channels;
 	readonly timeZone: string;
 	readonly publicUrl: string | undefined;
-	/** `daemon` installs the Turn task kind; `local` (a terminal with no daemon) leaves Turns waiting for one. */
+	/** `daemon` runs schedules; `local` (a terminal with no daemon) leaves them waiting for one. Both run Turns. */
 	readonly scheduling: "daemon" | "local";
 	readonly log: Log;
 	/** Root's own instructions (`<home>/instructions.md`), rendered after every section; absent leaves root's as they are. */
@@ -98,7 +101,10 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const schedule = defineSchedule({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, pollMs: PROC_POLL_MS, procDir, log, harness: () => harness, line: lineOf, catalog: options.profiles, classify: options.classify, workDir: options.workDir });
 	const reply = defineReply(() => harness, options.workDir);
 	const forkTask = defineForkTask(options.workDir);
+	let seat: ReturnType<typeof seatExtensions> | undefined;
+	const home = homeTools(options.toolsDir, registry, (tools) => seat!("agent", tools));
 	const library: ToolRegistration[] = [
+		home.tool,
 		...(await codingTools()),
 		...searchFns(options.files),
 		zoomTool(() => harness),
@@ -119,16 +125,19 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...profileFns(options.profiles, () => harness, reply, options.workDir),
 	];
 	for (const extension of [
-		identityExtension([...options.channels.values()].map((channel) => channel.profile), users),
+		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, options.toolsDir),
 		memoryExtension(),
 		skillsExtension(options.skillDirs),
 		defineExtension({ name: "agents", tasks: [forkTask, reply] }),
-		// Daemon only, so a terminal without a daemon leaves schedules and Turns waiting for one.
+		// Daemon only, so a terminal without a daemon leaves schedules waiting for one.
 		...(options.scheduling === "daemon" ? [defineExtension({ name: "schedules", tasks: [schedule] })] : []),
-		...seatExtensions(modelTools, library, [rosterSection(options.profiles)], [contextSection()]),
 	]) {
 		registry.install(extension);
 	}
+	seat = seatExtensions(modelTools, library, [rosterSection(options.profiles)], [contextSection()]);
+	for (const name of SEATS) registry.install(seat(name));
+	const loaded = await home.reload([...modelTools, ...library].map((each) => each.name));
+	if (loaded.length > 0) log("tools.loaded", { tools: loaded });
 
 	// One environment per directory, shared by every conversation working there.
 	const environments = new Map<string, ExecutionEnv>();
@@ -152,7 +161,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const root = await harness.root(context, { agent: { model: options.brain, thinkingLevel: "medium", extensions: rootSelection((name) => registry.snapshot().extension(name)) } });
 	await root.configure({ model: options.brain, ...(options.instructions === undefined ? {} : { instructions: options.instructions }) }, context);
 	const turn = defineTurn({ root, harness, users, channels: options.channels, workDir: options.workDir, media, log });
-	if (options.scheduling === "daemon") registry.install(defineExtension({ name: "delivery", tasks: [turn] }));
+	registry.install(defineExtension({ name: "delivery", tasks: [turn] }));
 	const lineId = await ensureLine(harness, context);
 	const commands = commandTask({
 		harness,

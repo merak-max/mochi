@@ -5,21 +5,21 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { loadConfig, unknownKeys } from "../config.ts";
 import type { Home } from "../home.ts";
-import { AttachClient, ProtocolError } from "./client.ts";
-import { PROTOCOL } from "./protocol.ts";
+import { Terminal, WireError } from "./client.ts";
+import { type DaemonFacts, WIRE } from "../channels/cli.ts";
 
-/** How the client found the daemon: none listens, one answers in protocol 2, or one answers in another way. */
+/** How a terminal found the daemon: none listens, one answers on this wire, or one answers in another way. */
 type Reach =
 	| { readonly kind: "absent"; readonly reason: string }
 	| { readonly kind: "refused"; readonly reason: string }
-	| { readonly kind: "ready"; readonly client: AttachClient };
+	| { readonly kind: "ready"; readonly terminal: Terminal };
 
 export async function reach(socket: string, watch: boolean): Promise<Reach> {
 	try {
-		return { kind: "ready", client: await AttachClient.connect(socket, { watch }) };
+		return { kind: "ready", terminal: await Terminal.connect(socket, watch) };
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
-		if (error instanceof ProtocolError) return { kind: "refused", reason };
+		if (error instanceof WireError) return { kind: "refused", reason };
 		return { kind: "absent", reason };
 	}
 }
@@ -73,7 +73,7 @@ function stopUnit(pid: number): number {
 }
 
 /**
- * mochi stop. The pid comes from the daemon's own hello, not the lock file. When systemd runs that pid, systemd stops it
+ * mochi stop. The pid comes from the daemon's own hello. When systemd runs that pid, systemd stops it
  * (a SIGTERM alone would be undone by Restart=always). Otherwise SIGTERM, then wait until the pid and the socket are gone.
  * This command never sends SIGKILL; systemd may, after TimeoutStopSec. Returns the exit code.
  */
@@ -85,15 +85,13 @@ export async function stopDaemon(home: Home, socket: string): Promise<number> {
 	}
 	const unit = unitState();
 	if (found.kind === "refused") {
-		// An older daemon cannot say its pid. systemd may stop it only when systemd and the lock name the same process.
+		process.stderr.write(`The daemon at ${socket} did not answer as mochi wire ${WIRE}: ${found.reason}\n`);
 		const holder = lockHolder(home);
-		if (unit.active && holder !== undefined && unit.mainPid === holder) return stopUnit(holder);
-		process.stderr.write(`The daemon at ${socket} did not answer as mochi protocol ${PROTOCOL}: ${found.reason}\n`);
 		if (holder !== undefined) process.stderr.write(`The lock file names pid ${holder}. Stop that process yourself.\n`);
 		return 1;
 	}
-	const pid = found.client.daemon!.pid;
-	found.client.close();
+	const pid = found.terminal.facts.pid;
+	found.terminal.close();
 	if (unit.active && unit.mainPid === pid) return stopUnit(pid);
 	process.stdout.write(`Sending SIGTERM to pid ${pid}.\n`);
 	process.kill(pid, "SIGTERM");
@@ -143,10 +141,10 @@ export async function doctor(home: Home, socket: string): Promise<Check[]> {
 	if (found.kind === "absent") add("socket", holder !== undefined && isAlive(holder) ? "fail" : "warn", `no daemon answers at ${socket}`);
 	else if (found.kind === "refused") add("socket", "fail", found.reason);
 	else {
-		const info = found.client.daemon!;
+		const info = found.terminal.facts;
 		daemonPid = info.pid;
-		found.client.close();
-		add("socket", "ok", `pid ${info.pid}, protocol ${info.protocol}, build ${info.build}, ${Date.now() - started} ms`);
+		found.terminal.close();
+		add("socket", "ok", `pid ${info.pid}, wire ${info.wire}, build ${info.build}, ${Date.now() - started} ms`);
 		if (holder !== undefined && holder !== info.pid) add("lock", "fail", `the lock names pid ${holder} but pid ${info.pid} answers the socket`);
 	}
 
@@ -186,4 +184,47 @@ function readTail(path: string, size: number): string {
 		closeSync(file);
 	}
 	return buffer.toString("utf8");
+}
+
+/** Rows as columns padded to the widest cell; the last column is not padded. */
+export function table(rows: readonly (readonly string[])[]): string {
+	const widths: number[] = [];
+	for (const row of rows) {
+		for (let at = 0; at < row.length; at++) widths[at] = Math.max(widths[at] ?? 0, row[at]!.length);
+	}
+	const lines: string[] = [];
+	for (const row of rows) {
+		const cells = row.map((cell, at) => (at === row.length - 1 ? cell : cell.padEnd(widths[at]!)));
+		lines.push(cells.join("  ").trimEnd());
+	}
+	return lines.join("\n");
+}
+
+function uptime(startedAt: string): string {
+	let seconds = Math.floor((Date.now() - Date.parse(startedAt)) / 1000);
+	const days = Math.floor(seconds / 86_400);
+	seconds -= days * 86_400;
+	const hours = Math.floor(seconds / 3_600);
+	seconds -= hours * 3_600;
+	const minutes = Math.floor(seconds / 60);
+	if (days > 0) return `${days}d ${hours}h`;
+	if (hours > 0) return `${hours}h ${minutes}m`;
+	return `${minutes}m ${seconds - minutes * 60}s`;
+}
+
+/** mochi status, from the daemon's hello. */
+export function printStatus(facts: DaemonFacts, json: boolean): void {
+	if (json) {
+		process.stdout.write(`${JSON.stringify(facts)}\n`);
+		return;
+	}
+	const lines = [
+		`mochi is running: pid ${facts.pid}, up ${uptime(facts.startedAt)} (since ${facts.startedAt})`,
+		`wire ${facts.wire}, build ${facts.build}`,
+		`home ${facts.home}`,
+		`channels: ${facts.channels.join(", ")}`,
+		"setup:",
+		...facts.setup.map((line) => `  ${line}`),
+	];
+	process.stdout.write(`${lines.join("\n")}\n`);
 }

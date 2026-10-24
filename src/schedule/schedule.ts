@@ -5,7 +5,7 @@ import type { Context, JsonValue } from "@earendil-works/chord";
 import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { AssistantEntry, LiveDoc, ResetEntry, type Conversation, type ConversationId, defineTask, defineTool, type Harness, ROOT_CONVERSATION_ID, type NextTaskState, type Task, type TaskId, type TaskRecord, type TaskRuntime, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
-import type { ChannelId, ChatChannelId } from "../channels/types.ts";
+import type { ChannelId } from "../channels/types.ts";
 import { holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
 import { withAttachments } from "../media/files.ts";
@@ -74,7 +74,7 @@ type ScheduleRuntime = TaskRuntime<ScheduleInput, ScheduleState, null, object>;
 const iso = (at: number): string => new Date(at).toISOString();
 
 /** A wake's text and destination, fixed on first run so a replay submits the same content to the same place. */
-type WakeMemo = { readonly body: string; readonly last: { readonly channel: ChatChannelId; readonly messageId: string } | null };
+type WakeMemo = { readonly body: string; readonly last: { readonly channel: ChannelId; readonly messageId: string } | null };
 
 interface ScheduleDeps {
 	readonly timeZone: string;

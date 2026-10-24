@@ -1,35 +1,27 @@
 import { createInterface } from "node:readline";
-import type { AttachClient } from "./client.ts";
-import type { Target } from "./protocol.ts";
-import { NO_REPLY } from "../turn/turn.ts";
+import type { Terminal } from "./client.ts";
 
-export type LinesOptions = { readonly json: boolean; readonly id?: string; readonly to?: Target };
-
-/** Each stdin line, or the one prompt, goes to `to` (default main); its answer prints. `json` prints that conversation's view frames instead. */
-export async function runLines(client: AttachClient, prompt: string | undefined, options: LinesOptions): Promise<void> {
-	const print = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
-	const to = options.to ?? "main";
-	if (options.json) {
-		client.onViewFrame = (frame) => print(frame.t === "view" ? { view: frame.value } : { ops: frame.ops });
-		await client.request({ op: "show", to });
-	}
-	let line = 0;
+/** Each stdin line, or the one prompt, goes to main. Its bubbles print, and the next line waits for its Turn to end. */
+export async function runLines(terminal: Terminal, prompt: string | undefined): Promise<void> {
+	let lineDone = (): void => {};
+	let failure: string | undefined;
+	terminal.onFrame = (frame) => {
+		if (frame.t === "bubble") process.stdout.write(`mochi> ${frame.text}\n`);
+		if (frame.t === "error") failure = frame.error;
+		if (frame.t === "done" || frame.t === "error") lineDone();
+	};
+	void terminal.closed.then(() => {
+		failure ??= "The daemon closed the connection.";
+		lineDone();
+	});
 	for await (const raw of prompt === undefined ? createInterface({ input: process.stdin, terminal: false }) : [prompt]) {
 		const text = raw.trim();
 		if (text === "") continue;
-		line++;
-		const { submissionId } = await client.request({
-			op: "submit",
-			to,
-			text,
-			whenBusy: "steer",
-			...(options.id === undefined ? {} : { messageId: `${options.id}:${line}` }),
+		const done = new Promise<void>((resolve) => {
+			lineDone = resolve;
 		});
-		const answer = await client.request({ op: "wait", submissionId });
-		if (options.json) continue;
-		if (answer.status === "done") {
-			if (answer.text.trim() !== NO_REPLY) process.stdout.write(`mochi> ${answer.text}\n`);
-		}
-		else process.stdout.write(`mochi! unanswered: ${answer.reason}\n`);
+		terminal.send(text);
+		await done;
+		if (failure !== undefined) throw new Error(failure);
 	}
 }

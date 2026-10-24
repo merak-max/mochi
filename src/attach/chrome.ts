@@ -15,7 +15,7 @@ const MARK = [
 	"",
 ];
 
-export type SplashFacts = { readonly build: string; readonly model: string; readonly home: string };
+type SplashFacts = { readonly build: string; readonly pid: number; readonly home: string };
 
 function markRow(row: string, theme: Theme): string {
 	let out = "";
@@ -38,7 +38,7 @@ export function splash(facts: () => SplashFacts, theme: Theme): Component {
 		render(width) {
 			const meta = [
 				`${theme.bold(theme.fg("text", "mochi"))} ${theme.fg("muted", facts().build)}`,
-				`${theme.fg("dim", "model")} ${theme.fg("muted", facts().model)}`,
+				`${theme.fg("dim", "pid")} ${theme.fg("muted", String(facts().pid))}`,
 				`${theme.fg("dim", "home")} ${theme.fg("muted", facts().home)}`,
 			];
 			const showMark = width >= markWidth + 40;
@@ -61,19 +61,8 @@ export function splash(facts: () => SplashFacts, theme: Theme): Component {
 	};
 }
 
-export function centered(text: string, width: number): string {
-	const pad = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
-	return truncateToWidth(" ".repeat(pad) + text, width, "");
-}
-
 export function spread(left: string, right: string, width: number): string {
 	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right) - 2);
 	return truncateToWidth(` ${left}${" ".repeat(gap)}${right} `, width, "");
 }
 
-/** Splits "[cli 2026-10-15 23:52 IST id=x]" off the front of an inbound user message. */
-export function splitTag(text: string): { readonly body: string; readonly meta: string | undefined } {
-	const match = /^\[([a-z-]+) (\d{4}-\d\d-\d\d \d\d:\d\d)[^\]]*\]\s*/.exec(text);
-	if (match === null) return { body: text, meta: undefined };
-	return { body: text.slice(match[0].length), meta: `${match[1]} · ${match[2]}` };
-}

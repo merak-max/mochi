@@ -12,34 +12,28 @@ One daemon process owns everything:
 
 - the Harness and its SQLite file `<home>/mochi.sqlite`
 - every channel adapter, and the schedule and webhook server
-- the attach socket `<home>/mochi.sock`
+- the terminal channel's socket `<home>/mochi.sock`
 
-The daemon takes the lock file `<home>/mochi.lock` at start and exits if another live process holds it. Terminals attach over the socket and never open storage.
+The daemon takes the lock file `<home>/mochi.lock` at start and exits if another live process holds it. Terminals reach it over the socket and never open storage.
 
 | Command | What runs |
 |---|---|
-| `mochi` on a terminal | The TUI. It attaches to the running daemon. Without one, this process becomes the daemon with every configured channel until the TUI exits. |
+| `mochi` on a terminal | The TUI: the owner's lines, mochi's replies and what main is doing now. It uses the running daemon. Without one, this process becomes the daemon with every configured channel until the TUI exits. |
 | `mochi --headless` | The daemon alone. This is the systemd mode. |
-| `mochi attach <id\|label>` | The TUI on another conversation. It needs a running daemon. |
-| `mochi chat [--to <id\|label>]` | Each stdin line goes to root, or to the `--to` conversation, and its answer prints. Without a daemon, this process becomes one with no channels and no schedules. |
-| `mochi -p <prompt> [--to <id\|label>]` | One prompt, then its reply. The same daemon rule as `chat`. |
-| `mochi agents` | Every conversation: id, kind, label, parent, busy or idle, model, title. |
-| `mochi status` | The daemon's pid, uptime, protocol, build, channels, setup report, usage and live tasks. |
-| `mochi doctor` | Read-only checks of the home, config, lock, socket, protocol, systemd unit and log. It exits 1 when a check fails. |
-| `mochi models [search]` | The configured models and the config names that pick them. |
+| `mochi chat` | Each stdin line goes to root, and its answer prints. The next line waits for the answer. Without a daemon, this process becomes one with no outside channels and no schedules. |
+| `mochi -p <prompt>` | One prompt, then its reply. The same daemon rule as `chat`. |
+| `mochi status` | The daemon's pid, uptime, wire, build, channels and setup report. |
+| `mochi doctor` | Read-only checks of the home, config, lock, socket, wire, systemd unit and log. It exits 1 when a check fails. |
 | `mochi stop` | Stops the daemon. When systemd runs it, this runs `systemctl --user stop mochi`. Otherwise it sends SIGTERM and waits. |
-| `mochi export <id\|label> [out]` | A conversation's history as JSON lines, to stdout or to a new file. |
 | `mochi auth apps` | The OAuth login to the apps server. |
 | `mochi service install` | Writes `~/.config/systemd/user/mochi.service`. |
 | `mochi help [command]` | The commands, or one command's flags. |
 
-`agents`, `status`, `export` and `attach` never become a daemon. Without one they print "mochi is not running." and exit 1.
+`status` never becomes a daemon. Without one it prints "mochi is not running." and exits 1.
 
-A conversation's label is `main`, `line`, `profile:<name>`, `schedule:<id>`, `fork:<name>@<id>`, `agent:<name>@<id>`, `user:<user id>`, or else `conversation:<id>`. A number is always a conversation id. A label must match exactly.
+The terminal is a channel, `cli` in `src/channels/cli.ts`, like iMessage. Each line is an inbound message from the owner: it opens a chat Turn in root, and `/new`, `/stop` and `/status` work as on iMessage. The Turn's bubbles go to every attached terminal, as one thread shows on every device. A NO_REPLY answer prints nothing. A terminal line never becomes the owner's last channel, so `notify` and `send` do not go to a terminal that may be closed.
 
-`--id <key>` makes a script's submissions replay-safe for any target: line n becomes request `cli:<key>:<n>`, so a rerun after a crash prints the same answers without asking again. `--json` prints the target's view as JSON lines.
-
-The socket speaks protocol 2. Each connection starts with `hello`. The daemon refuses another protocol with an error that says which side to restart. A line that is not a valid request gets one error frame, and only that connection closes.
+The socket speaks wire 4, one JSON frame a line. The terminal sends `hello { wire, watch }`, then `line { text }`. The daemon answers `hello` with its facts, then sends `bubble { text }` and one `done` when a line's Turn ends. With `watch`, it also sends `live { status }`, one line that says what root is doing now. Another wire, or a bad frame, gets one `error` frame, and only that connection closes.
 
 ## Conversations
 
@@ -87,6 +81,7 @@ The model sees three tools. `SURFACE` in `src/seats.ts` lists them:
 | Apps | `apps_search`, `apps_call`, `apps_skills` |
 | Media | `image_gen`, `video_gen`, `speak`, `transcribe`, `gif_search`, `gif_save` |
 | Forks and profiles | `fork`, `fork_start`, `agent`, `profile_list`, `profile_send`, `profile_stop`, `profile_update` |
+| Self-extension | `tools_reload` |
 | Scheduling | `schedule_add`, `schedule_list`, `schedule_remove` |
 | Processes | `proc_start`, `proc_status`, `proc_logs`, `proc_stop` |
 | Channels | `react` |
@@ -197,6 +192,10 @@ A run is the ordered `steps`. A classify step before the model step asks the cla
 
 At daemon start, `schedule/migrate.ts` carries the three schedulers of before into `mochi.schedule`, once: each live `mochi.trigger` becomes a schedule in its own conversation, each live `mochi.proc` a process schedule, and each open or waiting board task with a due an `at` schedule `board-<id>` whose prompt holds its title, owners and log. The old tasks are aborted and the board document is retired. A board task with no due, or one the old sweep already woke for its due, has no time left to fire and is dropped with a `schedule.board_dropped` log line. Claims, leases and re-wakes are gone: a schedule fires once per slot, in one conversation.
 
+## Own tools
+
+Each `<home>/tools/<name>.ts` default-exports one tool made with pi-durable's `defineTool`. A bare import in such a file resolves from mochi's own `node_modules`. The daemon loads every file at start, and `tools_reload` (agent seat) loads them again: a changed file is imported again with its mtime in the URL, a removed file drops its tool, and a file that fails to load, or takes a built-in name, keeps no tool. The result lists each file with the tool name now live, or its error. Home tools join the `seat-agent` extension as deferred script functions, so the prompt does not change; a reload shows from the next script, through `searchTools()`.
+
 ## Self-improvement
 
 The `improve` schedule runs `skills/improve` nightly. It follows Harness² (recursive agent harnessing), with one change: mochi does not rerun a task to compare harnesses, because its tasks act on the world. Instead `scripts/improve-check.ts` counts failure signals per owner turn since the last run (busy sends, refused notify, side schedulers, lost children, timeouts, owner chases, duplicate replies) and writes the transcripts. The run judges each pending edit on its signal (helped, hurt, no observed effect, confounded), reverts a hurt one with git, then proposes from two dimensions (procedure and practice) with `llm` on the strongest model, composes at most 3 edits, and applies them.
@@ -229,12 +228,13 @@ src/
   profiles/         profiles on disk, standing conversations, profile_* tools, memory owner
   schedule/         cron parser, the schedule task, steps, seeds, webhooks, the one-time migration
   turn/             ingest and the Turn task, commands (/new, /stop, /status), handoff
-  channels/         the channel interface, present(), iMessage
+  channels/         the channel interface, present(), iMessage, the terminal channel and its socket
+  tools/            the owner's own tools in <home>/tools and tools_reload
   apps/, auth/      the apps server client and its OAuth login
   web/, browser/    web functions and the logged-in browser
   media/            images, video, speech, gifs, inbound attachments
   procs/            background processes; their wakes are process schedules
-  attach/           the socket protocol, server, client, TUI and line modes
+  attach/           the terminal side: the socket client, TUI, line modes, stop and doctor
   skills/           the skills-index section
   env/              the execution environment for the file and shell tools
 ```
