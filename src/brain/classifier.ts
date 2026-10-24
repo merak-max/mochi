@@ -21,7 +21,7 @@ export function createClassify(models: Models, classifier: ModelRef | undefined)
 	};
 }
 
-export type ClassifyStep = { readonly question: string; readonly yes: string; readonly no: string; readonly threshold?: number };
+export type ClassifyStep = { readonly question: string; readonly yes: string; readonly no: string };
 
 /** P(yes) for one yes/no question over `state`. A failed classifier throws, so its outage shows. */
 export async function classifyYes(classify: Classify, step: ClassifyStep, state: JsonObject, log: Log, context: Context): Promise<number> {

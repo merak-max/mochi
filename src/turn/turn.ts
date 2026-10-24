@@ -58,7 +58,7 @@ const requestKey = (channel: ChannelId, messageId: string): string => `${channel
 /** A final text of exactly this sends nothing. */
 export const NO_REPLY = "NO_REPLY";
 
-type Origin = { readonly kind: "trigger"; readonly id: string } | { readonly kind: "conversation"; readonly id: ConversationId };
+type Origin = { readonly kind: "board"; readonly id: string } | { readonly kind: "conversation"; readonly id: ConversationId };
 
 export interface SavedFile {
 	readonly path: string;
@@ -81,6 +81,8 @@ type ChatTurn = {
 	readonly threadOn?: string;
 	/** When the message was sent, in ms; absent on Turns stored before the later-message check. */
 	readonly at?: number;
+	/** A board fire: it waits for root's current run to end instead of steering into it. */
+	readonly followUp?: true;
 };
 export type RunTurn = {
 	readonly source: "run";
@@ -222,7 +224,7 @@ type TurnHost = Pick<Line, "root" | "harness" | "users" | "channels" | "workDir"
 const NOTIFY_ENTRY = "app.notify";
 
 function deliveredRecord(input: RunTurn, recipient: string): string {
-	const from = input.from.kind === "trigger" ? `schedule ${input.from.id}` : `conversation ${input.from.id}`;
+	const from = input.from.kind === "board" ? `board item ${input.from.id}` : `conversation ${input.from.id}`;
 	const where = input.channel === "cli" ? "in the terminal" : `on ${input.channel}`;
 	return `[context, no reply needed: told ${recipient} ${where}, from ${from}] ${input.text}`;
 }
@@ -327,7 +329,7 @@ export function defineTurn(host: TurnHost): TurnTask {
 				try {
 					const conversation = (await runtime.conversation(conversationId, context))!;
 					const content = await inputOf(workDir, input, media, host.harness, context);
-					const submission = await conversation.submit({ type: "input", content, requestId: input.key, whenBusy: "steer" }, context);
+					const submission = await conversation.submit({ type: "input", content, requestId: input.key, whenBusy: input.followUp === true ? "followUp" : "steer" }, context);
 					settled = await submission.wait(context);
 					if (blockedByPolicy(settled)) {
 						log("turn.policy_reset", { task: task.id, conversation: conversationId });
@@ -451,11 +453,13 @@ export function openTurn(tx: Tx, line: Pick<Line, "id" | "turn">, input: TurnInp
 	return tx.createTask(line.turn, input, { ownership: { kind: "conversation" }, conversationId: line.id, background: true });
 }
 
-/**
- * Brings `text` into root through a chat Turn on the owner's last chat channel, so root's answer reaches the owner.
- * A bare submit to root runs it with no Turn, and the answer goes nowhere. False when no chat message came yet.
- * Not idempotent by itself: call it in the commit that ends the caller's task.
- */
+/** A daemon message to the owner, verbatim, on the channel the owner last wrote on. */
+export async function notifyOwner(harness: Harness, line: Line, text: string, context: Context): Promise<void> {
+	const last = (await harness.snapshot(LastInboundDoc, context))?.last?.channel;
+	const channel: ChannelId = last !== undefined && line.channels.has(last) ? last : "cli";
+	await harness.commit((tx) => openTurn(tx, line, { source: "run", channel, text, from: { kind: "conversation", id: ROOT_CONVERSATION_ID } }), context);
+}
+
 /** Writes `text` into a conversation as a note. It joins the next turn and starts no run. */
 export async function submitNote(conversation: Pick<Conversation, "submit">, requestId: string, text: string, context: Context): Promise<void> {
 	await conversation.submit({ type: "write", requestId, entry: { kind: "mochi.note", model: [{ role: "user", content: text, timestamp: Date.now() }] } }, context);

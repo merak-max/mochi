@@ -23,12 +23,11 @@ import { type Cli, helpText, parseCli } from "./cli.ts";
 import { runLines } from "./attach/lines.ts";
 import { runTui } from "./attach/tui.ts";
 import { Definitions } from "./agents/definitions.ts";
-import { schedulesComponent } from "./schedule/webhooks.ts";
+import { webhooksComponent } from "./board/webhooks.ts";
 import { login, tokenFile } from "./mcp/oauth.ts";
-import { ingest } from "./turn/turn.ts";
+import { ingest, notifyOwner } from "./turn/turn.ts";
 import type { TaskId } from "@earendil-works/pi-durable";
 import { runCompactor } from "./memory/compactor.ts";
-import { notifyOwner } from "./schedule/schedule.ts";
 import { fastCompletion } from "./turn/lifecycle.ts";
 
 /** The channels config turns on. The terminal channel always runs. */
@@ -225,7 +224,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			channels,
 			users: config.users,
 			timeZone: config.timeZone,
-			publicUrl: config.env.MOCHI_PUBLIC_URL,
+			webhookUrl: config.file.webhooks?.url,
 			scheduling: channelSet === "terminal" ? "local" : "daemon",
 			log,
 			...(await readInstructions(config.home)),
@@ -241,8 +240,8 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const background = [
 		runCompactor({ harness: mochi.harness, complete: fastCompletion(models, config.modelSetup.memory), log, notify: (text, context) => notifyOwner(mochi.harness, mochi.line, text, context), now: Date.now }, running),
 		...mcpRunning,
-		// A terminal-only daemon (chat, print) serves one script; schedules wait for the real daemon.
-		...(channelSet === "terminal" ? [] : [schedulesComponent(mochi, config, running)]),
+		// A terminal-only daemon (chat, print) serves one script; webhooks wait for the real daemon.
+		...(channelSet === "terminal" || config.file.webhooks === undefined ? [] : [webhooksComponent(mochi, config.file.webhooks, running)]),
 	];
 	// Channels stop after the harness, so no Turn sends on a closed channel.
 	const channelsRunning = new AbortController();
@@ -297,7 +296,7 @@ function socketPath(homeDir: string): string {
 	return join(tmpdir(), `mochi-${createHash("sha256").update(homeDir).digest("hex").slice(0, 16)}.sock`);
 }
 
-/** The outside services mochi calls. Models and the web need a key; without a classifier, classify steps fail. */
+/** The outside services mochi calls. Models and the web need a key; without a classifier, classify and gates fail. */
 function services(config: Pick<Config, "modelSetup" | "web" | "home" | "mcp" | "file">): readonly (readonly [string, Setup<void>])[] {
 	const missing = config.modelSetup.missing;
 	const unknown = unknownKeys(config.file);

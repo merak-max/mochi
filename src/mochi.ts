@@ -21,8 +21,8 @@ import { addContextReaders, agentStopTool, type Definitions, definitionsSection 
 import { connectServer, type McpConnection } from "./mcp/servers.ts";
 import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
-import { defineSchedule, notifyTool, RUN_DEADLINE_MS, scanSchedules, type ScheduleTask, scheduleFns } from "./schedule/schedule.ts";
-import { migrateSchedulers } from "./schedule/migrate.ts";
+import { boardFns, type BoardTasks, defineBoard } from "./board/board.ts";
+import { migrateBoard } from "./board/migrate.ts";
 import { migrateKeptLines } from "./memory/migrate.ts";
 import { defaultSelection, type LiveTools, type McpTools, rootSelection, SEATS, seatExtensions } from "./seats.ts";
 import { homeTools } from "./tools/home-tools.ts";
@@ -34,7 +34,7 @@ import type { MediaDeps } from "./media/client.ts";
 import { mediaFns } from "./media/media.ts";
 import { gifFns } from "./media/gif.ts";
 import { messageTool } from "./channels/message-tool.ts";
-import { PROC_POLL_MS, procFns } from "./procs/procs.ts";
+import { defineProcWatch, procFns } from "./procs/procs.ts";
 import { commandTask, runCommand } from "./turn/commands.ts";
 import { fastCompletion, handoffTool } from "./turn/lifecycle.ts";
 import type { Classify } from "./brain/classifier.ts";
@@ -71,8 +71,9 @@ interface MochiOptions {
 	readonly workDir: string;
 	readonly channels: Channels;
 	readonly timeZone: string;
-	readonly publicUrl: string | undefined;
-	/** `daemon` runs schedules; `local` (a terminal with no daemon) leaves them waiting for one. Both run Turns. */
+	/** The public URL webhook items answer on; absent, board_add refuses webhook items. */
+	readonly webhookUrl: string | undefined;
+	/** `daemon` runs the board's tasks; `local` (a terminal with no daemon) leaves them waiting for one. Both run Turns. */
 	readonly scheduling: "daemon" | "local";
 	readonly log: Log;
 	/** The owner's facts (`<home>/instructions.md`), after root's definition in root's instructions. */
@@ -84,7 +85,7 @@ export interface Mochi {
 	readonly harness: Harness;
 	readonly classify: Classify;
 	readonly line: Line;
-	readonly schedule: ScheduleTask;
+	readonly board: BoardTasks;
 	readonly catalog: Definitions;
 	/** One connection per configured MCP server; the daemon runs each. */
 	readonly mcp: readonly McpConnection[];
@@ -100,12 +101,10 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		if (line === undefined) throw new Error("The line is bound before resume.");
 		return line;
 	};
-	const modelTools: ToolRegistration[] = [
-		notifyTool({ line: lineOf, channels: [...options.channels.keys()], classify: options.classify, log, users }),
-		handoffTool(),
-	];
+	const modelTools: ToolRegistration[] = [handoffTool()];
 	const procDir = join(options.workDir, ".procs");
-	const schedule = defineSchedule({ timeZone: options.timeZone, deadlineMs: RUN_DEADLINE_MS, pollMs: PROC_POLL_MS, procDir, log, harness: () => harness, line: lineOf, catalog: options.definitions, classify: options.classify, workDir: options.workDir });
+	const board = defineBoard({ line: lineOf, definitions: options.definitions, classify: options.classify, timeZone: options.timeZone, workDir: options.workDir, log });
+	const procWatch = defineProcWatch(procDir, lineOf);
 	const forkTask = defineForkTask(options.workDir);
 	let seat: ReturnType<typeof seatExtensions> | undefined;
 	let live: LiveTools = { home: [], mcp: [] };
@@ -127,17 +126,17 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		...thinkFns({ models: options.models, ref: options.definitions.model, classify: options.classify }),
 		...contextFns(options.workDir),
 		...forkFns({ task: forkTask, scratchDir: (name) => join(options.workDir, "forks", name), definitions: options.definitions }),
-		...scheduleFns({ task: schedule, catalog: options.definitions, schedules: (context) => harness.commit(scanSchedules, context), abortTask: (id, context) => harness.abortTask(id, context), publicUrl: options.publicUrl, timeZone: options.timeZone, now: Date.now, users }),
-		...procFns({ task: schedule, catalog: options.definitions, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
+		...boardFns({ tasks: board, line: lineOf, definitions: options.definitions, abortTask: (id, context) => harness.abortTask(id, context), webhookUrl: options.webhookUrl }),
+		...procFns({ task: procWatch, dir: procDir, workDir: options.workDir, abortTask: (id, context) => harness.abortTask(id, context) }),
 		agentStopTool(options.definitions, () => harness),
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, options.toolsDir, options.memoryDir),
 		memoryExtension(),
 		skillsExtension(options.skillDirs),
-		defineExtension({ name: "agents", tasks: [forkTask] }),
-		// Daemon only, so a terminal without a daemon leaves schedules waiting for one.
-		...(options.scheduling === "daemon" ? [defineExtension({ name: "schedules", tasks: [schedule] })] : []),
+		defineExtension({ name: "agents", tasks: [forkTask, procWatch] }),
+		// Daemon only, so a terminal without a daemon leaves the board's tasks waiting for one.
+		...(options.scheduling === "daemon" ? [defineExtension({ name: "board", tasks: [board.clock, board.fire] })] : []),
 	]) {
 		registry.install(extension);
 	}
@@ -200,7 +199,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	});
 	registry.install(defineExtension({ name: "commands", tasks: [commands] }));
 	if (options.scheduling === "daemon") {
-		await migrateSchedulers(harness, schedule, options.definitions, log, context);
+		await migrateBoard(harness, board, lineId, options.definitions, log, context);
 		await migrateKeptLines(harness, options.memoryDir, (await options.definitions.all()).map((definition) => definition.name), log, context);
 	}
 	line = {
@@ -217,7 +216,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	};
 	await harness.commit(selectView, context);
 	await harness.commit(addContextReaders, context);
-	return { harness, classify: options.classify, line, schedule, catalog: options.definitions, mcp };
+	return { harness, classify: options.classify, line, board, catalog: options.definitions, mcp };
 }
 
 function webTools(options: MochiOptions): ToolRegistration[] {

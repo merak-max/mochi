@@ -14,7 +14,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { ChannelId } from "../channels/types.ts";
 import { allPages } from "../pages.ts";
-import { live as liveSchedule, plan, scanSchedules } from "../schedule/schedule.ts";
+import { boardItems, nextOf } from "../board/board.ts";
 import { keyedReset, threadHandoff, type FastCompletion } from "./lifecycle.ts";
 
 type Command = "new" | "stop" | "status";
@@ -66,26 +66,21 @@ function relativeTime(at: number, now: number): string {
 
 async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "timeZone" | "channels">, context: Context): Promise<string> {
 	const now = deps.now();
-	const [live, view, usage, schedules] = await Promise.all([
+	const [live, view, usage, items] = await Promise.all([
 		deps.harness.snapshot(LiveDoc, deps.root.id, context),
 		deps.root.context(context),
 		deps.harness.usage(context),
-		deps.harness.commit(scanSchedules, context),
+		boardItems(deps.harness, context),
 	]);
 	const assistant = view.messages.findLast((message): message is AssistantMessage => message.role === "assistant");
 	const tokens = assistant === undefined ? 0 : assistant.usage.input + assistant.usage.cacheRead + assistant.usage.cacheWrite;
 	const reset = (await allPages((cursor) => deps.root.entries({}, 256, cursor, context))).find((entry) => entry.kind === ResetEntry.kind);
 	const resetAt = reset?.data !== null && typeof reset?.data === "object" && "at" in reset.data && typeof reset.data.at === "number" ? reset.data.at : reset?.model?.[0]?.timestamp;
-	const active = schedules.filter(liveSchedule);
-	const slots = active.flatMap((task) => {
-		if (task.state.status === "terminal" || task.state.status === "completing") return [];
-		const checkpoint = task.state.checkpoint;
-		if (checkpoint.phase === "watch") return [];
-		if (checkpoint.phase !== "wait") return [checkpoint.slot];
-		const next = plan(task.input.schedule, checkpoint.last, now);
-		return next.kind === "fire" || next.kind === "miss" ? [next.slot] : [];
+	const slots = items.flatMap((item) => {
+		const next = nextOf(item, now);
+		return next === undefined ? [] : [Date.parse(next)];
 	});
-	const next = slots.length === 0 ? "no timed slot" : `next ${relativeTime(Math.min(...slots), now)}`;
+	const next = slots.length === 0 ? "no timed item" : `next ${relativeTime(Math.min(...slots), now)}`;
 	const day = (at: number) => new Intl.DateTimeFormat("en-CA", { timeZone: deps.timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(at));
 	const entries = await deps.harness.commit(async (tx) => {
 		const conversations = await allPages((cursor) => tx.scanConversations({}, 256, cursor));
@@ -100,7 +95,7 @@ async function statusText(deps: Pick<CommandDeps, "harness" | "root" | "now" | "
 	return [
 		`${activity}. thread about ${Math.round(tokens).toLocaleString("en-US")} tokens.`,
 		`reset ${resetAt === undefined ? "not yet" : relativeTime(resetAt, now)}. today about ${Math.max(0, total - older).toLocaleString("en-US")} tokens.`,
-		`${active.length} live schedules, ${next}.`,
+		`${items.length} board items, ${next}.`,
 		`channels ${deps.channels.length === 0 ? "none" : deps.channels.map(plain).sort().join(", ")}.`,
 	].join("\n");
 }

@@ -134,7 +134,8 @@ function definition(id: string, config: ProviderConfig, provider: string, url: s
 	const base = known ?? plain(id, wire);
 	const compat =
 		wire === "anthropic-messages"
-			? ({ ...(base.compat as AnthropicMessagesCompat | undefined), supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } satisfies AnthropicMessagesCompat)
+			? // A tool_removal block is refused as an unknown tool, so tool changes go out as the whole current list.
+				({ ...(base.compat as AnthropicMessagesCompat | undefined), supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: false } satisfies AnthropicMessagesCompat)
 			: wire === "openai-responses"
 				? ({ ...(base.compat as OpenAIResponsesCompat | undefined), supportsMidConvoSystemMessages: true } satisfies OpenAIResponsesCompat)
 				: base.compat;

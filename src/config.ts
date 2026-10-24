@@ -30,7 +30,7 @@ export type McpServerConfig = {
 	readonly auth: { readonly kind: "oauth" } | { readonly kind: "bearer"; readonly tokenEnv: string; readonly token: string | undefined };
 };
 
-/** `<home>/config.toml`. `[[triggers]]` is read as schedule seeds; the key keeps its old name so configs load unchanged. */
+/** `<home>/config.toml`. */
 const FileSchema = Type.Object(
 	{
 		timeZone: Type.Optional(Type.String({ minLength: 1 })),
@@ -44,6 +44,8 @@ const FileSchema = Type.Object(
 		/** Image, video and speech providers; see config.example.toml. */
 		media: Type.Optional(MediaConfigSchema),
 		users: Type.Optional(Type.Array(ChatUserSchema)),
+		/** The board's webhook server: where it listens, and the public URL that reaches it. Absent: no webhook items. */
+		webhooks: Type.Optional(Type.Object({ host: Type.String({ minLength: 1 }), port: Type.Integer({ minimum: 1, maximum: 65535 }), url: Type.String({ pattern: "^https?://" }) }, { additionalProperties: false })),
 	},
 	{ additionalProperties: true },
 );
@@ -51,9 +53,11 @@ type FileConfig = Static<typeof FileSchema>;
 
 /** Top-level keys mochi does not read, such as ones a newer or older version used. Boot names them; they do not stop it. */
 export function unknownKeys(file: Readonly<Record<string, unknown>>): string[] {
-	const known = new Set([...Object.keys(FileSchema.properties), "triggers"]);
+	const known = new Set(Object.keys(FileSchema.properties));
 	return Object.keys(file).filter((key) => !known.has(key));
 }
+
+export type WebhooksConfig = { readonly host: string; readonly port: number; readonly url: string };
 
 export type WebConfig = { readonly url: string; readonly keyEnv: string; readonly key: string | undefined; readonly browserProfile?: string };
 

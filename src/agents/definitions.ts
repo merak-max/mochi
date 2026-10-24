@@ -19,7 +19,7 @@ export interface Definition {
 	readonly instructions: string;
 	readonly model?: string;
 	readonly thinking?: Thinking;
-	/** The only tools its conversations may use; absent: its seat's tools. `codemode`, `notify` and the context readers stay, so a list names script functions. */
+	/** The only tools its conversations may use; absent: its seat's tools. `codemode`, `handoff` and the context readers stay, so a list names script functions. */
 	readonly tools?: readonly string[];
 	readonly resident: boolean;
 }
@@ -109,7 +109,7 @@ export function agentOf(definition: Definition, definitions: Definitions, header
 	return {
 		definition: definition.name,
 		agent: { model: definitions.model(definition.model ?? "default"), ...(definition.thinking === undefined ? {} : { thinkingLevel: definition.thinking }) },
-		tools: definition.tools === undefined ? undefined : ["codemode", "notify", "handoff", "context_read", "context_list", ...definition.tools],
+		tools: definition.tools === undefined ? undefined : ["codemode", "handoff", "context_read", "context_list", ...definition.tools],
 		instructions: [header, definition.instructions].filter((part) => part !== "").join("\n\n"),
 	};
 }
@@ -177,8 +177,8 @@ export async function addContextReaders(tx: Tx): Promise<void> {
 
 const RESIDENT_HEADER = (name: string) =>
 	`You are the ${name} agent, a standing teammate of mochi. Each message here starts with [from <sender>]: root (mochi) or another agent, never the owner. ` +
-	"Answer the sender. Hand a teammate a job with tools.agent({ jobs: [{ name, brief, definition }] }) when you need what they know. Use notify only when the owner must see something now. " +
-	"Anything that must happen later is a tools.schedule_add: {at} once, {cron} repeating. Never use systemd-run, crontab, at or nohup: root cannot see or stop those.";
+	"Answer the sender. Hand a teammate a job with tools.agent({ jobs: [{ name, brief, definition }] }) when you need what they know. Your final text goes back to the sender, never to the owner. " +
+	"Anything owed later is a tools.board_add item: {at} once, {cron} repeating. Never use systemd-run, crontab, at or nohup: root cannot see or stop those.";
 
 /** The standing conversation of a resident definition, created the first time, with its agent written again. */
 export async function residentConversation(tx: Tx, definition: Definition, definitions: Definitions): Promise<ConversationId> {
@@ -196,7 +196,7 @@ export function agentStopTool(definitions: Definitions, host: () => StopHost): T
 		name: "agent_stop",
 		description:
 			"Stop a resident agent now: abort its running turn, its queued jobs, and the forks and agents it started. Use it when the owner says stop or a brief is wrong. " +
-			"It does not stop shell processes or schedules the agent made: check proc_status, schedule_list and `systemctl --user list-timers` after it. Resolves to what it stopped.",
+			"It does not stop shell processes or schedules the agent made: check proc_status, board_list and `systemctl --user list-timers` after it. Resolves to what it stopped.",
 		parameters: Type.Object({ name: Type.String() }),
 		structuredOutputSchema: Type.String(),
 		replay: "safe",

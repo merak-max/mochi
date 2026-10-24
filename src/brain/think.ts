@@ -66,7 +66,7 @@ export function thinkFns(deps: { readonly models: Models; readonly ref: (name: s
 		}),
 		defineTool({
 			name: "classify",
-			description: "Typed bool, choice or score questions about a JSON object, answered by the classifier model with probabilities. Gate pattern: classify({state:{payload}, questions:{need:{type:'bool', instructions:'Does this need the owner?', criteria:{true:'...', false:'...'}}}}), then act only when answers.need.probability is above your threshold. A trigger can do the same before its model with a classify step.",
+			description: "Typed bool, choice or score questions about a JSON object, answered by the classifier model with probabilities. Gate pattern: classify({state:{payload}, questions:{need:{type:'bool', instructions:'Does this need the owner?', criteria:{true:'...', false:'...'}}}}), then act only when answers.need.probability is above your threshold. A board item can gate its owner's answer the same way with gate.",
 			parameters: Type.Object({
 				state: Type.Record(Type.String(), Type.Unknown()),
 				questions: Type.Record(Type.String({ pattern: "^[a-z0-9_]+$" }), Question, { minProperties: 1, maxProperties: 8 }),

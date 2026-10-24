@@ -19,24 +19,20 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
  * A seat is how far a conversation is trusted, stored in its agent and written only here.
  *   agent    root, every fork of it and every agent definition. A fork has its parent's tools and prompt, so it reuses its
  *            parent's prompt cache, and forks can fork at any depth.
- *   trigger  a schedule run. It reads outside data (webhook bodies, mail), so it cannot write notes, fork, add
- *            schedules or start agents. It reaches the owner only with notify.
  *   peer     the line, which holds delivery tasks. It works with the owner's MCP servers and answers; nothing else.
  *   user     a user's iMessage thread. Its reply goes to the user; it has no owner notes and reaches no owner channel.
  */
-export const SEATS = ["agent", "trigger", "peer", "user"] as const;
+export const SEATS = ["agent", "peer", "user"] as const;
 export type Seat = (typeof SEATS)[number];
 
 const ALL = SEATS;
 const AGENT: readonly Seat[] = ["agent"];
-const AGENT_TRIGGER: readonly Seat[] = ["agent", "trigger"];
 /** A user's thread never reaches the owner's MCP servers: their approvals are accepted without asking. */
-const MCP_SEATS: readonly Seat[] = ["agent", "trigger", "peer"];
+const MCP_SEATS: readonly Seat[] = ["agent", "peer"];
 
 /** The tools the model calls directly, and the seats that get each. Their `control` (handoff, terminate) works only on a model-issued call. */
 const SURFACE: Readonly<Record<string, readonly Seat[]>> = {
 	codemode: ALL,
-	notify: AGENT_TRIGGER,
 	handoff: ["agent", "user"],
 };
 
@@ -58,9 +54,9 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	context_put: { seats: ALL, inline: true },
 	context_list: { seats: ALL, inline: false },
 	agent: { seats: AGENT, inline: true },
-	schedule_add: { seats: AGENT, inline: true },
-	schedule_list: { seats: AGENT_TRIGGER, inline: true },
-	schedule_remove: { seats: AGENT_TRIGGER, inline: false },
+	board_add: { seats: AGENT, inline: true },
+	board_list: { seats: AGENT, inline: true },
+	board_done: { seats: AGENT, inline: true },
 	web_map: { seats: ALL, inline: false },
 	web_find_tools: { seats: ALL, inline: false },
 	web_alexandria: { seats: ALL, inline: false },
@@ -74,10 +70,10 @@ const LIBRARY: Readonly<Record<string, { readonly seats: readonly Seat[]; readon
 	gif_save: { seats: ALL, inline: false },
 	transcribe: { seats: ALL, inline: false },
 	message: { seats: AGENT, inline: false },
-	proc_start: { seats: AGENT_TRIGGER, inline: false },
-	proc_status: { seats: AGENT_TRIGGER, inline: false },
-	proc_logs: { seats: AGENT_TRIGGER, inline: false },
-	proc_stop: { seats: AGENT_TRIGGER, inline: false },
+	proc_start: { seats: AGENT, inline: false },
+	proc_status: { seats: AGENT, inline: false },
+	proc_logs: { seats: AGENT, inline: false },
+	proc_stop: { seats: AGENT, inline: false },
 	agent_stop: { seats: AGENT, inline: false },
 	tools_reload: { seats: AGENT, inline: false },
 };
@@ -138,8 +134,7 @@ export function seatExtensions(modelTools: readonly ToolRegistration[], library:
 		const codemode = codemodeFor(servers);
 		const tool = codemode.tools![0]!;
 		const codemodeTool: ToolRegistration = { ...tool, execute: (args, api, context) => tool.execute({ code: withDeadline((args as { code: string }).code) }, api, context) };
-		// handoff's `control` works only on a model-issued call, so scripts do not see it. notify sends from a script too;
-		// only its early end of the run is lost there, and schedule runs have alerted the owner from scripts.
+		// handoff's `control` works only on a model-issued call, so scripts do not see it.
 		const direct = modelTools.filter((each) => SURFACE[each.name]!.includes(seat)).map((each): ToolRegistration => (each.name === "handoff" ? { ...each, callers: ["model"] } : each));
 		const scripted: ToolRegistration[] = [];
 		for (const each of library) {

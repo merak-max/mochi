@@ -5,11 +5,12 @@ import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
 import { type Static, Type } from "@earendil-works/pi-ai";
-import { defineTool, type TaskId, type ToolExecutionApi, type ToolRegistration } from "@earendil-works/pi-durable";
+import { awaitWithContext } from "@earendil-works/chord/context";
+import { type ConversationId, defineTask, defineTool, type NextTaskState, ROOT_CONVERSATION_ID, type TaskId, type TaskRecord, type ToolExecutionApi, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
+import { holdText } from "../context.ts";
+import { allPages } from "../pages.ts";
 import { parseWith } from "../parse.ts";
-import { addSchedule, live, scanSchedules, type ScheduleTask } from "../schedule/schedule.ts";
-import { ProcName } from "../schedule/types.ts";
-import type { Definitions } from "../agents/definitions.ts";
+import { LastInboundDoc, type Line, openTurn } from "../turn/turn.ts";
 
 export const PROC_POLL_MS = 1000;
 const TAIL_BYTES = 256 * 1024;
@@ -20,7 +21,8 @@ sh -c "$1"
 code=$?
 printf '%s\\n' "$code" > "$2.tmp" && mv "$2.tmp" "$2"`;
 
-const Name = ProcName;
+const Name = Type.String({ pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 40 });
+const WAKE_LINES = 30;
 
 const MetaSchema = Type.Object({
 	name: Type.String(),
@@ -127,6 +129,91 @@ async function startProcess(files: ProcFiles, command: string, cwd: string): Pro
 	return child.pid;
 }
 
+
+type WatchInput = { readonly name: string; readonly pid: number; readonly command: string; readonly watch?: string };
+/** `matched`: the watch regex already woke the conversation once. */
+type WatchState = { readonly phase: "watch"; readonly matched: boolean };
+export type WatchTask = ReturnType<typeof defineProcWatch>;
+type WatchRecord = TaskRecord<WatchInput, WatchState, null>;
+
+/** A wake's text and destination, fixed on first run so a replay submits the same content to the same place. */
+type WakeMemo = { readonly body: string; readonly channel: string | null };
+
+/**
+ * Follows one background process for the conversation that started it. It wakes that conversation once when a log
+ * line first matches `watch`, and again when the process ends, with the log tail. Root wakes through a chat Turn, so
+ * its answer reaches the owner.
+ */
+export function defineProcWatch(dir: string, line: () => Line) {
+	const ended: NextTaskState<WatchState, null> = { status: "terminal", outcome: { status: "completed", result: null } };
+	return defineTask<WatchInput, WatchState, null>({
+		name: "mochi.proc-watch",
+		version: 1,
+		initial: () => ({ phase: "watch", matched: false }),
+		phases: {
+			watch: async (task, runtime, context) => {
+				const { name, pid, command, watch } = task.input;
+				const files = filesOf(dir, name);
+				const wake = async (key: string, tag: string, next: NextTaskState<WatchState, null>): Promise<void> => {
+					let frozen = await runtime.memo<WakeMemo>(`wake:${key}`, context);
+					if (frozen === undefined) {
+						const lines = await tailLines(files.log, WAKE_LINES);
+						const output = lines.length === 0 ? "(no output)" : lines.join("\n");
+						const last = runtime.conversationId === ROOT_CONVERSATION_ID ? (await runtime.snapshot(LastInboundDoc, context))?.last : undefined;
+						frozen = await runtime.memo<WakeMemo>(`wake:${key}`, { body: `Output of process ${name} (${command}), last lines:\n${output}`, channel: last?.channel ?? null }, context);
+					}
+					const requestId = `proc:${task.id}:${key}`;
+					if (frozen.channel !== null) {
+						const channel = frozen.channel as Parameters<typeof openTurn>[2]["channel"];
+						await runtime.commit(async (tx) => {
+							await openTurn(tx, line(), { source: "chat", channel, key: requestId, tag, text: frozen.body, files: [], followUp: true });
+							return next;
+						}, context);
+						return;
+					}
+					const conversation = (await runtime.conversation(runtime.conversationId, context))!;
+					const host = { commit: (change: (tx: Tx) => Promise<void>, context: Context) => runtime.commit(async (tx) => void (await change(tx)), context) };
+					const held = await holdText(host, line().workDir, conversation.id, `in:${requestId}`, frozen.body, context);
+					await conversation.submit({ type: "input", content: `${tag}\n${held}`, requestId, whenBusy: "followUp" }, context);
+					await runtime.commit(() => next, context);
+				};
+				const pattern = watch === undefined || task.state.checkpoint.matched ? undefined : new RegExp(watch);
+				let offset = 0;
+				let partial = "";
+				for (;;) {
+					const status = await procStatus(files, pid);
+					const over = status.state !== "running";
+					if (pattern !== undefined) {
+						const appended = await readFrom(files.log, offset);
+						offset += appended.length;
+						const lines = (partial + appended.toString("utf8")).split("\n");
+						partial = over ? "" : lines.pop()!;
+						if (lines.some((each) => pattern.test(each))) {
+							return wake("watch", `[process ${name} matched /${watch}/, ${over ? "now ended" : "still running"}]`, { status: "running", checkpoint: { phase: "watch", matched: true } });
+						}
+					}
+					if (over) {
+						const code = status.state === "exited" ? status.code : null;
+						return wake("exit", code === null ? `[process ${name} ended, exit code unknown]` : `[process ${name} exited code=${code}]`, ended);
+					}
+					await awaitWithContext(new Promise<void>((resolve) => runtime.setTimer(resolve, PROC_POLL_MS)), context);
+				}
+			},
+		},
+		abort: async (task, runtime, context) => {
+			await stopGroup(task.input.pid, filesOf(dir, task.input.name));
+			await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context);
+		},
+	});
+}
+
+const liveWatch = (task: WatchRecord): boolean => task.state.status !== "terminal" && !task.abortRequested;
+
+export async function scanWatches(tx: Pick<Tx, "scanTasks">, conversationId?: ConversationId): Promise<WatchRecord[]> {
+	const query = { kind: "mochi.proc-watch", ...(conversationId === undefined ? {} : { conversationId }) };
+	return ((await allPages((cursor) => tx.scanTasks(query, 256, cursor))) as unknown as WatchRecord[]).filter(liveWatch);
+}
+
 function checkPattern(watch: string): void {
 	try {
 		new RegExp(watch);
@@ -136,8 +223,7 @@ function checkPattern(watch: string): void {
 }
 
 interface ProcFnDeps {
-	readonly task: ScheduleTask;
-	readonly catalog: Definitions;
+	readonly task: WatchTask;
 	readonly dir: string;
 	readonly workDir: string;
 	readonly abortTask: (id: TaskId, context: Context) => Promise<unknown>;
@@ -156,7 +242,7 @@ const StatusRow = Type.Object({
 export function procFns(deps: ProcFnDeps): ToolRegistration[] {
 	const liveWatchers = (api: ToolExecutionApi, name: string, context: Context): Promise<TaskId[]> =>
 		api.commit(async (tx) => {
-			const watching = (await scanSchedules(tx)).filter((task) => live(task) && "process" in task.input.schedule.when && task.input.schedule.when.process.name === name);
+			const watching = (await scanWatches(tx)).filter((task) => task.input.name === name);
 			return watching.map((task) => task.id);
 		}, context);
 
@@ -164,7 +250,7 @@ export function procFns(deps: ProcFnDeps): ToolRegistration[] {
 		defineTool({
 			name: "proc_start",
 			description:
-				"Run a shell command in the background and return at once. Use it for any command that can take more than 30 seconds. This conversation wakes with the log tail when the command exits, and once when a line first matches the watch regex: proc_start adds a process schedule, proc-<name>, that schedule_list shows.",
+				"Run a shell command in the background and return at once. Use it for any command that can take more than 30 seconds. This conversation wakes with the log tail when the command exits, and once when a line first matches the watch regex.",
 			parameters: Type.Object({ name: Name, command: Type.String({ minLength: 1 }), cwd: Type.Optional(Type.String()), watch: Type.Optional(Type.String({ minLength: 1 })) }),
 			structuredOutputSchema: Type.Object({ name: Type.String(), pid: Type.Number(), log: Type.String() }),
 			replay: "unsafe",
@@ -179,12 +265,8 @@ export function procFns(deps: ProcFnDeps): ToolRegistration[] {
 				const pid = await startProcess(files, command, directory);
 				const meta: Meta = { name, command, cwd: directory, pid, startedAt: new Date().toISOString(), ...(watch === undefined ? {} : { watch }) };
 				await writeFile(files.meta, `${JSON.stringify(meta)}\n`);
-				const process = { name, pid, ...(watch === undefined ? {} : { watch }) };
-				const schedule = { id: `proc-${name}`, when: { process }, prompt: `Output of process ${name} (${command}), last lines:` };
-				await api.commit(async (tx) => {
-					const existing = await scanSchedules(tx);
-					await addSchedule(tx, deps.task, { schedule, origin: "model" }, existing, deps.catalog, api.conversationId);
-				}, context);
+				const input: WatchInput = { name, pid, command, ...(watch === undefined ? {} : { watch }) };
+				await api.commit((tx) => tx.createTask(deps.task, input, { ownership: { kind: "conversation" }, conversationId: api.conversationId, background: true }), context);
 				return { structuredOutput: { name, pid, log: files.log } };
 			},
 		}),
