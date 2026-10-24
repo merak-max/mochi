@@ -1,7 +1,7 @@
 import { copyFile, readFile, realpath, mkdir, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir } from "node:os";
-import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { lookup } from "mime-types";
 import type { Bubble } from "../channels/types.ts";

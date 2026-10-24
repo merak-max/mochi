@@ -56,13 +56,6 @@ export function blocks(text: string): string[] {
 	return groups(Lexer.lex(text));
 }
 
-/** The bubbles of a partial answer that a later bubble has closed; the last one may still grow. */
-export function closedBlocks(text: string): string[] {
-	const all = blocks(text);
-	all.pop();
-	return all;
-}
-
 export function present(text: string, profile: ChannelProfile): readonly Bubble[] {
 	const body = text.replace(TRUE_BLANKS, "").trim();
 	if (body === "") return [];

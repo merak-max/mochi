@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
-import { AgentDoc, configure, defineTask, type PromptSection, section, LiveDoc, type SubmissionId, type ConversationId, type DocumentReader, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
+import { AgentDoc, configure, defineTask, type PromptSection, section, LiveDoc, type SubmissionId, type ConversationId, defineDocFamily, defineTool, type Harness, type ModelRef, type Submission, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { holdText } from "../context.ts";
 import { abortTargets } from "../turn/commands.ts";
 import { journaled } from "../journal.ts";
@@ -126,13 +126,7 @@ const ProfileOfDoc = defineDocFamily<{ profile: string | null }, null>({
 /** Whose a conversation is: a profile's name, or root. */
 export type Owner = { readonly profile: string } | "root";
 
-/** The owner of a conversation, through a committed reader or a transaction. */
-export async function ownerOf(read: Pick<DocumentReader, "snapshot">, conversation: ConversationId, context: Context): Promise<Owner> {
-	const profile = (await read.snapshot(ProfileOfDoc, String(conversation), context))?.profile;
-	return profile == null ? "root" : { profile };
-}
-
-export async function ownerIn(tx: Tx, conversation: ConversationId): Promise<Owner> {
+async function ownerIn(tx: Tx, conversation: ConversationId): Promise<Owner> {
 	const { profile } = await tx.doc(ProfileOfDoc, String(conversation), null);
 	return profile === null ? "root" : { profile };
 }

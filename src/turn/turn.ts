@@ -189,10 +189,6 @@ function userInstructions(user: ChatUser): string {
 	return lines.join("\n\n");
 }
 
-export async function userConversation(harness: Pick<Harness, "snapshot">, handle: string, context: Context): Promise<ConversationId | null> {
-	return (await harness.snapshot(UserDoc, handle, context))?.conversation ?? null;
-}
-
 async function ensureUser(tx: Tx, user: ChatUser): Promise<ConversationId> {
 	const doc = await tx.doc(UserDoc, user.handle, null);
 	if (doc.conversation === null) doc.conversation = await createSeatConversation(tx, "user", { kind: "ownerless" }, { instructions: userInstructions(user) });
@@ -477,7 +473,7 @@ const tagOf = (channel: ChannelId, messageId: string, at: Date, timeZone: string
 // A chat message opens its Turn in the commit that finds no submission for its request key, then submits itself,
 // so arrival order is root's order. Resolves to the Turn that answers it; a tapback or a redelivery has none.
 export async function ingest(line: Line, inbound: Inbound, context: Context): Promise<TaskId | undefined> {
-	const { root, harness } = line;
+	const { harness } = line;
 	switch (inbound.kind) {
 		case "tapback": {
 			const user = userOf(line.users, inbound.person);

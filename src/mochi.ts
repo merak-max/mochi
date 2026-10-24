@@ -17,7 +17,7 @@ import { type FileIndexes, searchFns } from "./search/search.ts";
 import type { Log } from "./log.ts";
 import { contextFns, contextSection } from "./context.ts";
 import { defineForkTask, forkFns } from "./fork/fork.ts";
-import { addContextReaders, defineReply, ownerIn, ownerOf } from "./profiles/profiles.ts";
+import { addContextReaders, defineReply } from "./profiles/profiles.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
 import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";

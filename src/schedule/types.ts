@@ -62,48 +62,34 @@ export function describeWhen(when: When): string {
 	return `process ${when.process.name}${when.process.watch === undefined ? "" : ` /${when.process.watch}/`}`;
 }
 
-const GateSchema = Type.Object({ question: Type.String(), yes: Type.String(), no: Type.String(), threshold: Type.Optional(Type.Number()) });
-const LEGACY_FIELDS = {
+const ENTRY_FIELDS = {
 	id: Id,
 	prompt: Type.String({ minLength: 1 }),
 	steps: Type.Optional(Type.Array(StepSchema, { minItems: 1 })),
 	notify: Type.Optional(Type.Array(Type.String({ pattern: "^user[0-9]+$" }), { minItems: 1 })),
 	model: Type.Optional(Type.String({ minLength: 1 })),
 	profile: Type.Optional(Id),
-	role: Type.Optional(Id),
-	notifyWhen: Type.Optional(GateSchema),
-	admitWhen: Type.Optional(GateSchema),
 	thinking: Type.Optional(Thinking),
 	check: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })),
 };
 
 /**
- * The flat shape of a `[[triggers]]` entry in config.toml and of a stored `mochi.trigger` task: `kind` names the
- * when. `role`, `notifyWhen` and `admitWhen` are the names stored before profiles and steps.
+ * The flat shape of a `[[triggers]]` entry in config.toml and of a stored `mochi.trigger` task: `kind` names the when.
  */
 export const TriggerEntrySchema = Type.Union([
-	Type.Object({ kind: Type.Literal("cron"), ...LEGACY_FIELDS, cron: Type.String(), tz: Type.String() }),
-	Type.Object({ kind: Type.Literal("at"), ...LEGACY_FIELDS, at: Type.String() }),
-	Type.Object({ kind: Type.Literal("webhook"), ...LEGACY_FIELDS, auth: WebhookAuthSchema }),
+	Type.Object({ kind: Type.Literal("cron"), ...ENTRY_FIELDS, cron: Type.String(), tz: Type.String() }),
+	Type.Object({ kind: Type.Literal("at"), ...ENTRY_FIELDS, at: Type.String() }),
+	Type.Object({ kind: Type.Literal("webhook"), ...ENTRY_FIELDS, auth: WebhookAuthSchema }),
 ]);
 type TriggerEntry = Static<typeof TriggerEntrySchema>;
 
 export function scheduleOfEntry(entry: TriggerEntry): Schedule {
 	const when: When = entry.kind === "cron" ? { cron: entry.cron, tz: entry.tz } : entry.kind === "at" ? { at: entry.at } : { webhook: { auth: entry.auth } };
-	let steps = entry.steps;
-	if (steps === undefined && (entry.admitWhen !== undefined || entry.notifyWhen !== undefined)) {
-		const chain: Step[] = [];
-		if (entry.admitWhen !== undefined) chain.push({ classify: entry.admitWhen });
-		chain.push({ model: {} });
-		if (entry.notifyWhen !== undefined) chain.push({ classify: { ...entry.notifyWhen, on: "output" } });
-		steps = chain;
-	}
-	const profile = entry.profile ?? entry.role;
 	const schedule: Schedule = { id: entry.id, when, prompt: entry.prompt };
-	if (steps !== undefined) schedule.steps = steps;
+	if (entry.steps !== undefined) schedule.steps = entry.steps;
 	if (entry.notify !== undefined) schedule.notify = entry.notify;
 	if (entry.model !== undefined) schedule.model = entry.model;
-	if (profile !== undefined) schedule.profile = profile;
+	if (entry.profile !== undefined) schedule.profile = entry.profile;
 	if (entry.thinking !== undefined) schedule.thinking = entry.thinking;
 	if (entry.check !== undefined) schedule.check = entry.check;
 	return schedule;
