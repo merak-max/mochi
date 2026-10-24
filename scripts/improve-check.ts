@@ -31,7 +31,6 @@ const SIGNALS = {
 	script_timeout: "codemode scripts that hit their time limit.",
 	child_lost: "fork or agent children that were aborted or cancelled before they answered.",
 	validation_failed: "Tool calls rejected by argument validation.",
-	duplicate_reply: "The same teammate answer delivered twice to one conversation.",
 } as const;
 type Signal = keyof typeof SIGNALS;
 
@@ -47,7 +46,6 @@ const trunc = (text: string, size: number) => (text.length > size ? text.slice(0
 
 const db = new DatabaseSync(join(storeHome, "mochi.sqlite"), { readOnly: true });
 const transcripts = new Map<number, string[]>();
-const seenReplies = new Set<string>();
 
 for (const row of db.prepare("select id, conversation_id, record from entries order by id").iterate() as Iterable<{ id: number; conversation_id: number; record: string }>) {
 	const entry = JSON.parse(row.record);
@@ -59,15 +57,10 @@ for (const row of db.prepare("select id, conversation_id, record from entries or
 		if (typeof message.content === "string") {
 			const text = message.content;
 			if (message.role === "user") {
-				if (/^\[(imessage|whatsapp|cli) /.test(text)) {
+				if (/^\[(imessage|cli) /.test(text)) {
 					bump("owner_turns", where);
 					const body = text.split("\n").slice(1).join(" ").toLowerCase();
 					if (/\b(status|still|too slow|its been|it's been|why (wasnt|wasn't|isnt|isn't|didnt|didn't|not))\b/.test(body)) bump("owner_chase", where);
-				}
-				if (/^\[from [^\]]+\] re: /.test(text)) {
-					const key = row.conversation_id + "|" + text.replace(/^\[from [^\]]+\] re: [^\n]*\n/, "").slice(0, 500);
-					if (seenReplies.has(key)) bump("duplicate_reply", where);
-					seenReplies.add(key);
 				}
 				lines.push("#" + row.id + " [" + message.role + "] " + trunc(text, 2000));
 			}
@@ -77,7 +70,7 @@ for (const row of db.prepare("select id, conversation_id, record from entries or
 			if (part.type === "text") {
 				const text: string = part.text ?? "";
 				if (message.role === "toolResult") {
-					if (/NOT STARTED: |is busy; your message is queued/.test(text)) bump("busy_queued", where);
+					if (/NOT STARTED: /.test(text)) bump("busy_queued", where);
 					if (/Validation failed for tool/.test(text)) bump("validation_failed", where);
 					if (/Script error|Script failed/.test(text)) bump("script_failed", where);
 					if (/Script timed out|timed out after/i.test(text)) bump("script_timeout", where);

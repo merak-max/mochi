@@ -216,7 +216,7 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 				const withModel = model === undefined ? {} : { model };
 				let id;
 				if (job.fork === true) {
-					const input: ForkInput = { name: job.name, brief: briefOf(job.name, background, job.brief, scratch), depth, ...reply, ...withModel };
+					const input: ForkInput = { name: job.name, brief: briefOf(job.name, background, job.brief, scratch), depth, ...reply };
 					id = await journaled(tx, api.taskId, key, () => startFork(tx, task, api.conversationId, at, input));
 				} else {
 					const input: ForkInput = { name: job.name, brief: jobBriefOf(job.name, job.brief, keys, scratch), depth, ...reply, ...withModel };
@@ -235,7 +235,7 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 				"fork: true copies this conversation, so the child knows everything here and reuses the prompt cache; otherwise the child starts fresh with only its brief and the context keys you pass. " +
 				"definition names an agent definition: the fresh child runs with its model, thinking, tools and instructions. A resident definition keeps one standing conversation; the job goes there, and a busy one queues it and answers NOT STARTED. " +
 				"background: true returns the names at once, and each answer arrives later as a [name] note on your next turn. A foreground child outlives its script: if the script times out first, the child's answer still arrives as a [name] note. " +
-				"model: a name from [models] (brain, fast, or the owner's own); it overrides the definition's, and fast suits bulk reading.",
+				"model: a name from [models] (brain, fast, or the owner's own); it overrides a fresh child's definition, a fork takes none, and fast suits bulk reading.",
 			parameters: Type.Object({ jobs: Type.Array(Job, { minItems: 1 }), background: Type.Optional(Type.Boolean()) }),
 			structuredOutputSchema: Type.Array(Type.Object({ name: Type.String(), answer: Type.String() })),
 			replay: "safe",
@@ -244,6 +244,7 @@ export function forkFns(deps: ForkDeps): ToolRegistration[] {
 				for (const job of jobs) {
 					const definition = job.definition === undefined ? undefined : await definitions.get(job.definition);
 					if (definition !== undefined && job.fork === true) throw new Error(`Job ${job.name}: a fork is a copy of this conversation, so it takes no definition.`);
+					if (job.model !== undefined && job.fork === true) throw new Error(`Job ${job.name}: a fork runs on this conversation's model, so it takes no model.`);
 					if (definition?.resident === true && job.model !== undefined) throw new Error(`Job ${job.name}: ${definition.name} is resident and runs on its own model; drop model.`);
 					const modelName = job.model ?? definition?.model;
 					const model = modelName === undefined ? undefined : definitions.model(modelName);
