@@ -14,7 +14,6 @@ import { createWhatsAppChannel } from "./channels/whatsapp.ts";
 import type { Channel, Channels, ChatChannelId, Env, InboundSink } from "./channels/types.ts";
 import { type Config, unknownKeys, type ChatUser, loadConfig } from "./config.ts";
 import { type Home, resolveHome } from "./home.ts";
-import { SearchIndex } from "./index/fts.ts";
 import { FileIndexes } from "./search/search.ts";
 import { acquireLock } from "./lock.ts";
 import { log, setLogFile } from "./log.ts";
@@ -33,8 +32,8 @@ import { a2aComponent, a2aServerSetup } from "./a2a/server.ts";
 import { AUTH_COMMAND, authFile, loginApps, storedTokenConnector } from "./auth/apps.ts";
 import { connectApps } from "./apps/apps.ts";
 import { ingest } from "./turn/turn.ts";
-import { runFeed } from "./memory/feed.ts";
-import { watchCompaction } from "./memory/compact.ts";
+import { runCompactor } from "./memory/compactor.ts";
+import { notifyOwner } from "./triggers/trigger.ts";
 import { fastCompletion } from "./turn/lifecycle.ts";
 
 /** Only iMessage serves users; the other adapters stay owner-only. */
@@ -228,7 +227,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	const releaseLock = acquireLock(join(config.home.dir, "mochi.lock"));
 	const controller = new AbortController();
 	const running = withAbortSignal(controller.signal, BACKGROUND_CONTEXT);
-	const index = new SearchIndex(join(config.home.dir, "index.sqlite"));
 	const files = new FileIndexes();
 
 	const { channels, report: channelReport } = channelSet === "terminal" ? { channels: new Map() as Channels, report: [] } : configuredChannels(config.env, config.users);
@@ -251,7 +249,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 			web: config.web,
 			...(config.file.media === undefined ? {} : { media: { config: config.file.media, env: config.env, ...(config.file.providers === undefined ? {} : { providers: config.file.providers }) } }),
 			...(apps === undefined ? {} : { apps }),
-			index,
 			files,
 			skillDirs: [join(REPO, "skills"), config.home.skillsDir],
 			profiles,
@@ -268,7 +265,6 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 		BACKGROUND_CONTEXT,
 	);
 	mochi.harness.resume();
-	const stopCompaction = watchCompaction(mochi.harness, config.modelSetup.compactTokens, running, (error) => log("compaction.failed", { error: String(error) }));
 	const facts: DaemonFacts = {
 		startedAt: new Date(),
 		build: buildOf(),
@@ -281,7 +277,7 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	await listenAttach(socketPath(config.home.dir), { line: mochi.line, models, log, profiles, users: config.users, facts }, running);
 
 	const background = [
-		runFeed(mochi.harness, index, fastCompletion(models, config.modelSetup.fast), mochi.catalog, running, (error) => log("memory.failed", { error: String(error) })),
+		runCompactor({ harness: mochi.harness, fast: fastCompletion(models, config.modelSetup.fast), log, notify: (text, context) => notifyOwner(mochi.harness, mochi.line, text, context), now: Date.now }, running),
 		...(apps === undefined ? [] : [apps.run(running)]),
 		// A terminal-only daemon (chat, print) serves one script; triggers wait for the real daemon.
 		...(channelSet === "terminal" ? [] : [triggersComponent(mochi, config, running), a2aComponent(mochi, config, a2a, running)]),
@@ -299,13 +295,11 @@ async function startDaemon(config: Config, channelSet: "configured" | "terminal"
 	let stopped: Promise<void> | undefined;
 	const stop = async (reason: string): Promise<void> => {
 		log("mochi.stopping", { reason });
-		stopCompaction();
 		controller.abort();
 		await Promise.allSettled(background);
 		await mochi.harness.close(BACKGROUND_CONTEXT);
 		channelsRunning.abort();
 		await Promise.allSettled(inbound);
-		index.close();
 		files.close();
 		rmSync(socketPath(config.home.dir), { force: true });
 		releaseLock();

@@ -156,7 +156,7 @@ const INSTRUCTIONS =
 	"This conversation is an unattended trigger run, not a chat with the owner. Nobody reads your answers here. " +
 	"The only way to reach the owner is the notify tool; call it only when something needs the owner's attention, " +
 	"and otherwise finish with a short note of what you checked and what you already reported. Each run starts fresh " +
-	"from the last run's note; use recall for anything older. End a trigger that has served its purpose with tools.trigger_remove in code.";
+	"from the last run's note. End a trigger that has served its purpose with tools.trigger_remove in code.";
 
 async function lastRunNote(tx: Tx, conversationId: ConversationId): Promise<string> {
 	const recent = (await tx.scanEntries({ conversationId, order: "descending" }, 32)).items;
@@ -391,6 +391,13 @@ interface NotifyDeps {
 	readonly classify: Classify;
 	readonly log: Log;
 	readonly users: readonly ChatUser[];
+}
+
+/** A daemon message to the owner, verbatim, on the channel the owner last wrote on, as notify sends one. */
+export async function notifyOwner(harness: Harness, line: Line, text: string, context: Context): Promise<void> {
+	const last = (await harness.snapshot(LastInboundDoc, context))?.last?.channel;
+	const channel: ChannelId = last !== undefined && line.channels.has(last) ? last : ([...line.channels.keys()][0] ?? "cli");
+	await harness.commit((tx) => openTurn(tx, line, { source: "run", channel, text, from: { kind: "conversation", id: ROOT_CONVERSATION_ID } }), context);
 }
 
 export function notifyTool(deps: NotifyDeps): ToolRegistration {

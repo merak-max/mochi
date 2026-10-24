@@ -13,14 +13,13 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { codingTools } from "./media/read-image.ts";
 import type { Channels } from "./channels/types.ts";
 import { workEnv } from "./env/work-env.ts";
-import type { SearchIndex } from "./index/fts.ts";
 import { type FileIndexes, searchFns } from "./search/search.ts";
 import type { Log } from "./log.ts";
 import { contextFns, contextSection } from "./context.ts";
 import { defineForkTask, forkFns } from "./fork/fork.ts";
-import { addContextReaders, defineReply, ownerIn, ownerOf, sendToProfile } from "./profiles/profiles.ts";
+import { addContextReaders, defineReply, ownerIn, sendToProfile } from "./profiles/profiles.ts";
 import { type Apps, appsFns } from "./apps/apps.ts";
-import { historyTool, importOldNotes, MemoryLog, memoryExtension, noteTool, recallTool, windowExtension, zoomTool } from "./memory/memory.ts";
+import { memoryExtension, selectView, zoomTool } from "./memory/memory.ts";
 import { skillsExtension } from "./skills/skills.ts";
 import { defineTrigger, notifyTool, RUN_DEADLINE_MS, scanTriggers, type TriggerTask, triggerFns } from "./triggers/trigger.ts";
 import { defaultSelection, rootSelection, seatExtensions } from "./seats.ts";
@@ -56,7 +55,6 @@ interface MochiOptions {
 	readonly media?: Omit<MediaDeps, "workDir">;
 	/** The apps MCP server; absent, the apps functions say it is not connected. */
 	readonly apps?: Apps;
-	readonly index: SearchIndex;
 	/** fff file indexes for find and grep, one per root. */
 	readonly files: FileIndexes;
 	/** Skill directories, `<dir>/<name>/SKILL.md`: bundled first, then the owner's, which replace bundled ones by name. */
@@ -85,7 +83,7 @@ export interface Mochi {
 }
 
 export async function openMochi(options: MochiOptions, context: Context): Promise<Mochi> {
-	const { index, log, users, a2aPeers } = options;
+	const { log, users, a2aPeers } = options;
 	const registry = createRegistry();
 	const fast = fastCompletion(options.models, options.fast);
 	const media: Omit<MediaDeps, "workDir"> = options.media ?? { config: { images: { default: "", providers: [] } }, env: {} };
@@ -106,10 +104,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	const library: ToolRegistration[] = [
 		...(await codingTools()),
 		...searchFns(options.files),
-		noteTool(index, ownerIn),
-		zoomTool(ownerIn),
-		recallTool(index),
-		historyTool(index),
+		zoomTool(() => harness),
 		reactTool(options.channels),
 		sendTool(options.channels),
 		...webFns({ apiKey: options.web.key, keyEnv: options.web.keyEnv, ...(options.web.url === undefined ? {} : { baseUrl: options.web.url }), models: options.models, fast: options.fast }),
@@ -130,9 +125,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 	];
 	for (const extension of [
 		identityExtension([...options.channels.values()].map((channel) => channel.profile), users, [...a2aPeers.keys()]),
-		memoryExtension(ownerOf),
+		memoryExtension(),
 		skillsExtension(options.skillDirs),
-		windowExtension(),
 		defineExtension({ name: "agents", tasks: [forkTask, reply] }),
 		defineExtension({ name: "procs", tasks: [procWatch] }),
 		// Daemon only, so a terminal without a daemon leaves triggers and Turns waiting for one.
@@ -154,7 +148,7 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		{
 			models: options.models,
 			registry,
-			settings: { extensions: defaultSelection((name) => registry.snapshot().extension(name)), steeringMode: "all", followUpMode: "all" },
+			settings: { extensions: defaultSelection((name) => registry.snapshot().extension(name)), steeringMode: "all", followUpMode: "all", compaction: { enabled: false } },
 			env: ({ cwd }) => environment(cwd ?? options.workDir),
 			onReport: (error) => log("harness.report", { error: String(error) }),
 		},
@@ -194,9 +188,8 @@ export async function openMochi(options: MochiOptions, context: Context): Promis
 		users,
 		command: (input, context) => runCommand({ harness, lineId: () => lineId, task: commands }, input, context),
 	};
-	await harness.commit(importOldNotes, context);
+	await harness.commit(selectView, context);
 	await harness.commit(addContextReaders, context);
-	index.replaceMemory((await harness.snapshot(MemoryLog, context))?.lines ?? []);
 	return { harness, classify: options.classify, line, trigger, catalog: options.profiles };
 }
 

@@ -83,7 +83,7 @@ export async function keyedReset(root: Pick<Conversation, "submit">, key: string
 export function handoffTool() {
 	return defineTool({
 		name: "handoff",
-		description: "Start a fresh context from a note and continue. Older messages stay searchable.",
+		description: "Start a fresh context from a note and continue. The older messages leave the view.",
 		parameters: Type.Object({ note: Type.String({ minLength: 1 }) }),
 		replay: "safe",
 		execute: async ({ note }, api, context) => {

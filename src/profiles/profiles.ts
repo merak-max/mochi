@@ -9,7 +9,6 @@ import { abortTargets } from "../turn/commands.ts";
 import { journaled } from "../journal.ts";
 import { allPages } from "../pages.ts";
 import { createSeatConversation } from "../seats.ts";
-import type { Owner } from "../memory/memory.ts";
 import { answerText, submitNote } from "../turn/turn.ts";
 
 // A profile is a standing teammate inside this daemon: a name, a role (instructions), a model, a conversation that
@@ -124,7 +123,10 @@ const ProfileOfDoc = defineDocFamily<{ profile: string | null }, null>({
 	checkpointWhen: () => false,
 });
 
-/** The memory owner of a conversation, through a committed reader (prompt sections) or a transaction. */
+/** Whose a conversation is: a profile's name, or root. */
+export type Owner = { readonly profile: string } | "root";
+
+/** The owner of a conversation, through a committed reader or a transaction. */
 export async function ownerOf(read: Pick<DocumentReader, "snapshot">, conversation: ConversationId, context: Context): Promise<Owner> {
 	const profile = (await read.snapshot(ProfileOfDoc, String(conversation), context))?.profile;
 	return profile == null ? "root" : { profile };
@@ -135,7 +137,7 @@ export async function ownerIn(tx: Tx, conversation: ConversationId): Promise<Own
 	return profile === null ? "root" : { profile };
 }
 
-/** A fork works as its parent's profile, so its notes merge into the same memory log and its messages carry the same sender. */
+/** A fork works as its parent's profile, so its messages carry the same sender. */
 export async function inheritProfile(tx: Tx, parent: ConversationId, child: ConversationId): Promise<void> {
 	const { profile } = await tx.doc(ProfileOfDoc, String(parent), null);
 	if (profile !== null) (await tx.doc(ProfileOfDoc, String(child), null)).profile = profile;

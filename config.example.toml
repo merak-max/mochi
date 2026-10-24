@@ -27,9 +27,6 @@ keyEnv = "ANTHROPIC_API_KEY"
 brain = "anthropic/claude-opus-5-5"
 fast = "anthropic/claude-haiku-5-5"
 
-# Compact a conversation once a request sends more than this many tokens.
-compactTokens = 80000
-
 # The yes/no classifier for classify and classify steps, on a provider with api = "classifier".
 # With none set, OPENROUTER_API_KEY alone turns on its default classifier.
 # classifier = "classifier/typesafe/jev-1.13"

@@ -47,8 +47,6 @@ export const ModelsSchema = Type.Object(
 		fast: Type.Optional(Type.String({ minLength: 3 })),
 		/** The strongest model, for a profile that asks for `strongest`. Default: the brain. */
 		strongest: Type.Optional(Type.String({ minLength: 3 })),
-		/** Compact a conversation once a request sends more than this many tokens. Default 80000. */
-		compactTokens: Type.Optional(Type.Integer({ minimum: 20000 })),
 		/** The yes/no classifier for `classify` and classify steps, on a provider with api "classifier". */
 		classifier: Type.Optional(Type.String({ minLength: 3 })),
 		/** `sonnet = "anthropic/claude-sonnet-5-5"`: names a profile or a trigger may use. */
@@ -80,7 +78,6 @@ export interface ModelSetup {
 	readonly fast: ModelRef;
 	/** `[models] classifier`; absent, `classify` and classify steps fail with a clear error. */
 	readonly classifier?: ModelRef;
-	readonly compactTokens: number;
 	/** `brain` (or `default`), `fast`, `strongest`, an alias, or `provider/id`. */
 	ref(name: string): ModelRef;
 	/** One line per provider whose key is not set, for the setup report. */
@@ -244,5 +241,5 @@ export function createModelSetup(input: { readonly providers?: Record<string, Pr
 		}
 		return { provider, modelId: id };
 	};
-	return { models, brain: ref("brain"), fast: ref("fast"), ...(classifier === undefined ? {} : { classifier }), compactTokens: input.models?.compactTokens ?? 80_000, ref, missing };
+	return { models, brain: ref("brain"), fast: ref("fast"), ...(classifier === undefined ? {} : { classifier }), ref, missing };
 }
