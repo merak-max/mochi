@@ -1,16 +1,13 @@
-import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
-import { promisify } from "node:util";
 import { Type } from "@earendil-works/pi-ai";
 import type { ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
+import { heicToJpeg } from "./heic.ts";
 
-const execute = promisify(execFile);
-
-const FFMPEG_EXTENSIONS = new Set([".heic", ".heif", ".avif", ".tif", ".tiff"]);
+const HEIC_EXTENSIONS = new Set([".heic", ".heif"]);
 
 const ReadOutput = Type.Union([Type.String(), Type.Object({ type: Type.Literal("image"), data: Type.String(), mimeType: Type.String(), note: Type.String() })]);
 
@@ -32,15 +29,15 @@ async function createImageReadTool(): Promise<ToolRegistration> {
 		structuredOutputSchema: ReadOutput,
 		async execute(args, api, context) {
 			const { path } = args as { path: string };
-			if (!FFMPEG_EXTENSIONS.has(extname(path).toLowerCase()) || api.env === undefined) return withScriptOutput(await base.execute(args, api, context));
+			if (!HEIC_EXTENSIONS.has(extname(path).toLowerCase()) || api.env === undefined) return withScriptOutput(await base.execute(args, api, context));
 			const resolved = await api.env.absolutePath(path.startsWith("@") ? path.slice(1) : path, context);
 			if (!resolved.ok) throw new Error(`Cannot resolve ${path}`);
 			const dir = await mkdtemp(join(tmpdir(), "mochi-img-"));
 			try {
 				const jpeg = join(dir, "image.jpg");
-				await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", resolved.value, "-frames:v", "1", "-q:v", "2", "-y", jpeg], { timeout: 60_000 });
+				await writeFile(jpeg, await heicToJpeg(new Uint8Array(await readFile(resolved.value)), context.abortSignal));
 				const result = await base.execute({ ...(args as object), path: jpeg }, api, context);
-				const converted = { severity: "info" as const, message: `Converted ${path} to JPEG with ffmpeg.` };
+				const converted = { severity: "info" as const, message: `Converted ${path} to JPEG.` };
 				return withScriptOutput({ ...result, diagnostics: [...(result.diagnostics ?? []), converted] });
 			} finally {
 				await rm(dir, { recursive: true, force: true });
