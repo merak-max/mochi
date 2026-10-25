@@ -27,6 +27,12 @@ const VideoReply = Type.Object({
 	error: Type.Optional(Type.Union([Type.Null(), Type.Object({ message: Type.String() })])),
 });
 const TranscriptReply = Type.Object({ text: Type.String(), duration: Type.Optional(Type.Number()) });
+const ListenReply = Type.Object({
+	metadata: Type.Object({ duration: Type.Optional(Type.Number()) }),
+	results: Type.Object({
+		channels: Type.Array(Type.Object({ alternatives: Type.Array(Type.Object({ transcript: Type.String() }), { minItems: 1 }) }), { minItems: 1 }),
+	}),
+});
 /** The formats the OpenAI transcription API takes. */
 const TRANSCRIBABLE = /\.(flac|m4a|mp3|mp4|mpeg|mpga|oga|ogg|wav|webm)$/i;
 
@@ -179,6 +185,19 @@ export class MediaClient {
 	}
 
 	private async upload(absolute: string, path: string, signal?: AbortSignal): Promise<{ text: string; duration?: number }> {
+		const transcription = this.deps.config.transcription;
+		if (transcription !== undefined) {
+			const route = this.route(transcription);
+			const query = new URLSearchParams({ model: transcription.model, language: transcription.language, smart_format: "true" });
+			const response = await this.request(`${route.base}/listen?${query}`, {
+				method: "POST",
+				headers: { Authorization: `Token ${this.deps.env[transcription.keyEnv]}`, "content-type": mimeOf(path) },
+				body: new Uint8Array(await readFile(absolute)),
+			}, signal);
+			const reply = parseWith(ListenReply, await response.json(), "transcription response");
+			const text = reply.results.channels[0]!.alternatives[0]!.transcript;
+			return { text, ...(reply.metadata.duration === undefined ? {} : { duration: reply.metadata.duration }) };
+		}
 		const speech = this.speech();
 		const form = new FormData();
 		form.set("model", speech.stt);

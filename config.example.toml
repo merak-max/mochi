@@ -58,6 +58,15 @@ memory = "anthropic/claude-haiku-5-5"
 # tts = "gpt-4o-mini-tts"
 # stt = "gpt-4o-transcribe"
 # voice = "coral"
+#
+# Voice notes in can go to Deepgram's /listen API instead. language "multi" keeps
+# Hindi and English code-switching; "en" drops Hinglish to an empty transcript.
+# [media.transcription]
+# api = "deepgram-listen"
+# baseUrl = "https://api.deepgram.com/v1"
+# keyEnv = "DEEPGRAM_API_KEY"
+# model = "nova-3"
+# language = "multi"
 
 # Webhooks for board items. Without this section, board_add refuses webhook items. host and port
 # are where the server listens. url is the public base, so an item answers at <url>/hooks/<id>.

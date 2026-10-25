@@ -209,7 +209,7 @@ The other config keys are:
 - `timeZone`
 - `[mcp.<name>]`: `url`, and `auth = "oauth"`, or `auth = "bearer"` with `tokenEnv`
 - `[web]`: `keyEnv`, `url`, `browserProfile`
-- `[media]`: `images` (required in this section: `default` and a `providers` list), optional `video`, and optional `speech` through the OpenAI audio API on a named provider
+- `[media]`: `images` (required in this section: `default` and a `providers` list), optional `video`, and optional `speech` through the OpenAI audio API on a named provider, and optional `transcription` through Deepgram for voice notes in
 - `[[users]]`
 - `[webhooks]`: `host`, `port` and `url`, all required. Without this section, the board has no webhook items.
 
@@ -262,5 +262,5 @@ Small helpers (`lock.ts`, `log.ts`, `http.ts`, `parse.ts`, `pages.ts`, `pause.ts
 | uniichat's view instead of compaction. | Each rewrite of the whole prefix at compaction lost detail, and promises were lost at compaction. The tree builds each line once, `zoom` reaches every message, and the view changes only at its end. |
 | One board: a promise is an item with an `at`. | Of 23 commitments that root made from Oct 6 to 14, 10 had nothing behind them. Schedules, triggers and a board meant several places to look and several sets of rules. One board of items, each with an owner and an optional `when`, is one list. |
 | No caps on memory or context. | Sizes are reading budgets, not storage limits. Transport limits at HTTP boundaries and process timeouts stay. |
-| No vendor names in the core. | Providers, the classifier, MCP servers and the web are config. The web client speaks Firecrawl's v2 API as its one adapter. MCP servers are plain MCP. One exception: `gif_search` and `gif_save` use Tenor. |
+| No vendor names in the core. | Providers, the classifier, MCP servers and the web are config. The web client speaks Firecrawl's v2 API as its one adapter. MCP servers are plain MCP. Two exceptions: `gif_search` and `gif_save` use Tenor, and `[media.transcription]` speaks Deepgram's `/listen` API. |
 | Verification is a live run on a copy of a store. Unit tests cover only the pure view algorithm. | Without a daemon, `-p` and `chat` start no channels or board fires, so a copy reaches no one. |

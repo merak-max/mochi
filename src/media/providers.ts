@@ -27,6 +27,12 @@ export const MediaConfigSchema = Type.Object({
 		stt: Type.String({ minLength: 1 }),
 		voice: Type.String({ pattern: "^[a-z]+$" }),
 	})),
+	/** Voice notes in through Deepgram's /listen API instead of speech's stt. language "multi" keeps Hinglish. */
+	transcription: Type.Optional(Type.Object({
+		...Connection,
+		api: Type.Literal("deepgram-listen"),
+		language: Type.String({ minLength: 1 }),
+	})),
 });
 
 export type ImageProvider = Static<typeof ImageProviderSchema>;
