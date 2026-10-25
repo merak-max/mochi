@@ -143,6 +143,6 @@ npm run typecheck
 npm test
 ```
 
-`npm test` runs the unit tests of the pure view algorithm in `src/memory/view.test.ts`. Everything else has no unit tests. To verify a change, run the real daemon on a copy of a store: `MOCHI_HOME=<copy> node src/main.ts -p "<prompt>"`. Without a running daemon, `-p` and `chat` start no channels and no board fires, so a copy reaches no one.
+`npm test` runs the unit tests of two pure functions: the view algorithm in `src/memory/view.test.ts` and the voice note remux in `src/media/caf.test.ts`. Everything else has no unit tests. To verify a change, run the real daemon on a copy of a store: `MOCHI_HOME=<copy> node src/main.ts -p "<prompt>"`. Without a running daemon, `-p` and `chat` start no channels and no board fires, so a copy reaches no one.
 
 `SPEC.md` is the design: the process shape, conversations, tools, the prompt, memory, the board, agents, and the decisions that still hold and why.

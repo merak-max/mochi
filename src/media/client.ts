@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Type } from "@earendil-works/pi-ai";
 import { providerEndpoint, type ProviderConfig } from "../brain/providers.ts";
 import { parseWith } from "../parse.ts";
+import { cafOpusToOgg } from "./caf.ts";
 import { loadAttachment, mimeOf, outputPath, saveOutput, workPath } from "./files.ts";
 import { parseMediaConfig, type MediaConfig, type ImageProvider } from "./providers.ts";
 
@@ -33,8 +34,6 @@ const ListenReply = Type.Object({
 		channels: Type.Array(Type.Object({ alternatives: Type.Array(Type.Object({ transcript: Type.String() }), { minItems: 1 }) }), { minItems: 1 }),
 	}),
 });
-/** The formats the OpenAI transcription API takes. */
-const TRANSCRIBABLE = /\.(flac|m4a|mp3|mp4|mpeg|mpga|oga|ogg|wav|webm)$/i;
 
 const execute = promisify(execFile);
 
@@ -171,28 +170,22 @@ export class MediaClient {
 		}
 	}
 
-	/** A file the transcription API does not take, such as an iMessage voice note (.caf), goes up as mono MP3. */
+	/** An iMessage voice note (.caf) goes up as Ogg Opus with the same packets; any other file goes up as it is. */
 	async transcript(path: string, signal?: AbortSignal): Promise<{ text: string; duration?: number }> {
-		const absolute = await workPath(path, this.deps.workDir);
-		if (TRANSCRIBABLE.test(path)) return await this.upload(absolute, path, signal);
-		const mp3 = await outputPath(this.deps.workDir, "mp3");
-		try {
-			await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", absolute, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k", "-n", mp3.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 120_000 });
-			return await this.upload(mp3.absolute, mp3.path, signal);
-		} finally {
-			await unlink(mp3.absolute).catch(() => {});
-		}
+		const bytes = new Uint8Array(await readFile(await workPath(path, this.deps.workDir)));
+		if (/\.caf$/i.test(path)) return await this.upload(cafOpusToOgg(bytes), basename(path).replace(/\.caf$/i, ".ogg"), signal);
+		return await this.upload(bytes, basename(path), signal);
 	}
 
-	private async upload(absolute: string, path: string, signal?: AbortSignal): Promise<{ text: string; duration?: number }> {
+	private async upload(bytes: Uint8Array<ArrayBuffer>, name: string, signal?: AbortSignal): Promise<{ text: string; duration?: number }> {
 		const transcription = this.deps.config.transcription;
 		if (transcription !== undefined) {
 			const route = this.route(transcription);
 			const query = new URLSearchParams({ model: transcription.model, language: transcription.language, smart_format: "true" });
 			const response = await this.request(`${route.base}/listen?${query}`, {
 				method: "POST",
-				headers: { Authorization: `Token ${this.deps.env[transcription.keyEnv]}`, "content-type": mimeOf(path) },
-				body: new Uint8Array(await readFile(absolute)),
+				headers: { Authorization: `Token ${this.deps.env[transcription.keyEnv]}`, "content-type": mimeOf(name) },
+				body: bytes,
 			}, signal);
 			const reply = parseWith(ListenReply, await response.json(), "transcription response");
 			const text = reply.results.channels[0]!.alternatives[0]!.transcript;
@@ -201,7 +194,7 @@ export class MediaClient {
 		const speech = this.speech();
 		const form = new FormData();
 		form.set("model", speech.stt);
-		form.set("file", new Blob([new Uint8Array(await readFile(absolute))], { type: mimeOf(path) }), basename(path));
+		form.set("file", new Blob([bytes], { type: mimeOf(name) }), name);
 		const response = await this.request(`${speech.base}/audio/transcriptions`, { method: "POST", headers: speech.headers, body: form }, signal);
 		const reply = parseWith(TranscriptReply, await response.json(), "transcription response");
 		return { text: reply.text, ...(reply.duration === undefined ? {} : { duration: reply.duration }) };
