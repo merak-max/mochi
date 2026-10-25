@@ -1,13 +1,11 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { readFile, unlink } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Type } from "@earendil-works/pi-ai";
 import { providerEndpoint, type ProviderConfig } from "../brain/providers.ts";
 import { parseWith } from "../parse.ts";
-import { cafOpusToOgg } from "./caf.ts";
-import { loadAttachment, mimeOf, outputPath, saveOutput, workPath } from "./files.ts";
+import { cafOpusToOgg, oggOpusToCaf } from "./caf.ts";
+import { loadAttachment, mimeOf, saveOutput, workPath } from "./files.ts";
 import { parseMediaConfig, type MediaConfig, type ImageProvider } from "./providers.ts";
 
 export interface MediaDeps {
@@ -35,7 +33,6 @@ const ListenReply = Type.Object({
 	}),
 });
 
-const execute = promisify(execFile);
 
 export class MediaClient {
 	private readonly deps: MediaDeps;
@@ -154,20 +151,9 @@ export class MediaClient {
 		const speech = this.speech();
 		const response = await this.request(`${speech.base}/audio/speech`, {
 			method: "POST", headers: { ...speech.headers, "content-type": "application/json" },
-			body: JSON.stringify({ model: speech.tts, input: args.text, voice: args.voice ?? speech.voice, response_format: "aac" }),
+			body: JSON.stringify({ model: speech.tts, input: args.text, voice: args.voice ?? speech.voice, response_format: "opus" }),
 		}, signal);
-		const aac = await saveOutput(this.deps.workDir, "aac", new Uint8Array(await response.arrayBuffer()));
-		const aacAbsolute = await workPath(aac.path, this.deps.workDir);
-		const m4a = await outputPath(this.deps.workDir, "m4a");
-		try {
-			await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", aacAbsolute, "-c:a", "copy", "-movflags", "+faststart", "-n", m4a.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 60_000 });
-			return { path: m4a.path };
-		} catch (error) {
-			await unlink(m4a.absolute).catch(() => {});
-			throw error;
-		} finally {
-			await unlink(aacAbsolute).catch(() => {});
-		}
+		return saveOutput(this.deps.workDir, "caf", oggOpusToCaf(new Uint8Array(await response.arrayBuffer())));
 	}
 
 	/** An iMessage voice note (.caf) goes up as Ogg Opus with the same packets; any other file goes up as it is. */

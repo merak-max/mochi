@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cafOpusToOgg } from "./caf.ts";
+import { cafOpusToOgg, oggOpusToCaf } from "./caf.ts";
 
 function varint(value: number): number[] {
 	const out = [value & 0x7f];
@@ -93,4 +93,19 @@ test("a CAF of another codec throws", () => {
 	const caf = opusCaf([Uint8Array.of(1)], 44100, 1024, 0);
 	caf.write("aac ", 8 + 12 + 8, "latin1");
 	assert.throws(() => cafOpusToOgg(caf), /'aac ' is not Opus/);
+});
+
+test("an Ogg Opus file becomes a CAF file that reads back to the same packets", () => {
+	const packets: Uint8Array[] = [];
+	for (let k = 0; k < 120; k++) packets.push(Uint8Array.from({ length: 40 + k * 3 }, (_, i) => (i === 0 ? 0xf8 : (i * k) % 256)));
+	const ogg = cafOpusToOgg(opusCaf(packets, 48000, 960, 312));
+	const caf = oggOpusToCaf(ogg);
+	assert.equal(Buffer.from(caf.subarray(0, 4)).toString(), "caff");
+	const desc = new DataView(caf.buffer, caf.byteOffset + 8 + 12);
+	assert.equal(desc.getFloat64(0, false), 48000);
+	assert.equal(desc.getUint32(20, false), 960, "a 20 ms CELT TOC byte is 960 frames per packet");
+	const pages = readOgg(cafOpusToOgg(caf));
+	const audio = pages.slice(2).flatMap((page) => page.packets);
+	assert.deepEqual(audio.map((packet) => Buffer.from(packet)), packets.map((packet) => Buffer.from(packet)));
+	assert.equal(new DataView(pages[0]!.packets[0]!.buffer, pages[0]!.packets[0]!.byteOffset).getUint16(10, true), 312, "pre-skip survives");
 });

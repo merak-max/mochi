@@ -1,5 +1,6 @@
-// An iMessage voice note is Opus packets in a CAF container, which no transcription API takes. This moves the same
-// packets into an Ogg Opus file (RFC 7845) without decoding them. CAF layout: Apple's Core Audio Format Specification.
+// An iMessage voice note is Opus packets in a CAF container. No transcription API takes CAF, and no speech API writes it.
+// These move the same packets between CAF and Ogg Opus (RFC 7845) without decoding them. CAF layout: Apple's Core Audio
+// Format Specification.
 
 type Description = { sampleRate: number; formatId: string; bytesPerPacket: number; framesPerPacket: number; channels: number };
 type Packets = { sizes: number[]; frames: number[]; priming: number };
@@ -142,13 +143,107 @@ export function cafOpusToOgg(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
 		granule += BigInt(Math.round(packets.frames[k]! * toGranule));
 	}
 	pages.push(oggPage(batch, granule, pages.length, 4));
+	return concat(pages);
+}
+
+/** The packets of an Ogg stream, a packet that spans pages joined, and the stream's channel count and pre-skip. */
+function readOggOpus(ogg: Uint8Array): { packets: Uint8Array[]; channels: number; preSkip: number } {
+	const packets: Uint8Array[] = [];
+	let partial: Uint8Array[] = [];
+	let offset = 0;
+	while (offset + 27 <= ogg.length) {
+		if (String.fromCharCode(...ogg.subarray(offset, offset + 4)) !== "OggS") throw new Error("Not an Ogg file.");
+		const segments = ogg[offset + 26]!;
+		let body = offset + 27 + segments;
+		for (let k = 0; k < segments; k++) {
+			const size = ogg[offset + 27 + k]!;
+			partial.push(ogg.subarray(body, body + size));
+			body += size;
+			if (size < 255) {
+				packets.push(concat(partial));
+				partial = [];
+			}
+		}
+		offset = body;
+	}
+	const head = packets[0];
+	if (head === undefined || String.fromCharCode(...head.subarray(0, 8)) !== "OpusHead") throw new Error("Ogg stream is not Opus.");
+	return { packets: packets.slice(2), channels: head[9]!, preSkip: new DataView(head.buffer, head.byteOffset).getUint16(10, true) };
+}
+
+/** A packet's length in 48 kHz samples, from its TOC byte (RFC 6716, section 3.1). */
+function opusSamples(packet: Uint8Array): number {
+	const toc = packet[0]!;
+	const config = toc >> 3;
+	let tenths: number;
+	if (config < 12) tenths = [100, 200, 400, 600][config % 4]!;
+	else if (config < 16) tenths = [100, 200][config % 2]!;
+	else tenths = [25, 50, 100, 200][config % 4]!;
+	const code = toc & 3;
+	let frames = 1;
+	if (code === 1 || code === 2) frames = 2;
+	if (code === 3) frames = packet[1]! & 0x3f;
+	return (tenths * 48 * frames) / 10;
+}
+
+function concat(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
 	let total = 0;
-	for (const page of pages) total += page.length;
+	for (const part of parts) total += part.length;
 	const out = new Uint8Array(total);
 	let at = 0;
-	for (const page of pages) {
-		out.set(page, at);
-		at += page.length;
+	for (const part of parts) {
+		out.set(part, at);
+		at += part.length;
 	}
 	return out;
+}
+
+function writeVarint(value: number, out: number[]): void {
+	const bytes = [value & 0x7f];
+	for (let rest = Math.floor(value / 128); rest > 0; rest = Math.floor(rest / 128)) bytes.unshift((rest & 0x7f) | 0x80);
+	out.push(...bytes);
+}
+
+function cafChunk(type: string, body: Uint8Array): Uint8Array<ArrayBuffer> {
+	const head = new Uint8Array(12);
+	for (let k = 0; k < 4; k++) head[k] = type.charCodeAt(k);
+	new DataView(head.buffer).setBigInt64(4, BigInt(body.length), false);
+	return concat([head, body]);
+}
+
+/** An Ogg Opus file as a CAF file with the same packets, the format of an iMessage voice note. */
+export function oggOpusToCaf(ogg: Uint8Array): Uint8Array<ArrayBuffer> {
+	const { packets, channels, preSkip } = readOggOpus(ogg);
+	const frames: number[] = [];
+	let total = 0;
+	for (const packet of packets) {
+		const samples = opusSamples(packet);
+		frames.push(samples);
+		total += samples;
+	}
+	let constant = frames.length > 0 ? frames[0]! : 0;
+	for (const samples of frames) if (samples !== constant) constant = 0;
+	const desc = new Uint8Array(32);
+	const descView = new DataView(desc.buffer);
+	descView.setFloat64(0, 48000, false);
+	for (let k = 0; k < 4; k++) desc[8 + k] = "opus".charCodeAt(k);
+	descView.setUint32(20, constant, false);
+	descView.setUint32(24, channels, false);
+	const table: number[] = [];
+	for (let k = 0; k < packets.length; k++) {
+		writeVarint(packets[k]!.length, table);
+		if (constant === 0) writeVarint(frames[k]!, table);
+	}
+	const paktHead = new Uint8Array(24);
+	const paktView = new DataView(paktHead.buffer);
+	paktView.setBigInt64(0, BigInt(packets.length), false);
+	paktView.setBigInt64(8, BigInt(Math.max(total - preSkip, 0)), false);
+	paktView.setInt32(16, preSkip, false);
+	const fileHead = Uint8Array.of(0x63, 0x61, 0x66, 0x66, 0, 1, 0, 0);
+	return concat([
+		fileHead,
+		cafChunk("desc", desc),
+		cafChunk("pakt", concat([paktHead, Uint8Array.from(table)])),
+		cafChunk("data", concat([new Uint8Array(4), ...packets])),
+	]);
 }
