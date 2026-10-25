@@ -146,6 +146,7 @@ async function installService(home: Home): Promise<void> {
 		`WorkingDirectory=${REPO}`,
 		`Environment=MOCHI_HOME=${home.dir}`,
 		`Environment=PATH=${process.env.PATH ?? "/usr/bin:/bin"}`,
+		"Environment=MALLOC_ARENA_MAX=2",
 		`ExecStart=${process.execPath} src/main.ts --headless`,
 		"Restart=always",
 		"RestartSec=5",

@@ -5,7 +5,7 @@ import { Type } from "@earendil-works/pi-ai";
 import type { ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
-import { heicToJpeg } from "./heic.ts";
+import { heifToJpeg } from "heif2jpeg";
 
 const HEIC_EXTENSIONS = new Set([".heic", ".heif"]);
 
@@ -35,7 +35,7 @@ async function createImageReadTool(): Promise<ToolRegistration> {
 			const dir = await mkdtemp(join(tmpdir(), "mochi-img-"));
 			try {
 				const jpeg = join(dir, "image.jpg");
-				await writeFile(jpeg, await heicToJpeg(new Uint8Array(await readFile(resolved.value)), context.abortSignal));
+				await writeFile(jpeg, await heifToJpeg(await readFile(resolved.value)));
 				const result = await base.execute({ ...(args as object), path: jpeg }, api, context);
 				const converted = { severity: "info" as const, message: `Converted ${path} to JPEG.` };
 				return withScriptOutput({ ...result, diagnostics: [...(result.diagnostics ?? []), converted] });

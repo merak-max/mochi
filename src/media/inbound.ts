@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
+import { heifToJpeg } from "heif2jpeg";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { SavedFile } from "../turn/turn.ts";
 import { MediaClient, type MediaDeps } from "./client.ts";
 import { mimeOf, saveOutput, workPath } from "./files.ts";
-import { heicToJpeg } from "./heic.ts";
 
 /**
  * The type an image's bytes say it is. A channel's label can be wrong (iMessage sends PNGs as image/jpeg), and the model
@@ -32,7 +32,7 @@ export async function prepareInbound(
 		try {
 			const absolute = await workPath(file.path, workDir);
 			if (/^image\/hei[cf](?:-sequence)?(?:;|$)/i.test(file.mimeType) || /^image\/hei[cf]$/.test(mimeOf(file.path))) {
-				const bytes = await heicToJpeg(new Uint8Array(await readFile(absolute)), signal);
+				const bytes = await heifToJpeg(await readFile(absolute));
 				const jpeg = await saveOutput(workDir, "jpg", bytes);
 				images.push({ type: "image", mimeType: "image/jpeg", data: Buffer.from(bytes).toString("base64") });
 				notes.push(`[image converted from ${file.path}, JPEG saved at ${jpeg.path}]`);
