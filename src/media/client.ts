@@ -27,6 +27,8 @@ const VideoReply = Type.Object({
 	error: Type.Optional(Type.Union([Type.Null(), Type.Object({ message: Type.String() })])),
 });
 const TranscriptReply = Type.Object({ text: Type.String(), duration: Type.Optional(Type.Number()) });
+/** The formats the OpenAI transcription API takes. */
+const TRANSCRIBABLE = /\.(flac|m4a|mp3|mp4|mpeg|mpga|oga|ogg|wav|webm)$/i;
 
 const execute = promisify(execFile);
 
@@ -163,8 +165,20 @@ export class MediaClient {
 		}
 	}
 
+	/** A file the transcription API does not take, such as an iMessage voice note (.caf), goes up as mono MP3. */
 	async transcript(path: string, signal?: AbortSignal): Promise<{ text: string; duration?: number }> {
 		const absolute = await workPath(path, this.deps.workDir);
+		if (TRANSCRIBABLE.test(path)) return await this.upload(absolute, path, signal);
+		const mp3 = await outputPath(this.deps.workDir, "mp3");
+		try {
+			await execute("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", absolute, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k", "-n", mp3.absolute], { ...(signal === undefined ? {} : { signal }), timeout: 120_000 });
+			return await this.upload(mp3.absolute, mp3.path, signal);
+		} finally {
+			await unlink(mp3.absolute).catch(() => {});
+		}
+	}
+
+	private async upload(absolute: string, path: string, signal?: AbortSignal): Promise<{ text: string; duration?: number }> {
 		const speech = this.speech();
 		const form = new FormData();
 		form.set("model", speech.stt);
