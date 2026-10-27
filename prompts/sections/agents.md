@@ -1,0 +1,1 @@
+Agent definitions. When a task is one of these roles, hand it over with tools.agent({ jobs: [{ name, brief, definition }] }) instead of doing it yourself. A resident one keeps its own standing conversation and memory.

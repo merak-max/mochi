@@ -115,7 +115,7 @@ Message i is the i-th non-system message of a conversation's model context. A bi
 
 The `mochi.view` document family holds one tree per standing conversation, keyed by conversation id. A tree holds `start` (message 0's timestamp), `count`, `nodes` by slot, the chat's `view`, and the compactions' `seen` view (a quarter of `HIGH`). A reset or a manual compaction starts a new context, and the compactor starts a new tree for it. Forks and fresh agents have no tree.
 
-The compactor (`src/memory/compactor.ts`) is one loop in the daemon. After each commit that adds entries, it brings each standing conversation's tree up to its messages. It builds the due nodes oldest first, one commit per node, so a crash resumes at the next missing node. It stops at a tool result that pi-durable made for a call that still runs. Each call goes to the memory model with three parts: uniichat's compaction prompt verbatim (`src/memory/prompt.ts`), the `seen` view up to the node, and the `LEAF` or `MERGE` task with the node's input. When a line is over 512 bytes, the compactor asks again with the line's size and where the limit cuts it. It tries five times at most and keeps the shortest line. A failed pass waits 5 s, doubles the wait up to 5 min, and logs `view.failed` each time. After 30 minutes of failure, it notifies the owner once, through a run Turn on the owner's last channel. It notifies again only after a pass has worked in between. There is no fallback summary. A node that is not built shows as `(not summarized yet: zoom it)`.
+The compactor (`src/memory/compactor.ts`) is one loop in the daemon. After each commit that adds entries, it brings each standing conversation's tree up to its messages. It builds the due nodes oldest first, one commit per node, so a crash resumes at the next missing node. It stops at a tool result that pi-durable made for a call that still runs. Each call goes to the memory model with three parts: uniichat's compaction prompt verbatim (`prompts/memory/compaction.md`), the `seen` view up to the node, and the leaf or merge task (`prompts/memory/leaf-task.md`, `merge-task.md`) with the node's input. When a line is over 512 bytes, the compactor asks again with the line's size and where the limit cuts it. It tries five times at most and keeps the shortest line. A failed pass waits 5 s, doubles the wait up to 5 min, and logs `view.failed` each time. After 30 minutes of failure, it notifies the owner once, through a run Turn on the owner's last channel. It notifies again only after a pass has worked in between. There is no fallback summary. A node that is not built shows as `(not summarized yet: zoom it)`.
 
 Every seat selects the `notes` extension. It holds the `memory` section and a `beforeRequest` hook on `GenerationTask`. The hook reads the tree and replaces the request's messages with:
 
@@ -226,11 +226,12 @@ src/
   mochi.ts          openMochi: the registry, tools, extensions, root, the line, the store fixups
   config.ts         config.toml and .env, parsed with TypeBox at the boundary
   home.ts           the home directory layout
+  prompts.ts        loads every prose prompt from prompts/, with the owner's <home>/prompts files in their place
   seats.ts          SURFACE, LIBRARY, seat extensions with codemode, conversation creation, forkPoint
   setup.ts          readiness per boundary and the boot report
   journal.ts        a task-scoped record of what a call created, for replay
   brain/            providers and models, the classifier, identity section, llm and classify
-  memory/           view.ts (the tree and view, pure), memory.ts (the doc, the request hook, zoom), compactor.ts, prompt.ts
+  memory/           view.ts (the tree and view, pure), memory.ts (the doc, the request hook, zoom), compactor.ts
   context.ts        held text: files, the catalog, holdText, context_* tools and the context section
   fork/fork.ts      the child task and the agent tool: fork, fresh and resident jobs, depth
   agents/           definitions on disk, resident conversations, the owner of a conversation, agent_stop

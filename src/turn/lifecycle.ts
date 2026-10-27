@@ -8,6 +8,7 @@ import {
 	ResetEntry,
 	type SubmissionId,
 } from "@earendil-works/pi-durable";
+import { prompt } from "../prompts.ts";
 
 export type FastCompletion = (request: { readonly system: string; readonly prompt: string }, context: Context) => Promise<string>;
 
@@ -32,7 +33,7 @@ export async function threadHandoff(root: Conversation, fast: FastCompletion, co
 		const tail = serializeConversation(view.messages.slice(-32));
 		if (tail === "") return undefined;
 		const note = await fast({
-			system: "Write only a handoff note, at most 8 short lines. Keep open threads and promises, exact names and dates. Do not answer or continue the conversation. Omit completed work. No headings. Return an empty string if nothing is open.",
+			system: prompt("turn/handoff-note"),
 			prompt: `<conversation>\n${tail}\n</conversation>`,
 		}, context);
 		return note.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join("\n") || undefined;

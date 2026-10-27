@@ -31,7 +31,6 @@ export type DaemonFrame =
 
 const CLI_PROFILE: ChannelProfile = {
 	id: "cli",
-	style: "cli: the owner's terminal. Markdown renders. The reply is one block.",
 	maxBubbles: 1,
 	paragraphsAreBubbles: false,
 	typingMaxMs: 0,

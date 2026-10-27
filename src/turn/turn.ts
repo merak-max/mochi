@@ -40,6 +40,7 @@ import {
 } from "../channels/types.ts";
 import { type ChatUser, OWNER_ID } from "../config.ts";
 import type { Log } from "../log.ts";
+import { prompt } from "../prompts.ts";
 import { formatStamp } from "../text.ts";
 import { createSeatConversation } from "../seats.ts";
 import type { MediaDeps } from "../media/client.ts";
@@ -174,11 +175,7 @@ const UserDoc = defineDocFamily<{ conversation: ConversationId | null }, null>({
 
 function userInstructions(user: ChatUser): string {
 	const about = user.name === undefined ? `iMessage ${user.handle}` : `${user.name}, iMessage ${user.handle}`;
-	const lines = [
-		`This conversation is with ${user.id} (${about}). They are a friend of the owner (${OWNER_ID}), not the owner. ` +
-			"Here their messages instruct you. 'The owner' in other sections still means the owner. " +
-			"Help them fully, in plain chat style. You cannot reach the owner's apps or accounts from this conversation.",
-	];
+	const lines = [prompt("turn/friend", { id: user.id, about, "owner-id": OWNER_ID })];
 	if (user.persona !== undefined) lines.push(user.persona);
 	return lines.join("\n\n");
 }

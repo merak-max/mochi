@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
 import { AgentDoc, configure, type PromptSection, section, type ConversationId, defineDocFamily, defineTool, type Harness, type ModelRef, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { abortTargets } from "../turn/commands.ts";
+import { prompt } from "../prompts.ts";
 import { createSeatConversation } from "../seats.ts";
 
 // An agent definition is a named worker: `<home>/agents/<name>.md` or the bundled `agents/<name>.md`, with front matter
@@ -200,7 +201,7 @@ export function definitionsSection(definitions: Definitions): PromptSection {
 		const lines = (await definitions.all()).map((definition) => `${definition.name}${definition.resident ? " (resident)" : ""}: ${definition.description}`);
 		if (lines.length === 0) return undefined;
 		return [
-			"Agent definitions. When a task is one of these roles, hand it over with tools.agent({ jobs: [{ name, brief, definition }] }) instead of doing it yourself. A resident one keeps its own standing conversation and memory.",
+			prompt("sections/agents"),
 			...lines,
 		].join("\n");
 	});

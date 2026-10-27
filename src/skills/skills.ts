@@ -1,5 +1,6 @@
 import { loadSkillsFromDir, type Skill } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type Extension, section } from "@earendil-works/pi-durable";
+import { prompt } from "../prompts.ts";
 
 /**
  * The `skills-index` section: name, description and file, and the model opens the file with `read`.
@@ -15,7 +16,7 @@ export function skillsExtension(dirs: readonly string[]): Extension {
 		const skills = [...byName.values()].filter((skill) => !skill.disableModelInvocation).sort((a, b) => a.name.localeCompare(b.name));
 		if (skills.length === 0) return undefined;
 		const lines = skills.map(({ name, description, filePath }) => `${name} (${filePath}): ${description}`);
-		return ["Skills. Read a skill's file before following it.", ...lines].join("\n");
+		return [prompt("sections/skills"), ...lines].join("\n");
 	};
 	return defineExtension({ name: "skills", sections: [section("skills-index", render)] });
 }

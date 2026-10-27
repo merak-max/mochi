@@ -6,7 +6,7 @@ import { allPages } from "../pages.ts";
 import { pause } from "../pause.ts";
 import type { FastCompletion } from "../turn/lifecycle.ts";
 import { freshTree, messagesOf, nodeOf, show, type Tree, ViewDoc } from "./memory.ts";
-import { COMPACTION } from "./prompt.ts";
+import { prompt } from "../prompts.ts";
 import { blocks, bytes, ctx, fit, NODE, type Node, over, size, slot, source, task, todo, TRIES } from "./view.ts";
 
 const FIRST_DELAY_MS = 5_000;
@@ -53,11 +53,12 @@ function fitBoth(tree: Tree, node: Node, next: boolean): void {
 /** Node (l,i)'s line: its view to the node and its task, asked till a line fits, TRIES lines at most, the shortest kept. */
 async function compact(deps: CompactorDeps, tree: Readonly<Tree>, node: Node, l: number, i: number, input: string, context: Context): Promise<string> {
 	const upto = Math.min(ctx(l, i), firstUnbuilt(node, tree.count));
-	const prompt = blocks(tree.seen.parts, node, upto).join("") + task(l, i) + input + "\n</input>";
+	const system = prompt("memory/compaction", { kinds: prompt("memory/kinds") });
+	const request = blocks(tree.seen.parts, node, upto).join("") + task(l, i) + input + "\n</input>";
 	const lines: string[] = [];
 	let note = "";
 	while (lines.length < TRIES) {
-		const line = (await deps.complete({ system: COMPACTION, prompt: prompt + note }, context)).trim();
+		const line = (await deps.complete({ system, prompt: request + note }, context)).trim();
 		lines.push(line);
 		if (bytes(line) <= NODE) break;
 		note = "\n" + over(line);

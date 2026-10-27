@@ -8,6 +8,8 @@
 // message, to the view's end, in halves: detail fades with age) down to half, so a view changes only at its end
 // between batches. Two views: the chat's (turns'), and the compactions' (`seen`), to the first message not built.
 
+import { prompt } from "../prompts.ts";
+
 /** Node (l,i), as a line of a view. */
 export type Part = { readonly l: number; readonly i: number };
 
@@ -27,22 +29,6 @@ export const TRIES = 5;
 const SCALE = "-".repeat(NODE);
 
 export const WAIT = "(not summarized yet: zoom it)";
-
-/** A compaction's task, before its <input>: one message to compress (level 0). */
-const LEAF = `Compaction: compress message {id} into one line of at most ${NODE} bytes
-(about 70 words), the length of this ruler:
-${SCALE}
-<input>
-`;
-
-/** A compaction's task, before its <input>: two lines to merge. */
-const MERGE = `Compaction: merge lines {a} and {b}, adjacent, into one line of at most
-${NODE} bytes (about 70 words), the length of this ruler:
-${SCALE}
-<chat> may hold their messages, {id} to {end}, in more detail: take details
-of them from there too.
-<input>
-`;
 
 export function bytes(text: string): number {
 	return Buffer.byteLength(text, "utf8");
@@ -99,20 +85,15 @@ function cut(text: string): string {
 }
 
 export function over(line: string): string {
-	return `Too long: your last line for this <input> was ${bytes(line)} bytes,
-over the ${NODE}-byte limit. Write the whole line again, cutting just
-enough of the least valuable items to fit before this cut:
-${cut(line)}| ← LIMIT`;
+	return prompt("memory/too-long", { bytes: String(bytes(line)), limit: String(NODE), cut: cut(line) });
 }
 
 /** Node (l,i)'s task, but its input. */
 export function task(l: number, i: number): string {
 	const [a, z] = span({ l, i });
+	if (l === 0) return prompt("memory/leaf-task", { id: String(a), limit: String(NODE), ruler: SCALE });
 	const n = 2 ** l / 2;
-	const fill: Array<[string, string]> = [["{a}", a + "+" + n], ["{b}", a + n + "+" + n], ["{id}", String(a)], ["{end}", String(z)]];
-	let text = l === 0 ? LEAF : MERGE;
-	for (const [key, value] of fill) text = text.replace(key, value);
-	return text;
+	return prompt("memory/merge-task", { a: a + "+" + n, b: a + n + "+" + n, id: String(a), end: String(z), limit: String(NODE), ruler: SCALE });
 }
 
 /** What node (l,i) is made from: its message, or its halves' lines; null while a half is not built. */

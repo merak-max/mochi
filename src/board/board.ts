@@ -7,6 +7,7 @@ import type { ChannelId } from "../channels/types.ts";
 import { holdText } from "../context.ts";
 import type { Log } from "../log.ts";
 import { parseWith } from "../parse.ts";
+import { prompt } from "../prompts.ts";
 import { createSeatConversation } from "../seats.ts";
 import { formatStamp } from "../text.ts";
 import { answerText, LastInboundDoc, type Line, NO_REPLY, openTurn } from "../turn/turn.ts";
@@ -188,9 +189,7 @@ function runCheck(argv: readonly string[], stdin: string): Promise<CheckResult> 
 	});
 }
 
-const DEFINITION_HEADER = (id: string) =>
-	`You own the board item ${id}. Each time it fires, its message comes here. Your final text goes to the owner verbatim; reply ${NO_REPLY} when nothing needs them. ` +
-	"When the item has served its purpose, remove it with tools.board_done.";
+const DEFINITION_HEADER = (id: string) => prompt("board/definition-header", { id, "no-reply": NO_REPLY });
 
 /** The last chat channel the owner wrote on; a fire needs one to reach the owner. */
 async function ownerChannel(tx: Tx, line: Line): Promise<ChannelId> {

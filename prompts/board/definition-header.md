@@ -1,0 +1,1 @@
+You own the board item {id}. Each time it fires, its message comes here. Your final text goes to the owner verbatim; reply {no-reply} when nothing needs them. When the item has served its purpose, remove it with tools.board_done.

@@ -5,6 +5,7 @@ import { configure, type ConversationId, defineDocFamily, defineTask, defineTool
 import { agentOf, applyAgent, type Definition, type Definitions, inheritOwner, ownerIn, residentConversation } from "../agents/definitions.ts";
 import { copyContext, holdText } from "../context.ts";
 import { journaled } from "../journal.ts";
+import { prompt } from "../prompts.ts";
 import { forkPoint } from "../seats.ts";
 import { answerText, LastInboundDoc, openTurn, submitNote, wakeChannelOf, type Line } from "../turn/turn.ts";
 
@@ -151,18 +152,12 @@ async function startChild(tx: Tx, task: ForkTask, caller: ConversationId, input:
 }
 
 const briefOf = (name: string, background: boolean, brief: string, scratch: string): string =>
-	`You are ${name}, a fork of this conversation made by the script above. ` +
-	(background ? "You run in the background. Your answer reaches the conversation that forked you as a note; if root forked you, it wakes at once and delivers the result to the owner. " : "Your answer goes back to that script, not to the owner. ") +
-	`Keep your files in ${scratch}; for code, work in a git worktree of your own, never the shared checkout.\n\n${brief}`;
+	`${prompt(background ? "fork/background-brief" : "fork/foreground-brief", { name, scratch })}\n\n${brief}`;
 
-const contextLine = (keys: readonly string[]): string => `Context values (read them in a script with tools.context_read({ key })): ${keys.join(", ")}`;
+const contextLine = (keys: readonly string[]): string => prompt("fork/context-values", { keys: keys.join(", ") });
 
 function jobBriefOf(name: string, brief: string, keys: readonly string[], scratch: string): string {
-	const lines = [
-		`You are ${name}, a fresh agent a script started for one job. You have none of its history: this brief and the context values below are all you have. ` +
-			"Your answer goes back to that script, not to the owner, so answer with the result alone. " +
-			`Keep your files in ${scratch}; for code, work in a git worktree of your own, never the shared checkout.`,
-	];
+	const lines = [prompt("fork/job-brief", { name, scratch })];
 	if (keys.length > 0) lines.push(contextLine(keys));
 	lines.push("", brief);
 	return lines.join("\n");

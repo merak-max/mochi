@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 /**
  * Where one mochi keeps everything that is the owner's: config, keys, instructions, roles, skills, the store and
  * the work directory. `MOCHI_HOME`, else `~/.mochi`. Each agent definition is `<home>/agents/<name>.md`.
- * The repository holds only code, bundled skills and the bundled agent definitions.
+ * The repository holds only code, bundled skills, the bundled agent definitions and the bundled prompts.
  */
 export interface Home {
 	readonly dir: string;
@@ -18,6 +18,8 @@ export interface Home {
 	readonly agentsDir: string;
 	/** The owner's own tools, one `<name>.ts` each, loaded by `tools_reload`. */
 	readonly toolsDir: string;
+	/** Prompt overrides, one `<name>.md` each at the bundled `prompts/` path; a file here replaces the bundled one. */
+	readonly promptsDir: string;
 	/** Lasting facts as markdown, `<home>/memory`. */
 	readonly memoryDir: string;
 	readonly logFile: string;
@@ -33,6 +35,7 @@ export function resolveHome(env: Readonly<Record<string, string | undefined>>): 
 		skillsDir: join(dir, "skills"),
 		agentsDir: join(dir, "agents"),
 		toolsDir: join(dir, "tools"),
+		promptsDir: join(dir, "prompts"),
 		memoryDir: join(dir, "memory"),
 		logFile: join(dir, "mochi.log"),
 	};

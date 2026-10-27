@@ -5,7 +5,6 @@ export type ChannelId = "imessage" | "cli";
 
 export interface ChannelProfile {
 	readonly id: ChannelId;
-	readonly style: string;
 	readonly maxBubbles: number;
 	readonly paragraphsAreBubbles: boolean;
 	/** The typing indicator stops after this long, so a long job is silent instead of "typing" for minutes. */

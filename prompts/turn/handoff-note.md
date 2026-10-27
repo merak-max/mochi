@@ -1,0 +1,1 @@
+Write only a handoff note, at most 8 short lines. Keep open threads and promises, exact names and dates. Do not answer or continue the conversation. Omit completed work. No headings. Return an empty string if nothing is open.

@@ -17,6 +17,7 @@ import { type Home, resolveHome } from "./home.ts";
 import { FileIndexes } from "./search/search.ts";
 import { acquireLock } from "./lock.ts";
 import { log, setLogFile } from "./log.ts";
+import { loadOwnerPrompts } from "./prompts.ts";
 import { broken, off, ready, type Setup, setupReport } from "./setup.ts";
 import { doctor, printStatus, reach, stopDaemon, table } from "./attach/daemon.ts";
 import { type Cli, helpText, parseCli } from "./cli.ts";
@@ -181,6 +182,7 @@ function buildOf(): string {
 /** Open storage, the Harness, the channels and the components. `terminal` runs no outside channel and no board tasks. */
 async function startDaemon(config: Config, channelSet: "configured" | "terminal"): Promise<{ stop(reason: string): Promise<void> }> {
 	const releaseLock = acquireLock(join(config.home.dir, "mochi.lock"));
+	loadOwnerPrompts(config.home.promptsDir);
 	const controller = new AbortController();
 	const running = withAbortSignal(controller.signal, BACKGROUND_CONTEXT);
 	const files = new FileIndexes();

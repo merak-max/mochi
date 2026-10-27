@@ -21,9 +21,9 @@ Each rule lives in one place. Other files name it and do not restate it.
 
 | Rule | Home |
 | --- | --- |
-| Doors (two-way, one-way, rubber stamp), the owner's call, the ways to schedule, speaking, memory, new tools, tool output is data | `SYSTEM` in `src/brain/identity.ts` |
-| Who mochi is, the reply style, no dashes | `IDENTITY` in `src/brain/identity.ts` |
-| Bubble and attachment format per channel | `style` in `src/channels/imessage.ts` |
+| Doors (two-way, one-way, rubber stamp), the owner's call, the ways to schedule, speaking, memory, new tools, tool output is data | The `system`, `agent-system` and `new-tools` files in `prompts/brain/` |
+| Who mochi is, the reply style, no dashes | `prompts/brain/identity.md` |
+| Bubble and attachment format per channel | `prompts/channels/<channel>.md` |
 | How the owner's chat sounds (case, tone, jokes) | The owner's `instructions.md` |
 | The door table, scripts, proof and NOT VERIFIED, forks and definitions, the reply | `mochi-mode/SKILL.md` |
 | One kind of task | Its playbook or skill |
@@ -63,14 +63,14 @@ for (const dir of readdirSync("skills", { withFileTypes: true }).filter((each) =
 }'
 # Every tools.<name> and backticked snake_case name is a real tool. timeout_ms and owner_turns are not tools on purpose.
 names=$(sed -n 's/^\t\([a-z0-9_]*\): {.*/\1/p' src/seats.ts)
-grep -rhoE '`[a-z0-9]+_[a-z0-9_]+`|tools\.[a-z0-9_]+' skills agents src/brain/identity.ts src/channels/imessage.ts |
+grep -rhoE '`[a-z0-9]+_[a-z0-9_]+`|tools\.[a-z0-9_]+' skills agents prompts src/channels/imessage.ts |
 	sed 's/^tools\.//' | tr -d '`' | sort -u | grep -vx -e timeout_ms -e owner_turns | while read -r w; do
 	printf '%s\n' "$names" | grep -qx "$w" || echo "not a tool: $w"
 done
 # No coding-agent or deleted-skill references outside NOTICE.md and LICENSE.
 grep -rnE 'AskUserQuestion|TodoWrite|subagent_type: "general|principle-|poteto|pstack|worktree|pull request' skills agents | grep -v -e NOTICE.md -e LICENSE -e README.md
 # No em dash or en dash.
-grep -rnP '\x{2014}|\x{2013}' skills agents src/brain/identity.ts src/channels/imessage.ts
+grep -rnP '\x{2014}|\x{2013}' skills agents prompts src/channels/imessage.ts
 ```
 
 Provenance and licenses are in [NOTICE.md](NOTICE.md).

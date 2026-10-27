@@ -15,7 +15,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { allPages } from "../pages.ts";
 import { pause } from "../pause.ts";
-import { VIEW } from "./prompt.ts";
+import { prompt } from "../prompts.ts";
 import { blocks, bytes, cover, HIGH, NODE, type Node, type Part, reach, SEEN, slot, span, type View, WAIT, whole, zoom } from "./view.ts";
 
 // The transcript is the memory. pi-durable stores a conversation's messages; this doc holds the tree built over them
@@ -288,7 +288,7 @@ const VIEW_EXTENSION = "notes";
 export function memoryExtension(harness: () => Harness): Extension {
 	return defineExtension({
 		name: VIEW_EXTENSION,
-		sections: [section("memory", () => VIEW)],
+		sections: [section("memory", () => prompt("memory/view", { kinds: prompt("memory/kinds") }))],
 		hooks: [
 			hook(GenerationTask, {
 				beforeRequest: async ({ messages }, api, context) => {

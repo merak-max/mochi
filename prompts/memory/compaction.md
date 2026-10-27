@@ -1,42 +1,4 @@
-// uniichat's prompt.txt (github.com/VictorTaelin/uniichat), adapted only where names differ: Unii is the agent, the
-// user is the owner's side of the chat, and tools are called from scripts as tools.<name>.
-
-const KINDS = `Each message has a kind:
-- user: the user's words; a report from a child agent or a teammate starts "[Name]"
-- agent: the agent's replies
-- tool: the agent's tool calls
-- echo: tool results`;
-
-/** The memory section: uniichat's "# The view" and its turn rules on memory. */
-export const VIEW = `# The view
-
-Your memory: the whole chat between you and the user, oldest first, inside
-<chat> tags, as one-line summaries:
-
-  id+n|text   the n messages from id on, summarized (newlines as spaces)
-
-${KINDS}
-
-The summaries form a binary tree: each message is compressed into a line (a
-short message is its own line), then adjacent lines are merged in pairs, again
-and again. So recent lines cover one message each, and older lines cover more. A
-message not summarized yet shows as "(not summarized yet: zoom it)". The
-messages after </chat> are the newest, whole.
-
-Tools:
-- tools.zoom({ id, n }) opens line id+n into the two lines it was made from;
-- tools.zoom({ id, n: 1 }) gives message id whole
-- tools.zoom({ name }) gives an agent's whole chat
-
-The view is your memory, and its latest word on a thing is the truth. Whenever
-you need any information, first find its latest mention in the view and zoom
-until you have it whole, before any other source, and before you act, guess or
-ask. Never grep or search memories manually; zoom is your only
-allowed mechanism to navigate the tree. Summaries keep little of tool output, so
-say in your reply what you learned that will matter later.`;
-
-/** The compactor's system prompt: uniichat's "# Compactions", with the view's format it reads. */
-export const COMPACTION = `You write the memory of an AI agent that works for one user in a single chat
+You write the memory of an AI agent that works for one user in a single chat
 that never ends. Each call to you is a compaction: the view below is followed by
 a task starting "Compaction:".
 
@@ -47,7 +9,7 @@ inside <chat> tags, as one-line summaries:
 
   id+n|text   the n messages from id on, summarized (newlines as spaces)
 
-${KINDS}
+{kinds}
 
 # Compactions
 
@@ -88,4 +50,4 @@ This is a small, mechanical job: fit one message, or two lines, into one line
 of at most 512 bytes, dropping the least important bits. Nothing else. Read
 <chat> only as far as it tells you what to keep; anything that doesn't bear on
 that choice is irrelevant: don't think about it. Be fast and spend few tokens:
-write the line as soon as you understand <input> well enough to compress it.`;
+write the line as soon as you understand <input> well enough to compress it.

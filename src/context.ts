@@ -6,6 +6,7 @@ import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineDoc, defineTool, type DocumentReader, type PromptSection, section, type ToolRegistration, type Tx } from "@earendil-works/pi-durable";
 import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
+import { prompt } from "./prompts.ts";
 
 // A context value is text held outside the model's window: an immutable file named by its content hash, and a
 // descriptor in the conversation's catalog under an immutable key. Inbound text longer than INLINE_MAX reaches the model
@@ -204,7 +205,7 @@ export function contextSection(): PromptSection {
 		const stored: string[] = [];
 		for (const key of Object.keys(store).sort()) stored.push(`${key} (${count(JSON.stringify(store[key]).length)} chars)`);
 		if (lines.length === 0 && stored.length === 0) return undefined;
-		const out = ["Values held outside this window. Read a context value in a script with tools.context_read({ key }); load(key) reads a store() value."];
+		const out = [prompt("sections/context")];
 		out.push(...lines);
 		if (stored.length > 0) out.push(`store: ${stored.join(", ")}`);
 		return out.join("\n");
