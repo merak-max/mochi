@@ -12,7 +12,6 @@ const PLACEHOLDERS = {
 	"brain/identity": [],
 	"brain/new-tools": ["tools-dir"],
 	"brain/people": ["people"],
-	"brain/writing": [],
 	"brain/system": ["memory-dir"],
 	"channels/cli": [],
 	"channels/imessage": [],
