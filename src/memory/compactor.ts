@@ -13,7 +13,7 @@ const FIRST_DELAY_MS = 5_000;
 const MAX_DELAY_MS = 5 * 60_000;
 const NOTIFY_AFTER_MS = 30 * 60_000;
 
-interface CompactorDeps {
+export interface CompactorDeps {
 	readonly harness: Harness;
 	/** The memory model. */
 	readonly complete: FastCompletion;
@@ -41,7 +41,7 @@ function settled(chat: readonly Message[]): Message[] {
 }
 
 /** Both views to the messages, their sizes counted anew: a line built since it joined a view now has bytes. */
-function fitBoth(tree: Tree, node: Node, next: boolean): void {
+export function fitBoth(tree: Tree, node: Node, next: boolean): void {
 	for (const [view, to] of [[tree.view, tree.count], [tree.seen, firstUnbuilt(node, tree.count)]] as const) {
 		let total = 0;
 		for (const part of view.parts) total += size(node, part);
@@ -51,7 +51,7 @@ function fitBoth(tree: Tree, node: Node, next: boolean): void {
 }
 
 /** Node (l,i)'s line: its view to the node and its task, asked till a line fits, TRIES lines at most, the shortest kept. */
-async function compact(deps: CompactorDeps, tree: Readonly<Tree>, node: Node, l: number, i: number, input: string, context: Context): Promise<string> {
+export async function compact(deps: CompactorDeps, tree: Readonly<Tree>, node: Node, l: number, i: number, input: string, context: Context): Promise<string> {
 	const upto = Math.min(ctx(l, i), firstUnbuilt(node, tree.count));
 	const prompt = blocks(tree.seen.parts, node, upto).join("") + task(l, i) + input + "\n</input>";
 	const lines: string[] = [];
