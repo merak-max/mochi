@@ -23,6 +23,6 @@ export function identityExtension(profiles: readonly ChannelProfile[], users: re
 	const system = (agent: Agent): string => (agent.extensions.some((extension) => extension.name === "seat-agent") ? agentSystem : everySeatSystem);
 	return defineExtension({
 		name: "identity",
-		sections: [section("system", ({ agent }) => system(agent)), section("identity", () => prompt("brain/identity"))],
+		sections: [section("system", ({ agent }) => system(agent)), section("identity", () => prompt("brain/identity") + "\n\n" + prompt("brain/writing"))],
 	});
 }
