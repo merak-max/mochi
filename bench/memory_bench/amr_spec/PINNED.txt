@@ -1,0 +1,2 @@
+https://github.com/AgentMemoryRepo/agentmemoryrepo at 8798cb26c817d451a5ed6cba0ad8d9eca8d5ec3e
+SPEC.md, README.md, LICENSE and skills/agent-memory-repo/SKILL.md, copied unchanged.
