@@ -141,7 +141,7 @@ def collect(run_dir):
 def write(run_dir):
     run, rows, per_item, failures = collect(run_dir)
     lines = ["# Memory benchmark: " + run_dir.name, "", "Commands, run in order; each one resumes the same run:", "", "```", "set -a; source /run/user/1000/mochi.env; set +a"] + run["commands"] + ["```", ""]
-    lines.append("Dollars use fitted Bifrost rates for Luna (uncached input $" + str(LUNA_UNCACHED_INPUT_PER_M) + "/M, cached input $" + str(LUNA_CACHED_INPUT_PER_M) + "/M, output $" + str(LUNA_OUTPUT_PER_M) + "/M) and the text-embedding-3-small list price ($" + str(EMBEDDING_PER_M) + "/M, ESTIMATE); Bifrost returns no cost field. Judge (Astra) cost is excluded. acc %/$ is the headline judge accuracy divided by total dollars; $/1k questions divides total dollars by answered questions. Token counts come from each response's usage. Input includes cached input; cache write is part of uncached input. mochi-tree-small-tail reuses mochi-tree's tree, so its ingest columns repeat mochi-tree's and do not add. Ingest wall counts only the last attempt of a resumed job; call time is the sum of model-call latencies, which equals wall time for sequential ingest (mochi-tree, mem0) and exceeds it for graphiti, which calls in parallel.")
+    lines.append("Dollars use fitted Bifrost rates for Luna (uncached input $" + str(LUNA_UNCACHED_INPUT_PER_M) + "/M, cached input $" + str(LUNA_CACHED_INPUT_PER_M) + "/M, output $" + str(LUNA_OUTPUT_PER_M) + "/M) and the text-embedding-3-small list price ($" + str(EMBEDDING_PER_M) + "/M, ESTIMATE); Bifrost returns no cost field. Judge cost is excluded. acc %/$ is the headline judge accuracy divided by total dollars; $/1k questions divides total dollars by answered questions. Token counts come from each response's usage. Input includes cached input; cache write is part of uncached input. mochi-tree-small-tail reuses mochi-tree's tree, so its ingest columns repeat mochi-tree's and do not add. Ingest wall counts only the last attempt of a resumed job; call time is the sum of model-call latencies, which equals wall time for sequential ingest (mochi-tree, mem0) and exceeds it for graphiti, which calls in parallel.")
     lines.append("")
     for bench in ("locomo", "longmemeval"):
         keys = [key for key in rows if key[0] == bench]
@@ -196,7 +196,7 @@ def write(run_dir):
     for row in rows.values():
         for field in TOKEN_FIELDS:
             judge_total[field] += row["judge"][field]
-    lines.append("Judge (Astra) usage, not counted in any system: " + number(judge_total["calls"]) + " calls, " + number(judge_total["input_tokens"]) + " in, " + number(judge_total["output_tokens"]) + " out.")
+    lines.append("Judge usage, not counted in any system: " + number(judge_total["calls"]) + " calls, " + number(judge_total["input_tokens"]) + " in, " + number(judge_total["output_tokens"]) + " out.")
     lines.append("")
     if failures:
         lines.append("## Failure history")

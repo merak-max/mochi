@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 LUNA = "azure/gpt-6-luna"
-ASTRA = "azure/gpt-6-astra"
+JUDGE_MODEL = "azure/gpt-6.1-sol"
 EMBEDDING_MODEL = "openai/text-embedding-3-small"
 EMBEDDING_DIMS = 1536
 MEMORY_EFFORT = "none"

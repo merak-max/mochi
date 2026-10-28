@@ -5,7 +5,7 @@ from collections import Counter
 
 from nltk.stem import PorterStemmer
 
-from memory_bench.common import ASTRA
+from memory_bench.common import JUDGE_MODEL
 
 LONGMEMEVAL_TEMPLATES = {
     "plain": "I will give you a question, a correct answer, and a response from a model. Please answer yes if the response contains the correct answer. Otherwise, answer no. If the response is equivalent to the correct answer or contains all the intermediate steps to get the correct answer, you should also answer yes. If the response only contains a subset of the information required by the answer, answer no. \n\nQuestion: {}\n\nCorrect Answer: {}\n\nModel Response: {}\n\nIs the model response correct? Answer yes or no only.",
@@ -109,13 +109,13 @@ def parse_locomo_label(text):
     return label.strip().upper() == "CORRECT"
 
 
-async def judge(client, bench, question, response):
+async def judge(client, bench, question, response, model=JUDGE_MODEL):
     if bench == "locomo":
         prompt = LOCOMO_JUDGE.format(question=question["question"], gold_answer=question["answer"], generated_answer=response)
-        reply = await client.responses.create(model=ASTRA, input=prompt, text={"format": {"type": "json_object"}}, store=False)
+        reply = await client.responses.create(model=model, input=prompt, text={"format": {"type": "json_object"}}, store=False)
         text = reply.output_text.strip()
         return {"correct": parse_locomo_label(text), "judge_text": text, "f1": locomo_f1(question, response)}
     prompt = longmemeval_prompt(question, response)
-    reply = await client.responses.create(model=ASTRA, input=prompt, store=False)
+    reply = await client.responses.create(model=model, input=prompt, store=False)
     text = reply.output_text.strip()
     return {"correct": "yes" in text.lower(), "judge_text": text}
