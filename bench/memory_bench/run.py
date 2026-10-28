@@ -15,6 +15,7 @@ from memory_bench.common import (
     ANSWER_SYSTEM,
     BENCH_DIR,
     BENCH_KEY,
+    CONTENT_FILTER_EXIT,
     FALKOR_CONTAINER,
     FALKOR_IMAGE,
     FALKOR_PORT,
@@ -108,6 +109,8 @@ def job_command(run_dir, bench, item_id, system):
 
 
 def job_complete(run_dir, item, system):
+    if (item_dir(run_dir, item["bench"], system, item["item_id"]) / "filtered.json").exists():
+        return True
     variants = MOCHI_VARIANTS if system == "mochi-tree" else [system]
     for variant in variants:
         answered = {row["qid"] for row in read_jsonl(item_dir(run_dir, item["bench"], variant, item["item_id"]) / "answers.jsonl")}
@@ -138,6 +141,9 @@ async def run_job(run_dir, item, system, gate):
             if code == 0:
                 return code
             append_jsonl(run_dir / "failures.jsonl", {"ts": time.time(), "bench": item["bench"], "item": item["item_id"], "system": system, "attempt": attempt, "exit": code, "log": str(directory / "job.log")})
+        if code == CONTENT_FILTER_EXIT:
+            write_json_atomic(directory / "filtered.json", {"ts": time.time(), "attempts": JOB_ATTEMPTS, "log": str(directory / "job.log")})
+            print(item["bench"], item["item_id"], system, "recorded as filtered", flush=True)
         return code
 
 
@@ -190,19 +196,22 @@ async def run(args, command_line):
     run_dir.mkdir(parents=True, exist_ok=True)
     items = prepare_items(run_dir, args)
     systems = SYSTEMS if args.systems == "all" else args.systems.split(",")
-    record_run(run_dir, command_line, systems, items)
-    if "graphiti" in systems:
+    lme_systems = systems if not args.lme_systems else args.lme_systems.split(",")
+    record_run(run_dir, command_line, sorted(set(systems) | set(lme_systems)), items)
+    if "graphiti" in systems or "graphiti" in lme_systems:
         ensure_falkordb(run_dir)
     proxy = start_proxy(run_dir)
     try:
         gate = asyncio.Semaphore(args.jobs)
         jobs = []
-        for system in sorted(systems, key=SYSTEMS.index):
+        for system in SYSTEMS:
             for item in items:
-                jobs.append(run_job(run_dir, item, system, gate))
+                chosen = lme_systems if item["bench"] == "longmemeval" else systems
+                if system in chosen:
+                    jobs.append(run_job(run_dir, item, system, gate))
         await asyncio.gather(*jobs)
         judged_systems = []
-        for system in systems:
+        for system in set(systems) | set(lme_systems):
             judged_systems.extend(MOCHI_VARIANTS if system == "mochi-tree" else [system])
         count, errors = await judge_all(run_dir, items, judged_systems)
         print("judged", count, "answers,", errors, "judge errors", flush=True)
@@ -221,6 +230,7 @@ def main():
     run_parser.add_argument("--lme-per-type", type=int, default=0)
     run_parser.add_argument("--lme-items", default="")
     run_parser.add_argument("--systems", default="all")
+    run_parser.add_argument("--lme-systems", default="", help="systems for LongMemEval items; default: --systems")
     run_parser.add_argument("--jobs", type=int, default=8)
     summary_parser = sub.add_parser("summary")
     summary_parser.add_argument("--run-id", required=True)

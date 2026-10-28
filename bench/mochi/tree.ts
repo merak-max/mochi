@@ -17,6 +17,7 @@ const SMALL_TAIL_HIGH = 16000;
 const MAX_ZOOMS = 8;
 const RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 40_000];
 const ANSWER_CONCURRENCY = 8;
+const CONTENT_FILTER_EXIT = 3;
 const VARIANTS = [
 	{ system: "mochi-tree", high: HIGH },
 	{ system: "mochi-tree-small-tail", high: SMALL_TAIL_HIGH },
@@ -225,4 +226,13 @@ async function main(): Promise<void> {
 	await answerAll(runDir, item, history, trees.small, VARIANTS[1]!);
 }
 
-await main();
+try {
+	await main();
+} catch (error) {
+	const text = String(error);
+	if (text.includes("content_filter") || text.includes("content management policy")) {
+		console.error("content filter blocked this item: " + text);
+		process.exit(CONTENT_FILTER_EXIT);
+	}
+	throw error;
+}

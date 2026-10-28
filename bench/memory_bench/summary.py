@@ -83,14 +83,19 @@ def collect(run_dir):
     variants = []
     for system in run["systems"]:
         variants.extend(MOCHI_VARIANTS if system == "mochi-tree" else [system])
-    rows = defaultdict(lambda: {"correct": [], "f1": [], "adversarial_correct": [], "adversarial_f1": [], "by_category": defaultdict(list), "questions": 0, "answered": 0, "judged": 0, "ingest": empty_usage(), "answer": empty_usage(), "judge": empty_usage(), "ingest_wall": 0.0, "answer_wall": 0.0, "zooms": [], "items": 0, "job_failures": 0, "truncated": 0})
+    rows = defaultdict(lambda: {"correct": [], "f1": [], "adversarial_correct": [], "adversarial_f1": [], "by_category": defaultdict(list), "questions": 0, "answered": 0, "judged": 0, "ingest": empty_usage(), "answer": empty_usage(), "judge": empty_usage(), "ingest_wall": 0.0, "answer_wall": 0.0, "zooms": [], "items": 0, "job_failures": 0, "truncated": 0, "filtered": 0})
     per_item = []
     for bench, item_id in run["items"]:
         item = json.loads(item_file(run_dir, bench, item_id).read_text())
         questions = {question["qid"]: question for question in item["questions"]}
         for system in variants:
+            owner_dir = item_dir(run_dir, bench, ingest_owner(system), item_id)
+            if not owner_dir.exists():
+                continue
             row = rows[(bench, system)]
             row["items"] += 1
+            if (owner_dir / "filtered.json").exists():
+                row["filtered"] += 1
             row["questions"] += len(questions)
             answers = {answer["qid"]: answer for answer in read_jsonl(item_dir(run_dir, bench, system, item_id) / "answers.jsonl")}
             judgments = {verdict["qid"]: verdict for verdict in read_jsonl(item_dir(run_dir, bench, system, item_id) / "judgments.jsonl")}
@@ -149,7 +154,7 @@ def write(run_dir):
         if bench == "locomo":
             header += ["F1 %", "adversarial acc %", "adversarial F1 %"]
         header += [category + " %" for category in categories if not (bench == "locomo" and category == LOCOMO_ADVERSARIAL)]
-        header += ["ingest $", "answer $", "total $", "acc %/$", "$/1k questions", "ingest calls", "ingest in", "ingest cached", "ingest cache write", "ingest out", "ingest embed", "answer calls", "answer in", "answer cached", "answer cache write", "answer out", "answer embed", "ingest wall s", "answer wall s (sum)", "failed job attempts", "failed calls", "tool calls/question"]
+        header += ["ingest $", "answer $", "total $", "acc %/$", "$/1k questions", "ingest calls", "ingest in", "ingest cached", "ingest cache write", "ingest out", "ingest embed", "answer calls", "answer in", "answer cached", "answer cache write", "answer out", "answer embed", "ingest wall s", "answer wall s (sum)", "failed job attempts", "failed calls", "filtered items", "tool calls/question"]
         lines.append("| " + " | ".join(header) + " |")
         lines.append("|" + "---|" * len(header))
         for key in sorted(keys, key=lambda key: key[1]):
@@ -171,7 +176,7 @@ def write(run_dir):
             per_dollar = "n/a" if accuracy is None or total_dollars == 0 else f"{100 * accuracy / total_dollars:.1f}"
             per_thousand = "n/a" if row["answered"] == 0 else f"{1000 * total_dollars / row['answered']:.2f}"
             zoom_mean = mean(row["zooms"])
-            cells += [f"{ingest_dollars:.4f}", f"{answer_dollars:.4f}", f"{total_dollars:.4f}", per_dollar, per_thousand, number(ingest["calls"]), number(ingest["input_tokens"]), number(ingest["cached_tokens"]), number(ingest["cache_write_tokens"]), number(ingest["output_tokens"]), number(ingest["embed_tokens"]), number(answer["calls"]), number(answer["input_tokens"]), number(answer["cached_tokens"]), number(answer["cache_write_tokens"]), number(answer["output_tokens"]), number(answer["embed_tokens"]), f"{row['ingest_wall']:.0f}", f"{row['answer_wall']:.0f}", str(row["job_failures"]), str(ingest["errors"] + answer["errors"]), "n/a" if zoom_mean is None else f"{zoom_mean:.2f}"]
+            cells += [f"{ingest_dollars:.4f}", f"{answer_dollars:.4f}", f"{total_dollars:.4f}", per_dollar, per_thousand, number(ingest["calls"]), number(ingest["input_tokens"]), number(ingest["cached_tokens"]), number(ingest["cache_write_tokens"]), number(ingest["output_tokens"]), number(ingest["embed_tokens"]), number(answer["calls"]), number(answer["input_tokens"]), number(answer["cached_tokens"]), number(answer["cache_write_tokens"]), number(answer["output_tokens"]), number(answer["embed_tokens"]), f"{row['ingest_wall']:.0f}", f"{row['answer_wall']:.0f}", str(row["job_failures"]), str(ingest["errors"] + answer["errors"]), str(row["filtered"]), "n/a" if zoom_mean is None else f"{zoom_mean:.2f}"]
             lines.append("| " + " | ".join(cells) + " |")
         lines.append("")
         truncated = [key[1] + " (" + str(rows[key]["truncated"]) + " answers)" for key in keys if rows[key]["truncated"]]

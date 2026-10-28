@@ -21,7 +21,8 @@ BENCH_DIR = Path(__file__).resolve().parent.parent
 RUNS_DIR = BENCH_DIR / "runs"
 DATA_CACHE_DIR = BENCH_DIR / "data" / "cache"
 
-SYSTEMS = ["mochi-tree", "amr-dream", "amr", "graphiti", "mem0", "rag", "full-context"]
+SYSTEMS = ["mochi-tree", "amr-dream", "amr", "graphiti", "mem0", "fact-log", "rag", "full-context"]
+CONTENT_FILTER_EXIT = 3
 MOCHI_VARIANTS = ["mochi-tree", "mochi-tree-small-tail"]
 
 ANSWER_SYSTEM = """You answer one question about a long conversation history, using only the memory you are given.

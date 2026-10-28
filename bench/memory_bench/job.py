@@ -3,6 +3,7 @@ import asyncio
 import importlib
 import json
 import shutil
+import sys
 import time
 
 from openai import AsyncOpenAI
@@ -28,8 +29,11 @@ SYSTEM_MODULES = {
     "graphiti": "memory_bench.systems.graphiti_system",
     "amr": "memory_bench.systems.amr_system",
     "amr-dream": "memory_bench.systems.amr_system",
+    "fact-log": "memory_bench.systems.fact_log",
 }
-RESUMABLE_INGEST = {"graphiti", "mem0", "amr", "amr-dream"}
+RESUMABLE_INGEST = {"graphiti", "mem0", "amr", "amr-dream", "fact-log"}
+CONTENT_FILTER_EXIT = 3
+CONTENT_FILTER_MARKS = ("content_filter", "content management policy")
 ANSWER_CONCURRENCY = 8
 
 
@@ -118,7 +122,18 @@ def main():
     parser.add_argument("--bench", required=True)
     parser.add_argument("--item", required=True)
     parser.add_argument("--system", required=True)
-    asyncio.run(main_async(parser.parse_args()))
+    try:
+        asyncio.run(main_async(parser.parse_args()))
+    except Exception as error:
+        text = repr(error)
+        cause = error.__cause__
+        while cause is not None:
+            text += " " + repr(cause)
+            cause = cause.__cause__
+        if any(mark in text for mark in CONTENT_FILTER_MARKS):
+            print("content filter blocked this item:", text[:500], file=sys.stderr)
+            sys.exit(CONTENT_FILTER_EXIT)
+        raise
 
 
 if __name__ == "__main__":
